@@ -28,6 +28,12 @@ def test_extracts_receipt_items_from_azure_receipt_result():
         ("PARSLEY", "1.29", 0.982),
         ("SILK CASHEW", "4.69", 0.979),
     ]
+    assert [item.raw_description for item in receipt.items] == [
+        "NBSC SALTINE",
+        "FDFL BREAD",
+        "PARSLEY",
+        "SILK CASHEW",
+    ]
 
 
 def test_extracts_optional_item_quantity_and_unit_price():
@@ -78,6 +84,7 @@ def test_extracts_optional_item_quantity_and_unit_price():
 
     assert receipt.total == "7.0"
     assert receipt.items[0].description == "Tea"
+    assert receipt.items[0].raw_description == "Tea"
     assert receipt.items[0].quantity == 2.0
     assert receipt.items[0].unit_price == "3.5"
     assert receipt.items[0].amount == "7.0"

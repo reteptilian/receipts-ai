@@ -45,6 +45,7 @@ def _receipt_items(items_field: Any) -> list[ReceiptItem]:
         items.append(
             ReceiptItem(
                 description=description,
+                raw_description=description,
                 quantity=_float_value(_nested_field(item_object, "Quantity", "valueNumber")),
                 unit_price=_currency_amount(item_object.get("Price")),
                 amount=amount,

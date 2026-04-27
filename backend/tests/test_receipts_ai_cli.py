@@ -13,7 +13,13 @@ def test_writes_one_csv_row_per_receipt_item():
         total="11.00",
         extraction=ExtractionMetadata(model="prebuilt-receipt", confidence=0.97),
         items=[
-            ReceiptItem(description="Coffee", quantity=2, unit_price="3.50", amount="7.00"),
+            ReceiptItem(
+                description="Coffee",
+                raw_description="COF",
+                quantity=2,
+                unit_price="3.50",
+                amount="7.00",
+            ),
             ReceiptItem(description="Bagel", amount="3.00", confidence=0.91),
         ],
     )
@@ -37,6 +43,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_index": "1",
             "item_id": "",
             "item_description": "Coffee",
+            "item_raw_description": "COF",
             "item_quantity": "2.0",
             "item_unit_price": "3.50",
             "item_amount": "7.00",
@@ -55,6 +62,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_index": "2",
             "item_id": "",
             "item_description": "Bagel",
+            "item_raw_description": "",
             "item_quantity": "",
             "item_unit_price": "",
             "item_amount": "3.00",
@@ -69,7 +77,7 @@ def test_json_output_preserves_nested_receipt_struct():
     receipt = Receipt(
         total="7.00",
         extraction=ExtractionMetadata(model="prebuilt-receipt", raw_text="Coffee 7.00"),
-        items=[ReceiptItem(description="Coffee", amount="7.00")],
+        items=[ReceiptItem(description="Coffee", raw_description="COF", amount="7.00")],
     )
     output = StringIO()
 
@@ -77,4 +85,5 @@ def test_json_output_preserves_nested_receipt_struct():
 
     assert '"total": "7.00"' in output.getvalue()
     assert '"rawText": "Coffee 7.00"' in output.getvalue()
+    assert '"rawDescription": "COF"' in output.getvalue()
     assert '"items": [' in output.getvalue()

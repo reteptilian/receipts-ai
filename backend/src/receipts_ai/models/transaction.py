@@ -91,7 +91,18 @@ class ReceiptItem(BaseModel):
         populate_by_name=True,
     )
     id: Annotated[str | None, Field(min_length=1)] = None
-    description: Annotated[str, Field(min_length=1)]
+    description: Annotated[
+        str,
+        Field(description="Normalized, user-facing receipt line item description.", min_length=1),
+    ]
+    raw_description: Annotated[
+        str | None,
+        Field(
+            alias="rawDescription",
+            description="Raw receipt line item description as extracted from the source document.",
+            min_length=1,
+        ),
+    ] = None
     quantity: Annotated[float | None, Field(gt=0.0)] = None
     unit_price: Annotated[
         str | None,

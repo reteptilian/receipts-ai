@@ -3,24 +3,28 @@
   "items": [
     {
       "description": "NBSC SALTINE",
+      "rawDescription": "NBSC SALTINE",
       "amount": "4.49",
       "lineType": "item",
       "confidence": 0.979
     },
     {
       "description": "FDFL BREAD",
+      "rawDescription": "FDFL BREAD",
       "amount": "6.99",
       "lineType": "item",
       "confidence": 0.979
     },
     {
       "description": "PARSLEY",
+      "rawDescription": "PARSLEY",
       "amount": "1.29",
       "lineType": "item",
       "confidence": 0.982
     },
     {
       "description": "SILK CASHEW",
+      "rawDescription": "SILK CASHEW",
       "amount": "4.69",
       "lineType": "item",
       "confidence": 0.979

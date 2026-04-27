@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from receipts_ai.models import Transaction
+from receipts_ai.models.transaction import ReceiptItem
 
 
 def test_transaction_accepts_json_aliases():
@@ -35,6 +36,19 @@ def test_transaction_accepts_python_field_names():
     )
 
     assert transaction.transaction_date.isoformat() == "2026-04-27"
+
+
+def test_receipt_item_accepts_raw_description_alias():
+    item = ReceiptItem.model_validate(
+        {
+            "description": "Saltine Crackers",
+            "rawDescription": "NBSC SALTINE",
+            "amount": "4.49",
+        }
+    )
+
+    assert item.description == "Saltine Crackers"
+    assert item.raw_description == "NBSC SALTINE"
 
 
 def test_transaction_rejects_invalid_currency():

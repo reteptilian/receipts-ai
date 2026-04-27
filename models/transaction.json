@@ -179,7 +179,12 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "description": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Normalized, user-facing receipt line item description."
+        },
+        "rawDescription": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Raw receipt line item description as extracted from the source document."
         },
         "quantity": {
           "type": "number",
