@@ -25,7 +25,19 @@ class FakeBraveClient:
 
     def search(self, query: str) -> dict[str, object]:
         self.queries.append(query)
-        return {"query": {"original": query}, "web": {"results": [{"title": "Saltines"}]}}
+        return {
+            "query": {"original": query},
+            "web": {
+                "results": [
+                    {
+                        "description": "Crisp crackers with sea salt.",
+                        "thumbnail": {"src": "https://example.test/image.jpg"},
+                        "title": "Premium Saltines",
+                        "url": "https://example.test/saltines",
+                    }
+                ]
+            },
+        }
 
 
 class FakeResponse:
@@ -180,10 +192,43 @@ def test_enrich_receipt_items_with_brave_search_uses_raw_description_first():
     assert client.queries == ["FredMeyer NBSC SALTINE $2.25", "FredMeyer Parsley $1.29"]
     assert transaction.receipt is not None
     assert transaction.receipt.items[0].brave_search_result is not None
-    assert (
-        json.loads(transaction.receipt.items[0].brave_search_result)["query"]["original"]
-        == "FredMeyer NBSC SALTINE $2.25"
+    assert json.loads(transaction.receipt.items[0].brave_search_result) == [
+        {
+            "description": "Crisp crackers with sea salt.",
+            "title": "Premium Saltines",
+        }
+    ]
+
+
+def test_enrich_receipt_items_with_brave_search_stores_only_titles_and_descriptions():
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="FredMeyer",
+        amount="-4.49",
+        currency="USD",
+        receipt=Receipt(
+            items=[
+                ReceiptItem(
+                    description="Saltine Crackers",
+                    raw_description="NBSC SALTINE",
+                    amount="4.49",
+                ),
+            ]
+        ),
     )
+
+    enrich_receipt_items_with_brave_search(transaction, client=FakeBraveClient())
+
+    assert transaction.receipt is not None
+    assert transaction.receipt.items[0].brave_search_result is not None
+    assert json.loads(transaction.receipt.items[0].brave_search_result) == [
+        {
+            "description": "Crisp crackers with sea salt.",
+            "title": "Premium Saltines",
+        }
+    ]
 
 
 def test_enrich_receipt_items_with_brave_search_throttles_between_requests(

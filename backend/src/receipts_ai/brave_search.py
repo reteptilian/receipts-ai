@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from receipts_ai.models.transaction import ReceiptItem, Transaction
 
@@ -103,9 +103,41 @@ def enrich_receipt_items_with_brave_search(
             sleep(active_request_delay_seconds)
         logger.info("Enriching receipt item %s with Brave Search: %s", index + 1, query)
         result = active_client.search(query)
-        item.brave_search_result = json.dumps(result, sort_keys=True)
+        item.brave_search_result = json.dumps(_search_result_summaries(result), sort_keys=True)
         logger.info("Stored Brave Search response on receipt item %s", index + 1)
     return transaction
+
+
+def _search_result_summaries(result: Any) -> list[dict[str, str]]:
+    if not isinstance(result, dict):
+        return []
+
+    result_object = cast(dict[str, object], result)
+    web = result_object.get("web")
+    if not isinstance(web, dict):
+        return []
+
+    web_object = cast(dict[str, object], web)
+    results = web_object.get("results")
+    if not isinstance(results, list):
+        return []
+
+    summaries: list[dict[str, str]] = []
+    for search_result_object in cast(list[object], results):
+        if not isinstance(search_result_object, dict):
+            continue
+        search_result = cast(dict[str, object], search_result_object)
+
+        title = search_result.get("title")
+        description = search_result.get("description")
+        summaries.append(
+            {
+                "description": description if isinstance(description, str) else "",
+                "title": title if isinstance(title, str) else "",
+            }
+        )
+
+    return summaries
 
 
 def _receipt_item_query(payee: str, item: ReceiptItem) -> str:
