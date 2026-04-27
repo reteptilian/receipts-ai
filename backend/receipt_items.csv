@@ -1,5 +1,0 @@
-receipt_id,source_document_id,receipt_number,receipt_subtotal,receipt_total,extraction_model,extraction_confidence,item_index,item_id,item_description,item_raw_description,item_quantity,item_unit_price,item_amount,item_line_type,item_category_id,item_confidence
-,,,,17.46,prebuilt-receipt,0.971,1,,NBSC SALTINE,NBSC SALTINE,,,4.49,item,,0.979
-,,,,17.46,prebuilt-receipt,0.971,2,,FDFL BREAD,FDFL BREAD,,,6.99,item,,0.979
-,,,,17.46,prebuilt-receipt,0.971,3,,PARSLEY,PARSLEY,,,1.29,item,,0.982
-,,,,17.46,prebuilt-receipt,0.971,4,,SILK CASHEW,SILK CASHEW,,,4.69,item,,0.979
