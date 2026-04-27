@@ -162,8 +162,8 @@ reportUnreachable = false
 
 [tool.codespell]
 # Add here as needed:
-ignore-words-list = "chec"
-# skip = "foo.py,bar.py"
+# ignore-words-list = "foo,bar"
+skip = "tests/fixtures"
 
 [tool.pytest.ini_options]
 python_files = ["*.py"]
