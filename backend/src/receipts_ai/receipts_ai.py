@@ -82,7 +82,7 @@ def main() -> None:
 
     if args.brave_search:
         enrich_receipt_items_with_brave_search(
-            transaction.receipt, request_delay_seconds=args.brave_search_delay_seconds
+            transaction, request_delay_seconds=args.brave_search_delay_seconds
         )
     _write_transaction(transaction, output_format=args.format, output_path=args.output)
 

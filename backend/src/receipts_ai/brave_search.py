@@ -8,9 +8,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any, Protocol
 
-from receipts_ai.models.transaction import Receipt
+from receipts_ai.models.transaction import ReceiptItem, Transaction
 
 DEFAULT_BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 ENDPOINT_ENV_VARS = ("BRAVE_SEARCH_ENDPOINT",)
@@ -72,12 +73,15 @@ def create_brave_search_client() -> BraveSearchClient:
 
 
 def enrich_receipt_items_with_brave_search(
-    receipt: Receipt,
+    transaction: Transaction,
     *,
     client: BraveSearchClient | None = None,
     request_delay_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
-) -> Receipt:
+) -> Transaction:
+    if transaction.receipt is None:
+        raise ValueError("transaction does not contain a receipt")
+
     active_client = client if client is not None else create_brave_search_client()
     active_request_delay_seconds = (
         _brave_search_request_delay_seconds()
@@ -87,8 +91,8 @@ def enrich_receipt_items_with_brave_search(
     if active_request_delay_seconds < 0:
         raise ValueError("request_delay_seconds must not be negative")
 
-    for index, item in enumerate(receipt.items):
-        query = item.raw_description or item.description
+    for index, item in enumerate(transaction.receipt.items):
+        query = _receipt_item_query(transaction.payee, item)
         if not query:
             continue
         if index > 0 and active_request_delay_seconds > 0:
@@ -101,7 +105,22 @@ def enrich_receipt_items_with_brave_search(
         result = active_client.search(query)
         item.brave_search_result = json.dumps(result, sort_keys=True)
         logger.info("Stored Brave Search response on receipt item %s", index + 1)
-    return receipt
+    return transaction
+
+
+def _receipt_item_query(payee: str, item: ReceiptItem) -> str:
+    description = item.raw_description or item.description
+    price = item.unit_price if item.unit_price is not None else item.amount
+    return " ".join((payee.strip(), description.strip(), _format_item_amount(price)))
+
+
+def _format_item_amount(amount: str) -> str:
+    decimal_amount = Decimal(amount)
+    absolute_amount = abs(decimal_amount)
+    exponent = decimal_amount.as_tuple().exponent
+    decimal_places = max(2, -exponent if isinstance(exponent, int) else 2)
+    prefix = "-$" if decimal_amount < 0 else "$"
+    return f"{prefix}{absolute_amount:.{decimal_places}f}"
 
 
 def _brave_search_endpoint() -> str:

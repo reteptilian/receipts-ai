@@ -189,7 +189,7 @@ def test_main_can_enrich_items_with_brave_search(
         currency="USD",
         receipt=receipt,
     )
-    calls: list[Receipt] = []
+    calls: list[Transaction] = []
 
     def fake_analyze_receipt_file(path: Path) -> dict[str, Path]:
         return {"result": path}
@@ -220,12 +220,13 @@ def test_main_can_enrich_items_with_brave_search(
     )
 
     def fake_enrich_receipt_items_with_brave_search(
-        receipt_to_enrich: Receipt, *, request_delay_seconds: float | None = None
-    ) -> Receipt:
-        calls.append(receipt_to_enrich)
+        transaction_to_enrich: Transaction, *, request_delay_seconds: float | None = None
+    ) -> Transaction:
+        calls.append(transaction_to_enrich)
         assert request_delay_seconds == 1.1
-        receipt_to_enrich.items[0].brave_search_result = "search payload"
-        return receipt_to_enrich
+        assert transaction_to_enrich.receipt is not None
+        transaction_to_enrich.receipt.items[0].brave_search_result = "search payload"
+        return transaction_to_enrich
 
     monkeypatch.setattr(
         receipts_ai,
@@ -235,5 +236,5 @@ def test_main_can_enrich_items_with_brave_search(
 
     main()
 
-    assert calls == [receipt]
+    assert calls == [transaction]
     assert receipt.items[0].brave_search_result == "search payload"
