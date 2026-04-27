@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import sys
 from pathlib import Path
 from typing import TextIO
 
+from receipts_ai.brave_search import enrich_receipt_items_with_brave_search
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.models.transaction import Receipt
 from receipts_ai.receipt_extraction import receipt_from_document_intelligence_result
@@ -49,10 +51,31 @@ def main() -> None:
         type=Path,
         help="Write output to a file instead of stdout.",
     )
+    parser.add_argument(
+        "--brave-search",
+        action="store_true",
+        help="Populate each receipt item braveSearchResult with raw Brave Search JSON.",
+    )
+    parser.add_argument(
+        "--brave-search-delay-seconds",
+        type=float,
+        help="Sleep this many seconds between Brave Search requests.",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
+        default="WARNING",
+        help="Show logs at this level.",
+    )
     args = parser.parse_args()
+    logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
     result = analyze_receipt_file(args.receipt)
     receipt = receipt_from_document_intelligence_result(result)
+    if args.brave_search:
+        enrich_receipt_items_with_brave_search(
+            receipt, request_delay_seconds=args.brave_search_delay_seconds
+        )
     _write_receipt(receipt, output_format=args.format, output_path=args.output)
 
 
