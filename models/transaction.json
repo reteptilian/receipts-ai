@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://receipts-ai.local/schemas/transaction.json",
+  "title": "Transaction",
+  "description": "A canonical expense-tracking transaction, optionally enriched with receipt line items and category allocations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "source", "transactionDate", "payee", "amount", "currency"],
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Application-level stable identifier for this transaction."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["bank_statement", "receipt", "manual"],
+      "description": "How this transaction entered the system."
+    },
+    "externalId": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Importer-provided identifier, if one exists."
+    },
+    "accountId": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Account that produced the statement row, when applicable."
+    },
+    "transactionDate": {
+      "$ref": "#/$defs/isoDate",
+      "description": "Date the transaction occurred."
+    },
+    "postedDate": {
+      "$ref": "#/$defs/isoDate",
+      "description": "Date the transaction posted to the account, when different from the transaction date."
+    },
+    "payee": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Merchant, counterparty or payer name."
+    },
+    "description": {
+      "type": "string",
+      "description": "Original or user-facing transaction description."
+    },
+    "amount": {
+      "$ref": "#/$defs/decimalString",
+      "description": "Signed transaction amount from the account perspective."
+    },
+    "currency": {
+      "$ref": "#/$defs/currencyCode"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["expense", "income", "transfer", "adjustment"],
+      "description": "User-facing transaction kind."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "posted", "reconciled", "void"],
+      "default": "posted"
+    },
+    "categoryAllocations": {
+      "type": "array",
+      "description": "Budget category splits for the transaction total.",
+      "items": {
+        "$ref": "#/$defs/categoryAllocation"
+      },
+      "default": []
+    },
+    "receipt": {
+      "$ref": "#/$defs/receipt",
+      "description": "Itemized receipt data associated with this transaction."
+    },
+    "linkedTransactionIds": {
+      "type": "array",
+      "description": "Other transaction records that represent the same real-world purchase, such as a receipt import matched to a statement row.",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "notes": {
+      "type": "string"
+    },
+    "createdAt": {
+      "$ref": "#/$defs/isoDateTime"
+    },
+    "updatedAt": {
+      "$ref": "#/$defs/isoDateTime"
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "isoDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "isoDateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "currencyCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 currency code."
+    },
+    "decimalString": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+      "description": "Decimal amount encoded as a string to avoid floating point rounding errors."
+    },
+    "categoryAllocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categoryId", "amount"],
+      "properties": {
+        "categoryId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "amount": {
+          "$ref": "#/$defs/decimalString",
+          "description": "Signed amount allocated to this category."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence score when the category was inferred."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["user", "model", "rule", "receipt"],
+          "description": "How this allocation was assigned."
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sourceDocumentId": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Uploaded image, PDF or extraction job identifier."
+        },
+        "receiptNumber": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "subtotal": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "total": {
+          "$ref": "#/$defs/decimalString",
+          "description": "Signed receipt total. Usually matches transaction amount after normalization."
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/receiptItem"
+          }
+        },
+        "extraction": {
+          "$ref": "#/$defs/extractionMetadata"
+        }
+      }
+    },
+    "receiptItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "amount"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "quantity": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "unitPrice": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "amount": {
+          "$ref": "#/$defs/decimalString",
+          "description": "Signed line amount, including discounts or returns when negative."
+        },
+        "lineType": {
+          "type": "string",
+          "enum": ["item", "tax", "tip", "service_charge", "shipping", "fee", "discount", "return", "other"],
+          "default": "item"
+        },
+        "categoryId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence score when the line category or extraction was inferred."
+        }
+      }
+    },
+    "extractionMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "extractedAt": {
+          "$ref": "#/$defs/isoDateTime"
+        },
+        "rawText": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
