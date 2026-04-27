@@ -43,12 +43,14 @@ def test_receipt_item_accepts_raw_description_alias():
         {
             "description": "Saltine Crackers",
             "rawDescription": "NBSC SALTINE",
+            "braveSearchResult": "Nabisco Premium Saltine Crackers - search result",
             "amount": "4.49",
         }
     )
 
     assert item.description == "Saltine Crackers"
     assert item.raw_description == "NBSC SALTINE"
+    assert item.brave_search_result == "Nabisco Premium Saltine Crackers - search result"
 
 
 def test_transaction_rejects_invalid_currency():

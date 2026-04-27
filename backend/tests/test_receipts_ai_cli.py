@@ -16,6 +16,7 @@ def test_writes_one_csv_row_per_receipt_item():
             ReceiptItem(
                 description="Coffee",
                 raw_description="COF",
+                brave_search_result="Coffee product search result",
                 quantity=2,
                 unit_price="3.50",
                 amount="7.00",
@@ -44,6 +45,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_id": "",
             "item_description": "Coffee",
             "item_raw_description": "COF",
+            "item_brave_search_result": "Coffee product search result",
             "item_quantity": "2.0",
             "item_unit_price": "3.50",
             "item_amount": "7.00",
@@ -63,6 +65,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_id": "",
             "item_description": "Bagel",
             "item_raw_description": "",
+            "item_brave_search_result": "",
             "item_quantity": "",
             "item_unit_price": "",
             "item_amount": "3.00",

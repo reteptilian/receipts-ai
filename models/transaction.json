@@ -186,6 +186,10 @@
           "$ref": "#/$defs/nonEmptyString",
           "description": "Raw receipt line item description as extracted from the source document."
         },
+        "braveSearchResult": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Raw or lightly processed Brave Search result text for the receipt line item description query."
+        },
         "quantity": {
           "type": "number",
           "exclusiveMinimum": 0

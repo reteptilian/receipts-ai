@@ -103,6 +103,14 @@ class ReceiptItem(BaseModel):
             min_length=1,
         ),
     ] = None
+    brave_search_result: Annotated[
+        str | None,
+        Field(
+            alias="braveSearchResult",
+            description="Raw or lightly processed Brave Search result text for the receipt line item description query.",
+            min_length=1,
+        ),
+    ] = None
     quantity: Annotated[float | None, Field(gt=0.0)] = None
     unit_price: Annotated[
         str | None,
