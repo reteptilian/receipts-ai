@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from receipts_ai.receipt_extraction import receipt_from_document_intelligence_result
+from receipts_ai.receipt_extraction import (
+    receipt_from_document_intelligence_result,
+    transaction_from_document_intelligence_result,
+)
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "azure"
 
@@ -13,7 +16,15 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "azure"
 def test_extracts_receipt_items_from_azure_receipt_result():
     payload = json.loads((FIXTURE_DIR / "fred_meyer_receipt.json").read_text())
 
-    receipt = receipt_from_document_intelligence_result(payload)
+    transaction = transaction_from_document_intelligence_result(payload)
+    receipt = transaction.receipt
+
+    assert transaction.source == "receipt"
+    assert transaction.payee == "FredMeyer"
+    assert transaction.transaction_date.isoformat() == "2025-10-14"
+    assert transaction.amount == "-17.46"
+    assert transaction.currency == "USD"
+    assert receipt is not None
 
     assert receipt.total == "17.46"
     assert receipt.subtotal is None
@@ -44,6 +55,8 @@ def test_extracts_optional_item_quantity_and_unit_price():
             {
                 "confidence": 0.9,
                 "fields": {
+                    "MerchantName": {"valueString": "Tea Shop"},
+                    "TransactionDate": {"valueDate": "2026-04-27"},
                     "Total": {
                         "type": "currency",
                         "valueCurrency": {"amount": 7.0, "currencyCode": "USD"},
@@ -90,6 +103,15 @@ def test_extracts_optional_item_quantity_and_unit_price():
     assert receipt.items[0].amount == "7.0"
 
 
+def test_receipt_extractor_preserves_legacy_receipt_return_type():
+    payload = json.loads((FIXTURE_DIR / "fred_meyer_receipt.json").read_text())
+
+    receipt = receipt_from_document_intelligence_result(payload)
+
+    assert receipt.total == "17.46"
+    assert receipt.items[0].description == "NBSC SALTINE"
+
+
 def test_rejects_receipt_result_without_items():
     with pytest.raises(ValueError, match="line items"):
         receipt_from_document_intelligence_result(
@@ -97,10 +119,16 @@ def test_rejects_receipt_result_without_items():
                 "documents": [
                     {
                         "fields": {
+                            "MerchantName": {"valueString": "Empty Store"},
+                            "TransactionDate": {"valueDate": "2026-04-27"},
+                            "Total": {
+                                "type": "currency",
+                                "valueCurrency": {"amount": 0, "currencyCode": "USD"},
+                            },
                             "Items": {
                                 "type": "array",
                                 "valueArray": [],
-                            }
+                            },
                         }
                     }
                 ]

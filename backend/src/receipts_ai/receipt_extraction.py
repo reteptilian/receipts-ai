@@ -1,15 +1,33 @@
 from __future__ import annotations
 
+import hashlib
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, cast
 
 from receipts_ai.document_intelligence import to_jsonable
-from receipts_ai.models.transaction import ExtractionMetadata, Receipt, ReceiptItem
+from receipts_ai.models.transaction import (
+    ExtractionMetadata,
+    Receipt,
+    ReceiptItem,
+    Source,
+    Transaction,
+)
 
-__all__ = ("receipt_from_document_intelligence_result",)
+__all__ = (
+    "receipt_from_document_intelligence_result",
+    "transaction_from_document_intelligence_result",
+)
 
 
 def receipt_from_document_intelligence_result(result: Any) -> Receipt:
+    transaction = transaction_from_document_intelligence_result(result)
+    if transaction.receipt is None:
+        raise ValueError("transaction does not contain a receipt")
+    return transaction.receipt
+
+
+def transaction_from_document_intelligence_result(result: Any) -> Transaction:
     payload = cast(dict[str, Any], to_jsonable(result))
     documents = _list_value(payload.get("documents"))
     if not documents:
@@ -17,17 +35,40 @@ def receipt_from_document_intelligence_result(result: Any) -> Receipt:
 
     document = _dict_value(documents[0])
     fields = _dict_value(document.get("fields"))
-    items = _receipt_items(fields.get("Items"))
+    payee = _field_text(fields.get("MerchantName"))
+    if payee is None:
+        raise ValueError("document intelligence result does not contain a merchant name")
 
-    return Receipt(
+    transaction_date = _field_date(fields.get("TransactionDate"))
+    if transaction_date is None:
+        raise ValueError("document intelligence result does not contain a transaction date")
+
+    total_field = fields.get("Total")
+    total = _currency_amount(total_field)
+    if total is None:
+        raise ValueError("document intelligence result does not contain a receipt total")
+
+    items = _receipt_items(fields.get("Items"))
+    currency = _currency_code(total_field) or "USD"
+
+    receipt = Receipt(
         subtotal=_currency_amount(fields.get("Subtotal")),
-        total=_currency_amount(fields.get("Total")),
+        total=total,
         items=items,
         extraction=ExtractionMetadata(
             model=_string_value(payload.get("modelId")) or _string_value(payload.get("model_id")),
             confidence=_float_value(document.get("confidence")),
             raw_text=_string_value(payload.get("content")),
         ),
+    )
+    return Transaction(
+        id=_transaction_id(payee, transaction_date, total, _string_value(payload.get("content"))),
+        source=Source.receipt,
+        transaction_date=transaction_date,
+        payee=payee,
+        amount=_expense_amount(total),
+        currency=currency,
+        receipt=receipt,
     )
 
 
@@ -67,6 +108,27 @@ def _field_text(field: Any) -> str | None:
     return _string_value(field_dict.get("valueString")) or _string_value(field_dict.get("content"))
 
 
+def _field_date(field: Any) -> date | None:
+    field_dict = _dict_value(field)
+    value_date = _string_value(field_dict.get("valueDate"))
+    if value_date is not None:
+        try:
+            return date.fromisoformat(value_date)
+        except ValueError:
+            pass
+
+    content = _string_value(field_dict.get("content"))
+    if content is None:
+        return None
+
+    for date_format in ("%Y-%m-%d", "%m/%d/%y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(content, date_format).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _currency_amount(field: Any) -> str | None:
     field_dict = _dict_value(field)
     currency = _dict_value(field_dict.get("valueCurrency"))
@@ -81,6 +143,27 @@ def _currency_amount(field: Any) -> str | None:
     if amount is None:
         return None
     return _decimal_string(amount)
+
+
+def _currency_code(field: Any) -> str | None:
+    currency = _dict_value(_dict_value(field).get("valueCurrency"))
+    code = _string_value(currency.get("currencyCode"))
+    if code is None:
+        return None
+    return code.upper()
+
+
+def _expense_amount(total: str) -> str:
+    amount = Decimal(total)
+    if amount > 0:
+        amount = -amount
+    return format(amount, "f")
+
+
+def _transaction_id(payee: str, transaction_date: date, total: str, raw_text: str | None) -> str:
+    key = "|".join((payee, transaction_date.isoformat(), total, raw_text or ""))
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    return f"receipt_{digest}"
 
 
 def _decimal_string(value: object) -> str | None:

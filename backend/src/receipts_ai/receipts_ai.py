@@ -9,10 +9,15 @@ from typing import TextIO
 
 from receipts_ai.brave_search import enrich_receipt_items_with_brave_search
 from receipts_ai.document_intelligence import analyze_receipt_file
-from receipts_ai.models.transaction import Receipt
-from receipts_ai.receipt_extraction import receipt_from_document_intelligence_result
+from receipts_ai.models.transaction import Receipt, Transaction
+from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
 
 CSV_FIELDNAMES: tuple[str, ...] = (
+    "transaction_id",
+    "transaction_date",
+    "payee",
+    "transaction_amount",
+    "transaction_currency",
     "receipt_id",
     "source_document_id",
     "receipt_number",
@@ -71,35 +76,54 @@ def main() -> None:
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
     result = analyze_receipt_file(args.receipt)
-    receipt = receipt_from_document_intelligence_result(result)
+    transaction = transaction_from_document_intelligence_result(result)
+    if transaction.receipt is None:
+        raise ValueError("transaction does not contain a receipt")
+
     if args.brave_search:
         enrich_receipt_items_with_brave_search(
-            receipt, request_delay_seconds=args.brave_search_delay_seconds
+            transaction.receipt, request_delay_seconds=args.brave_search_delay_seconds
         )
-    _write_receipt(receipt, output_format=args.format, output_path=args.output)
+    _write_transaction(transaction, output_format=args.format, output_path=args.output)
 
 
-def _write_receipt(
-    receipt: Receipt, *, output_format: str, output_path: Path | None = None
+def _write_transaction(
+    transaction: Transaction, *, output_format: str, output_path: Path | None = None
 ) -> None:
     if output_path is None:
-        _write_receipt_to_file(receipt, output_format=output_format, file=sys.stdout)
+        _write_transaction_to_file(transaction, output_format=output_format, file=sys.stdout)
         return
 
     with output_path.open("w", encoding="utf-8", newline="") as file:
-        _write_receipt_to_file(receipt, output_format=output_format, file=file)
+        _write_transaction_to_file(transaction, output_format=output_format, file=file)
 
 
-def _write_receipt_to_file(receipt: Receipt, *, output_format: str, file: TextIO) -> None:
+def _write_transaction_to_file(
+    transaction: Transaction, *, output_format: str, file: TextIO
+) -> None:
     if output_format == "csv":
-        write_receipt_items_csv(receipt, file)
+        write_transaction_receipt_items_csv(transaction, file)
         return
 
     if output_format == "json":
-        write_receipt_json(receipt, file)
+        write_transaction_json(transaction, file)
         return
 
     raise ValueError(f"unsupported output format: {output_format}")
+
+
+def write_transaction_receipt_items_csv(transaction: Transaction, file: TextIO) -> None:
+    if transaction.receipt is None:
+        raise ValueError("transaction does not contain a receipt")
+
+    writer = csv.DictWriter(file, fieldnames=CSV_FIELDNAMES)
+    writer.writeheader()
+    writer.writerows(_transaction_receipt_item_rows(transaction))
+
+
+def write_transaction_json(transaction: Transaction, file: TextIO) -> None:
+    file.write(transaction.model_dump_json(by_alias=True, indent=2, exclude_none=True))
+    file.write("\n")
 
 
 def write_receipt_items_csv(receipt: Receipt, file: TextIO) -> None:
@@ -113,10 +137,39 @@ def write_receipt_json(receipt: Receipt, file: TextIO) -> None:
     file.write("\n")
 
 
-def _receipt_item_rows(receipt: Receipt) -> list[dict[str, object | None]]:
+def _transaction_receipt_item_rows(
+    transaction: Transaction,
+) -> list[dict[str, object | None]]:
+    if transaction.receipt is None:
+        raise ValueError("transaction does not contain a receipt")
+
+    return _receipt_item_rows(
+        transaction.receipt,
+        transaction_id=transaction.id,
+        transaction_date=transaction.transaction_date.isoformat(),
+        payee=transaction.payee,
+        transaction_amount=transaction.amount,
+        transaction_currency=transaction.currency,
+    )
+
+
+def _receipt_item_rows(
+    receipt: Receipt,
+    *,
+    transaction_id: str | None = None,
+    transaction_date: str | None = None,
+    payee: str | None = None,
+    transaction_amount: str | None = None,
+    transaction_currency: str | None = None,
+) -> list[dict[str, object | None]]:
     extraction = receipt.extraction
     return [
         {
+            "transaction_id": transaction_id,
+            "transaction_date": transaction_date,
+            "payee": payee,
+            "transaction_amount": transaction_amount,
+            "transaction_currency": transaction_currency,
             "receipt_id": receipt.id,
             "source_document_id": receipt.source_document_id,
             "receipt_number": receipt.receipt_number,
