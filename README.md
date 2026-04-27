@@ -18,7 +18,7 @@ Receipt subtotals, taxes, tips, discounts and fees are modeled as receipt line i
 
 ## Bank statement / Receipt correlation
 
-As noted above, a bank statement transaction can be associated with a receipt. This association will be made by the user. The data model supports both workflows: a single transaction can contain receipt detail directly, or two imported transaction records can be linked when a statement row and a receipt upload are matched after import.
+As noted above, a bank statement transaction can be associated with a receipt. This association will be made by the user. Matched bank statement transactions and receipt transactions should remain separate imported records, linked together after matching, so the app preserves the original source data while still allowing the UI and backend to treat them as the same real-world purchase when needed.
 
 ### Project Layout
 
