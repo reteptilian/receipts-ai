@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := default
 
-.PHONY: default install lint test upgrade build clean
+.PHONY: default install lint test generate-models upgrade build clean
 
 default: install lint test 
 
@@ -16,6 +16,9 @@ lint:
 
 test:
 	uv run pytest
+
+generate-models:
+	uv run python devtools/generate_models.py
 
 upgrade:
 	uv sync --upgrade --all-extras --dev

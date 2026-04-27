@@ -39,6 +39,7 @@ classifiers = [
 # ---- Main dependencies ----
 
 dependencies = [
+    "pydantic>=2.12.5",
 ]
 
 
@@ -46,6 +47,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "datamodel-code-generator>=0.36.0",
     "pytest>=9.0.2",
     "pytest-sugar>=1.1.1",
     "ruff>=0.15.1",
@@ -148,6 +150,7 @@ reportUnusedCallResult = false
 reportAny = false
 reportExplicitAny = false
 reportImplicitStringConcatenation = false
+reportUnannotatedClassAttribute = false
 reportUnreachable = false
 # reportPrivateImportUsage = false
 # reportPrivateLocalImportUsage = false
