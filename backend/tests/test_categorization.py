@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import urllib.error
 import urllib.request
 from datetime import date
@@ -14,6 +15,8 @@ from receipts_ai.cache import JsonCallCache
 from receipts_ai.categorization import (
     DEFAULT_OLLAMA_URL,
     CachedCategoryModelClient,
+    CategoryChoiceProbability,
+    CategoryCompletion,
     UrlLibOllamaClient,
     categorize_receipt_items,
     classify_receipt_items_by_product_taxonomy,
@@ -30,6 +33,23 @@ class FakeCategoryClient:
         self.prompts: list[str] = []
 
     def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self.responses.pop(0)
+
+
+class FakeProbabilityCategoryClient:
+    def __init__(self, responses: list[CategoryCompletion]) -> None:
+        self.responses = responses
+        self.prompts: list[str] = []
+
+    def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self.responses.pop(0).response
+
+    def complete_with_probabilities(
+        self, prompt: str, *, choices: tuple[str, ...]
+    ) -> CategoryCompletion:
+        _ = choices
         self.prompts.append(prompt)
         return self.responses.pop(0)
 
@@ -229,6 +249,124 @@ def test_classify_receipt_items_by_product_taxonomy_stops_when_model_repeats_par
     assert "Audio" in client.prompts[1]
 
 
+def test_classify_receipt_items_by_product_taxonomy_stops_at_parent_on_low_probability():
+    item = ReceiptItem(
+        description="Chocolate pastry",
+        amount="5.00",
+        brave_search_result=json.dumps(
+            [{"title": "Chocolate pastry", "description": "Bakery item with chocolate."}]
+        ),
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Bakery",
+        amount="-5.00",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    taxonomy: dict[str, object] = {
+        "Food, Beverages & Tobacco": {
+            "Food Items": {
+                "Bakery": {
+                    "Cakes": {},
+                    "Crackers": {},
+                },
+            },
+        },
+    }
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="Food, Beverages & Tobacco",
+                probabilities=(CategoryChoiceProbability("Food, Beverages & Tobacco", 0.90),),
+            ),
+            CategoryCompletion(
+                response="Food Items",
+                probabilities=(CategoryChoiceProbability("Food Items", 0.80),),
+            ),
+            CategoryCompletion(
+                response="Bakery",
+                probabilities=(CategoryChoiceProbability("Bakery", 0.70),),
+            ),
+            CategoryCompletion(
+                response="Cakes",
+                probabilities=(
+                    CategoryChoiceProbability("Cakes", 0.25),
+                    CategoryChoiceProbability("Crackers", 0.20),
+                ),
+            ),
+        ]
+    )
+
+    classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
+
+    assert item.taxonomy1 == "Food, Beverages & Tobacco"
+    assert item.taxonomy2 == "Food Items"
+    assert item.taxonomy3 == "Bakery"
+    assert item.taxonomy4 is None
+    assert len(client.prompts) == 4
+
+
+def test_classify_receipt_items_by_product_taxonomy_searches_multiple_probable_paths():
+    item = ReceiptItem(
+        description="Sparkling cider",
+        amount="6.00",
+        brave_search_result=json.dumps(
+            [{"title": "Sparkling cider", "description": "Non-alcoholic bottled drink."}]
+        ),
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Grocery",
+        amount="-6.00",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    taxonomy: dict[str, object] = {
+        "Food, Beverages & Tobacco": {
+            "Food Items": {"Fruit": {}},
+            "Beverages": {"Juice": {}},
+        },
+    }
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="Food, Beverages & Tobacco",
+                probabilities=(CategoryChoiceProbability("Food, Beverages & Tobacco", 0.90),),
+            ),
+            CategoryCompletion(
+                response="Food Items",
+                probabilities=(
+                    CategoryChoiceProbability("Food Items", 0.52),
+                    CategoryChoiceProbability("Beverages", 0.41),
+                ),
+            ),
+            CategoryCompletion(
+                response="Fruit",
+                probabilities=(CategoryChoiceProbability("Fruit", 0.30),),
+            ),
+            CategoryCompletion(
+                response="Juice",
+                probabilities=(CategoryChoiceProbability("Juice", 0.90),),
+            ),
+        ]
+    )
+
+    classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
+
+    assert item.taxonomy1 == "Food, Beverages & Tobacco"
+    assert item.taxonomy2 == "Beverages"
+    assert item.taxonomy3 == "Juice"
+    assert len(client.prompts) == 4
+    assert (
+        "Selected product taxonomy path: Food, Beverages & Tobacco > Beverages" in client.prompts[3]
+    )
+
+
 def test_categorize_receipt_items_rejects_non_leaf_category_response():
     item = ReceiptItem(
         description="Coffee",
@@ -306,6 +444,49 @@ def test_url_lib_ollama_client_posts_generate_request(monkeypatch: pytest.Monkey
         "prompt": "Choose one",
         "stream": False,
         "options": {"temperature": 0},
+    }
+
+
+def test_url_lib_ollama_client_can_request_choice_probabilities(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    requests: list[urllib.request.Request] = []
+
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        assert timeout == 30.0
+        requests.append(request)
+        return FakeResponse(
+            {
+                "response": "Groceries",
+                "logprobs": {
+                    "top_logprobs": [
+                        {"token": "Groceries", "logprob": -0.2},
+                        {"token": "Dining", "logprob": -1.2},
+                    ]
+                },
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = UrlLibOllamaClient(url="http://example.test:11434", model="llama3.2")
+
+    completion = client.complete_with_probabilities("Choose one", choices=("Groceries", "Dining"))
+
+    assert completion.response == "Groceries"
+    assert len(completion.probabilities) == 2
+    assert completion.probabilities[0].choice == "Groceries"
+    assert math.isclose(completion.probabilities[0].probability, 0.8187307530779818)
+    assert completion.probabilities[1].choice == "Dining"
+    assert math.isclose(completion.probabilities[1].probability, 0.30119421191220214)
+    request_data = requests[0].data
+    assert isinstance(request_data, bytes)
+    assert json.loads(request_data) == {
+        "model": "llama3.2",
+        "prompt": "Choose one",
+        "stream": False,
+        "logprobs": True,
+        "top_logprobs": 5,
+        "options": {"temperature": 0, "logprobs": True, "top_logprobs": 5},
     }
 
 

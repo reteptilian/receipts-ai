@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 from typing import Protocol, cast
@@ -19,7 +21,10 @@ OLLAMA_URL_ENV_VARS = ("OLLAMA_URL",)
 OLLAMA_MODEL_ENV_VARS = ("OLLAMA_MODEL", "OLLAMA_MODEL_NAME")
 
 MAX_SEARCH_RESULTS = 5
+MAX_TAXONOMY_SEARCH_PATHS = 5
 MAX_TAXONOMY_LEVELS = 9
+TAXONOMY_MIN_CHOICE_PROBABILITY = 0.35
+TAXONOMY_MIN_SEARCH_PROBABILITY = 0.15
 PRODUCT_TAXONOMY_FILENAME = "taxonomy.en-US.txt"
 
 logger = logging.getLogger(__name__)
@@ -27,6 +32,25 @@ logger = logging.getLogger(__name__)
 
 class CategoryModelClient(Protocol):
     def complete(self, prompt: str) -> str: ...
+
+
+@dataclass(frozen=True)
+class CategoryChoiceProbability:
+    choice: str
+    probability: float
+
+
+@dataclass(frozen=True)
+class CategoryCompletion:
+    response: str
+    probabilities: tuple[CategoryChoiceProbability, ...]
+
+
+@dataclass(frozen=True)
+class _TaxonomySearchPath:
+    path: tuple[str, ...]
+    node: dict[str, object]
+    probability: float
 
 
 class UrlLibOllamaClient:
@@ -39,18 +63,49 @@ class UrlLibOllamaClient:
         self.timeout_seconds = timeout_seconds
 
     def complete(self, prompt: str) -> str:
+        return self._generate(prompt, options={"temperature": 0}).response
+
+    def complete_with_probabilities(
+        self, prompt: str, *, choices: tuple[str, ...]
+    ) -> CategoryCompletion:
+        completion = self._generate(
+            prompt,
+            options={"temperature": 0, "logprobs": True, "top_logprobs": 5},
+            logprobs=True,
+            top_logprobs=5,
+        )
+        return CategoryCompletion(
+            response=completion.response,
+            probabilities=_choice_probabilities_from_ollama_response(
+                completion.raw_response,
+                response_text=completion.response,
+                choices=choices,
+            ),
+        )
+
+    def _generate(
+        self,
+        prompt: str,
+        *,
+        options: dict[str, object],
+        logprobs: bool | None = None,
+        top_logprobs: int | None = None,
+    ) -> _OllamaCompletion:
         if not prompt:
             raise ValueError("prompt must not be empty")
 
         logger.debug("Prompt: %s", prompt)
-        payload = json.dumps(
-            {
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0},
-            }
-        ).encode("utf-8")
+        request_payload: dict[str, object] = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": options,
+        }
+        if logprobs is not None:
+            request_payload["logprobs"] = logprobs
+        if top_logprobs is not None:
+            request_payload["top_logprobs"] = top_logprobs
+        payload = json.dumps(request_payload).encode("utf-8")
         request = urllib.request.Request(
             self.generate_url,
             data=payload,
@@ -90,7 +145,18 @@ class UrlLibOllamaClient:
             self.model,
             len(response_text),
         )
-        return response_text
+        logger.debug(
+            "Ollama generate response metadata: has_logprobs=%s top_level_keys=%s",
+            "logprobs" in result_object,
+            ", ".join(sorted(result_object.keys())),
+        )
+        return _OllamaCompletion(response=response_text, raw_response=result_object)
+
+
+@dataclass(frozen=True)
+class _OllamaCompletion:
+    response: str
+    raw_response: dict[str, object]
 
 
 class CachedCategoryModelClient:
@@ -118,6 +184,47 @@ class CachedCategoryModelClient:
         self.cache.set("ollama", request, response)
         logger.info("Cached Ollama response: prompt_chars=%s", len(prompt))
         return response
+
+    def complete_with_probabilities(
+        self, prompt: str, *, choices: tuple[str, ...]
+    ) -> CategoryCompletion:
+        request = {
+            "prompt": prompt,
+            "logprobs": True,
+            "top_logprobs": 5,
+        }
+        cached_response = self.cache.get("ollama", request)
+        if isinstance(cached_response, dict):
+            cached_response_object = cast(dict[str, object], cached_response)
+            response_text = cached_response_object.get("response")
+            probabilities = cached_response_object.get("probabilities")
+            if isinstance(response_text, str) and isinstance(probabilities, list):
+                stored_probabilities = cast(list[object], probabilities)
+                logger.info(
+                    "Using cached Ollama probability response: prompt_chars=%s", len(prompt)
+                )
+                return CategoryCompletion(
+                    response=response_text,
+                    probabilities=_stored_choice_probabilities(
+                        stored_probabilities, choices=choices
+                    ),
+                )
+
+        active_client = self._active_client()
+        completion = _complete_with_probabilities(active_client, prompt, choices=choices)
+        self.cache.set(
+            "ollama",
+            request,
+            {
+                "response": completion.response,
+                "probabilities": [
+                    {"choice": result.choice, "probability": result.probability}
+                    for result in completion.probabilities
+                ],
+            },
+        )
+        logger.info("Cached Ollama probability response: prompt_chars=%s", len(prompt))
+        return completion
 
     def _active_client(self) -> CategoryModelClient:
         if self._client is None:
@@ -179,27 +286,13 @@ def classify_receipt_items_by_product_taxonomy(
 
     for index, item in enumerate(transaction.receipt.items, start=1):
         logger.info("Classifying receipt item %s by product taxonomy", index)
-        choices = tuple(active_taxonomy.keys())
-        node: dict[str, object] = active_taxonomy
-        selected_path: list[str] = []
+        selected_path = _search_taxonomy_path(
+            item=item,
+            taxonomy=active_taxonomy,
+            client=active_client,
+        )
 
-        while choices and len(selected_path) < MAX_TAXONOMY_LEVELS:
-            choice = _choose_taxonomy_category(
-                client=active_client,
-                prompt=_product_taxonomy_prompt(item, selected_path, choices),
-                choices=choices,
-                selected_path=selected_path,
-            )
-            if choice is None:
-                break
-            selected_path.append(choice)
-            child = node.get(choice)
-            if not isinstance(child, dict) or not child:
-                break
-            node = cast(dict[str, object], child)
-            choices = tuple(node.keys())
-
-        _set_item_taxonomy(item, selected_path)
+        _set_item_taxonomy(item, list(selected_path))
         logger.info("Classified receipt item %s as %s", index, " > ".join(selected_path))
 
     return transaction
@@ -247,27 +340,261 @@ def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple
     return choice
 
 
-def _choose_taxonomy_category(
+def _search_taxonomy_path(
+    *,
+    item: ReceiptItem,
+    taxonomy: dict[str, object],
+    client: CategoryModelClient,
+) -> tuple[str, ...]:
+    search_paths = (_TaxonomySearchPath(path=(), node=taxonomy, probability=1.0),)
+    best_path: tuple[str, ...] = ()
+    best_probability = 0.0
+
+    logger.debug(
+        "Starting taxonomy search: active_paths=%s",
+        _format_taxonomy_search_paths(search_paths),
+    )
+    while search_paths:
+        current, search_paths = search_paths[0], search_paths[1:]
+        logger.debug(
+            "Expanding taxonomy path: path=%s probability=%.3f remaining_paths=%s",
+            _format_taxonomy_path(current.path),
+            current.probability,
+            _format_taxonomy_search_paths(search_paths),
+        )
+
+        choices = tuple(current.node.keys())
+        if not choices or len(current.path) >= MAX_TAXONOMY_LEVELS:
+            reason = "leaf" if not choices else "max-level"
+            best_path, best_probability = _preferred_taxonomy_candidate(
+                best_path,
+                best_probability,
+                current.path,
+                current.probability,
+            )
+            logger.debug(
+                "Completed taxonomy path: path=%s probability=%.3f reason=%s "
+                "best_path=%s best_probability=%.3f",
+                _format_taxonomy_path(current.path),
+                current.probability,
+                reason,
+                _format_taxonomy_path(best_path),
+                best_probability,
+            )
+            continue
+
+        logger.debug(
+            "Requesting taxonomy choices: path=%s choices=%s",
+            _format_taxonomy_path(current.path),
+            ", ".join(choices),
+        )
+        choice_results = _choose_taxonomy_categories(
+            client=client,
+            prompt=_product_taxonomy_prompt(item, list(current.path), choices),
+            choices=choices,
+            selected_path=list(current.path),
+        )
+        logger.debug(
+            "Received taxonomy choices: path=%s results=%s",
+            _format_taxonomy_path(current.path),
+            _format_category_choice_probabilities(choice_results),
+        )
+        if not choice_results:
+            best_path, best_probability = _preferred_taxonomy_candidate(
+                best_path,
+                best_probability,
+                current.path,
+                current.probability,
+            )
+            logger.debug(
+                "Stopped taxonomy path without new choices: path=%s probability=%.3f "
+                "best_path=%s best_probability=%.3f",
+                _format_taxonomy_path(current.path),
+                current.probability,
+                _format_taxonomy_path(best_path),
+                best_probability,
+            )
+            continue
+
+        top_result = choice_results[0]
+        if top_result.probability < TAXONOMY_MIN_CHOICE_PROBABILITY:
+            logger.debug(
+                "Stopping taxonomy path %s because top choice %s probability %.3f is below %.3f",
+                " > ".join(current.path) if current.path else "<root>",
+                top_result.choice,
+                top_result.probability,
+                TAXONOMY_MIN_CHOICE_PROBABILITY,
+            )
+            best_path, best_probability = _preferred_taxonomy_candidate(
+                best_path,
+                best_probability,
+                current.path,
+                current.probability,
+            )
+            logger.debug(
+                "Stopped low-confidence taxonomy path: path=%s best_path=%s best_probability=%.3f",
+                _format_taxonomy_path(current.path),
+                _format_taxonomy_path(best_path),
+                best_probability,
+            )
+            continue
+
+        new_paths: list[_TaxonomySearchPath] = []
+        for result in choice_results:
+            if result.probability < TAXONOMY_MIN_SEARCH_PROBABILITY:
+                logger.debug(
+                    "Discarding taxonomy choice below search threshold: path=%s choice=%s "
+                    "probability=%.3f threshold=%.3f",
+                    _format_taxonomy_path(current.path),
+                    result.choice,
+                    result.probability,
+                    TAXONOMY_MIN_SEARCH_PROBABILITY,
+                )
+                continue
+
+            child = current.node.get(result.choice)
+            next_path = (*current.path, result.choice)
+            next_probability = current.probability * result.probability
+            if not isinstance(child, dict) or not child:
+                best_path, best_probability = _preferred_taxonomy_candidate(
+                    best_path,
+                    best_probability,
+                    next_path,
+                    next_probability,
+                )
+                logger.debug(
+                    "Reached terminal taxonomy choice: path=%s local_probability=%.3f "
+                    "cumulative_probability=%.3f best_path=%s best_probability=%.3f",
+                    _format_taxonomy_path(next_path),
+                    result.probability,
+                    next_probability,
+                    _format_taxonomy_path(best_path),
+                    best_probability,
+                )
+                continue
+
+            new_path = _TaxonomySearchPath(
+                path=next_path,
+                node=cast(dict[str, object], child),
+                probability=next_probability,
+            )
+            new_paths.append(new_path)
+            logger.debug(
+                "Added taxonomy search path: path=%s local_probability=%.3f "
+                "cumulative_probability=%.3f",
+                _format_taxonomy_path(next_path),
+                result.probability,
+                next_probability,
+            )
+
+        search_paths = _prune_taxonomy_search_paths((*search_paths, *new_paths))
+        logger.debug(
+            "Pruned taxonomy search set: active_paths=%s best_path=%s best_probability=%.3f",
+            _format_taxonomy_search_paths(search_paths),
+            _format_taxonomy_path(best_path),
+            best_probability,
+        )
+
+    logger.debug(
+        "Finished taxonomy search: best_path=%s best_probability=%.3f",
+        _format_taxonomy_path(best_path),
+        best_probability,
+    )
+    return best_path
+
+
+def _preferred_taxonomy_candidate(
+    current_path: tuple[str, ...],
+    current_probability: float,
+    candidate_path: tuple[str, ...],
+    candidate_probability: float,
+) -> tuple[tuple[str, ...], float]:
+    if not candidate_path:
+        return current_path, current_probability
+    if len(candidate_path) > len(current_path):
+        return candidate_path, candidate_probability
+    if len(candidate_path) == len(current_path) and candidate_probability > current_probability:
+        return candidate_path, candidate_probability
+    return current_path, current_probability
+
+
+def _choose_taxonomy_categories(
     *,
     client: CategoryModelClient,
     prompt: str,
     choices: tuple[str, ...],
     selected_path: list[str],
-) -> str | None:
-    response = client.complete(prompt)
-    choice = _normalize_choice(response, choices)
-    if choice is not None:
-        return choice
+) -> tuple[CategoryChoiceProbability, ...]:
+    completion = _complete_with_probabilities(client, prompt, choices=choices)
+    probabilities = tuple(result for result in completion.probabilities if result.choice in choices)
+    if probabilities:
+        return probabilities
 
-    if selected_path and _normalize_choice(response, tuple(selected_path)) is not None:
+    choice = _normalize_choice(completion.response, choices)
+    if choice is not None:
+        return (CategoryChoiceProbability(choice=choice, probability=1.0),)
+
+    if selected_path and _normalize_choice(completion.response, tuple(selected_path)) is not None:
         logger.info(
-            "Model repeated selected taxonomy path category %r; stopping taxonomy walk", response
+            "Model repeated selected taxonomy path category %r; stopping taxonomy walk",
+            completion.response,
         )
-        return None
+        return ()
 
     options = ", ".join(choices)
     raise RuntimeError(
-        f"model returned an invalid category {response!r}; expected one of: {options}"
+        f"model returned an invalid category {completion.response!r}; expected one of: {options}"
+    )
+
+
+def _complete_with_probabilities(
+    client: CategoryModelClient, prompt: str, *, choices: tuple[str, ...]
+) -> CategoryCompletion:
+    complete_with_probabilities = getattr(client, "complete_with_probabilities", None)
+    if callable(complete_with_probabilities):
+        completion = complete_with_probabilities(prompt, choices=choices)
+        if isinstance(completion, CategoryCompletion):
+            return completion
+
+    return CategoryCompletion(response=client.complete(prompt), probabilities=())
+
+
+def _prune_taxonomy_search_paths(
+    search_paths: tuple[_TaxonomySearchPath, ...],
+) -> tuple[_TaxonomySearchPath, ...]:
+    deduped: dict[tuple[str, ...], _TaxonomySearchPath] = {}
+    for search_path in search_paths:
+        existing = deduped.get(search_path.path)
+        if existing is None or search_path.probability > existing.probability:
+            deduped[search_path.path] = search_path
+
+    return tuple(
+        sorted(deduped.values(), key=lambda path: path.probability, reverse=True)[
+            :MAX_TAXONOMY_SEARCH_PATHS
+        ]
+    )
+
+
+def _format_taxonomy_path(path: tuple[str, ...]) -> str:
+    return " > ".join(path) if path else "<root>"
+
+
+def _format_taxonomy_search_paths(search_paths: tuple[_TaxonomySearchPath, ...]) -> str:
+    if not search_paths:
+        return "<empty>"
+    return "; ".join(
+        f"{_format_taxonomy_path(search_path.path)} ({search_path.probability:.3f})"
+        for search_path in search_paths
+    )
+
+
+def _format_category_choice_probabilities(
+    probabilities: tuple[CategoryChoiceProbability, ...],
+) -> str:
+    if not probabilities:
+        return "<empty>"
+    return "; ".join(
+        f"{probability.choice} ({probability.probability:.3f})" for probability in probabilities
     )
 
 
@@ -399,6 +726,139 @@ def _normalize_choice(response: str, choices: tuple[str, ...]) -> str | None:
         if re.search(rf"\b{re.escape(_normalize_text(choice))}\b", cleaned_response):
             return choice
     return None
+
+
+def _choice_probabilities_from_ollama_response(
+    response: dict[str, object], *, response_text: str, choices: tuple[str, ...]
+) -> tuple[CategoryChoiceProbability, ...]:
+    raw_probabilities = _raw_top_logprob_entries(response)
+    if not raw_probabilities:
+        logger.debug(
+            "Ollama response did not include usable logprob entries; falling back to "
+            "plain response normalization for %r",
+            response_text,
+        )
+        return ()
+
+    probabilities: dict[str, float] = {}
+
+    for token_text, log_probability in raw_probabilities:
+        choice = _normalize_choice(token_text, choices)
+        if choice is None:
+            choice = _choice_with_token_prefix(token_text, choices)
+        if choice is None:
+            continue
+
+        probability = _probability_from_logprob(log_probability)
+        probabilities[choice] = max(probabilities.get(choice, 0.0), probability)
+
+    return tuple(
+        CategoryChoiceProbability(choice=choice, probability=probability)
+        for choice, probability in sorted(
+            probabilities.items(), key=lambda item: item[1], reverse=True
+        )
+    )
+
+
+def _raw_top_logprob_entries(response: dict[str, object]) -> list[tuple[str, float]]:
+    logprobs = response.get("logprobs")
+    if isinstance(logprobs, list):
+        return _raw_top_logprob_entries_from_tokens(cast(list[object], logprobs))
+    if isinstance(logprobs, dict):
+        logprobs_object = cast(dict[str, object], logprobs)
+        content = logprobs_object.get("content")
+        if isinstance(content, list):
+            return _raw_top_logprob_entries_from_tokens(cast(list[object], content))
+
+        top_logprobs = logprobs_object.get("top_logprobs")
+        if isinstance(top_logprobs, list):
+            return _raw_top_logprob_entries_from_top_logprobs(cast(list[object], top_logprobs))
+
+    top_logprobs = response.get("top_logprobs")
+    if isinstance(top_logprobs, list):
+        return _raw_top_logprob_entries_from_top_logprobs(cast(list[object], top_logprobs))
+    return []
+
+
+def _raw_top_logprob_entries_from_tokens(tokens: list[object]) -> list[tuple[str, float]]:
+    entries: list[tuple[str, float]] = []
+    for token_object in tokens:
+        if not isinstance(token_object, dict):
+            continue
+        token = cast(dict[str, object], token_object)
+        top_logprobs = token.get("top_logprobs")
+        if isinstance(top_logprobs, list):
+            entries.extend(
+                _raw_top_logprob_entries_from_top_logprobs(cast(list[object], top_logprobs))
+            )
+
+        token_text = token.get("token")
+        log_probability = token.get("logprob")
+        if isinstance(token_text, str) and isinstance(log_probability, int | float):
+            entries.append((token_text, float(log_probability)))
+    return entries
+
+
+def _raw_top_logprob_entries_from_top_logprobs(
+    top_logprobs: list[object],
+) -> list[tuple[str, float]]:
+    entries: list[tuple[str, float]] = []
+    for entry_object in top_logprobs:
+        if isinstance(entry_object, dict):
+            entry = cast(dict[str, object], entry_object)
+            token_text = entry.get("token")
+            log_probability = entry.get("logprob")
+            if isinstance(token_text, str) and isinstance(log_probability, int | float):
+                entries.append((token_text, float(log_probability)))
+            continue
+
+        if (
+            isinstance(entry_object, list | tuple)
+            and len(entry := cast(list[object] | tuple[object, ...], entry_object)) == 2
+            and isinstance(entry[0], str)
+            and isinstance(entry[1], int | float)
+        ):
+            entries.append((entry[0], float(entry[1])))
+    return entries
+
+
+def _choice_with_token_prefix(token_text: str, choices: tuple[str, ...]) -> str | None:
+    normalized_token = _normalize_text(token_text).strip(".,:;-")
+    if not normalized_token:
+        return None
+
+    matching_choices = [
+        choice for choice in choices if _normalize_text(choice).startswith(normalized_token)
+    ]
+    if len(matching_choices) == 1:
+        return matching_choices[0]
+    return None
+
+
+def _probability_from_logprob(log_probability: float) -> float:
+    if log_probability > 0:
+        return min(log_probability, 1.0)
+    return min(math.exp(log_probability), 1.0)
+
+
+def _stored_choice_probabilities(
+    probabilities: list[object], *, choices: tuple[str, ...]
+) -> tuple[CategoryChoiceProbability, ...]:
+    results: list[CategoryChoiceProbability] = []
+    for probability_object in probabilities:
+        if not isinstance(probability_object, dict):
+            continue
+        probability = cast(dict[str, object], probability_object)
+        choice = probability.get("choice")
+        value = probability.get("probability")
+        if isinstance(choice, str) and choice in choices and isinstance(value, int | float):
+            results.append(
+                CategoryChoiceProbability(
+                    choice=choice,
+                    probability=max(0.0, min(float(value), 1.0)),
+                )
+            )
+    return tuple(sorted(results, key=lambda result: result.probability, reverse=True))
 
 
 def _normalize_text(value: str) -> str:
