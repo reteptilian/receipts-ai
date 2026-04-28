@@ -16,8 +16,10 @@ from receipts_ai.categorization import (
     CachedCategoryModelClient,
     UrlLibOllamaClient,
     categorize_receipt_items,
+    classify_receipt_items_by_product_taxonomy,
     create_ollama_category_client,
     load_budget_categories,
+    load_product_taxonomy,
 )
 from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
 
@@ -53,6 +55,34 @@ def test_load_budget_categories_exposes_nested_categories():
     food_categories = categories["Food & Dining"]
     assert isinstance(food_categories, dict)
     assert "Groceries" in food_categories
+
+
+def test_load_product_taxonomy_parses_greater_than_levels(tmp_path: Path):
+    taxonomy_path = tmp_path / "taxonomy.en-US.txt"
+    taxonomy_path.write_text(
+        "\n".join(
+            (
+                "# Comment",
+                "Food, Beverages & Tobacco",
+                "Food, Beverages & Tobacco > Food Items",
+                "Food, Beverages & Tobacco > Food Items > Bakery",
+                "Food, Beverages & Tobacco > Food Items > Bakery > Crackers",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    taxonomy = load_product_taxonomy(taxonomy_path)
+
+    assert taxonomy == {
+        "Food, Beverages & Tobacco": {
+            "Food Items": {
+                "Bakery": {
+                    "Crackers": {},
+                },
+            },
+        },
+    }
 
 
 def test_categorize_receipt_items_uses_search_results_and_leaf_category_only():
@@ -93,6 +123,110 @@ def test_categorize_receipt_items_uses_search_results_and_leaf_category_only():
     assert "Crisp crackers sold in grocery stores." in client.prompts[1]
     assert "RAW CONFUSING CODE" not in "\n".join(client.prompts)
     assert "Confusing receipt text" not in "\n".join(client.prompts)
+
+
+def test_classify_receipt_items_by_product_taxonomy_walks_each_level():
+    item = ReceiptItem(
+        description="Confusing receipt text",
+        raw_description="RAW CONFUSING CODE",
+        amount="4.49",
+        taxonomy4="Stale Value",
+        brave_search_result=json.dumps(
+            [
+                {
+                    "title": "Premium Saltines",
+                    "description": "Crisp crackers sold in grocery stores.",
+                },
+                {"title": "Result 2", "description": "Description 2"},
+                {"title": "Result 3", "description": "Description 3"},
+                {"title": "Result 4", "description": "Description 4"},
+                {"title": "Result 5", "description": "Description 5"},
+                {"title": "Result 6", "description": "Description 6"},
+            ]
+        ),
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="FredMeyer",
+        amount="-4.49",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    taxonomy: dict[str, object] = {
+        "Animals & Pet Supplies": {},
+        "Food, Beverages & Tobacco": {
+            "Food Items": {
+                "Bakery": {
+                    "Crackers": {},
+                    "Cakes": {},
+                },
+                "Candy": {},
+            },
+            "Beverages": {},
+        },
+    }
+    client = FakeCategoryClient(["Food, Beverages & Tobacco", "Food Items", "Bakery", "Crackers"])
+
+    result = classify_receipt_items_by_product_taxonomy(
+        transaction, client=client, taxonomy=taxonomy
+    )
+
+    assert result is transaction
+    assert item.taxonomy1 == "Food, Beverages & Tobacco"
+    assert item.taxonomy2 == "Food Items"
+    assert item.taxonomy3 == "Bakery"
+    assert item.taxonomy4 == "Crackers"
+    assert item.taxonomy5 is None
+    assert len(client.prompts) == 4
+    assert "pick the most appropriate product type" in client.prompts[0]
+    assert "Animals & Pet Supplies" in client.prompts[0]
+    assert "Food Items" not in client.prompts[0]
+    assert "Selected product taxonomy path: Food, Beverages & Tobacco" in client.prompts[1]
+    assert "Food Items" in client.prompts[1]
+    assert "Bakery" in client.prompts[2]
+    assert "Crackers" in client.prompts[3]
+    assert "Premium Saltines" in client.prompts[0]
+    assert "Crisp crackers sold in grocery stores." in client.prompts[3]
+    assert "Result 5" in client.prompts[3]
+    assert "Result 6" not in "\n".join(client.prompts)
+    assert "RAW CONFUSING CODE" not in "\n".join(client.prompts)
+    assert "Confusing receipt text" not in "\n".join(client.prompts)
+
+
+def test_classify_receipt_items_by_product_taxonomy_stops_when_model_repeats_parent():
+    item = ReceiptItem(
+        description="TurboTax software",
+        amount="25.00",
+        brave_search_result=json.dumps(
+            [{"title": "TurboTax Software", "description": "Tax software sold at Costco."}]
+        ),
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Costco",
+        amount="-25.00",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    taxonomy: dict[str, object] = {
+        "Electronics": {
+            "Audio": {},
+            "Computers": {},
+            "Video": {},
+        },
+    }
+    client = FakeCategoryClient(["Electronics", "Electronics"])
+
+    classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
+
+    assert item.taxonomy1 == "Electronics"
+    assert item.taxonomy2 is None
+    assert len(client.prompts) == 2
+    assert "Audio" in client.prompts[1]
 
 
 def test_categorize_receipt_items_rejects_non_leaf_category_response():

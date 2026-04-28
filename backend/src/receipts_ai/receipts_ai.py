@@ -16,6 +16,7 @@ from receipts_ai.cache import JsonCallCache
 from receipts_ai.categorization import (
     CachedCategoryModelClient,
     categorize_receipt_items,
+    classify_receipt_items_by_product_taxonomy,
     create_ollama_category_client,
 )
 from receipts_ai.document_intelligence import analyze_receipt_file
@@ -45,6 +46,15 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "item_amount",
     "item_line_type",
     "item_category_id",
+    "item_taxonomy_1",
+    "item_taxonomy_2",
+    "item_taxonomy_3",
+    "item_taxonomy_4",
+    "item_taxonomy_5",
+    "item_taxonomy_6",
+    "item_taxonomy_7",
+    "item_taxonomy_8",
+    "item_taxonomy_9",
     "item_confidence",
 )
 
@@ -79,7 +89,10 @@ def main() -> None:
     parser.add_argument(
         "--categorize-items",
         action="store_true",
-        help="Use Ollama to populate each receipt item categoryId from Brave Search results.",
+        help=(
+            "Use Ollama to populate each receipt item categoryId and product taxonomy "
+            "from Brave Search results."
+        ),
     )
     parser.add_argument(
         "--cache-file",
@@ -120,14 +133,17 @@ def main() -> None:
             )
     if args.categorize_items:
         if cache is not None:
+            category_client = CachedCategoryModelClient(
+                cache=cache, client_factory=create_ollama_category_client
+            )
             categorize_receipt_items(
                 transaction,
-                client=CachedCategoryModelClient(
-                    cache=cache, client_factory=create_ollama_category_client
-                ),
+                client=category_client,
             )
+            classify_receipt_items_by_product_taxonomy(transaction, client=category_client)
         else:
             categorize_receipt_items(transaction)
+            classify_receipt_items_by_product_taxonomy(transaction)
     _write_transaction(transaction, output_format=args.format, output_path=args.output)
 
 
@@ -231,6 +247,15 @@ def _receipt_item_rows(
             "item_amount": item.amount,
             "item_line_type": item.line_type.value if item.line_type is not None else None,
             "item_category_id": item.category_id,
+            "item_taxonomy_1": item.taxonomy1,
+            "item_taxonomy_2": item.taxonomy2,
+            "item_taxonomy_3": item.taxonomy3,
+            "item_taxonomy_4": item.taxonomy4,
+            "item_taxonomy_5": item.taxonomy5,
+            "item_taxonomy_6": item.taxonomy6,
+            "item_taxonomy_7": item.taxonomy7,
+            "item_taxonomy_8": item.taxonomy8,
+            "item_taxonomy_9": item.taxonomy9,
             "item_confidence": item.confidence,
         }
         for index, item in enumerate(receipt.items, start=1)

@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from importlib import resources
+from pathlib import Path
 from typing import Protocol, cast
 
 from receipts_ai.cache import JsonCallCache
@@ -18,6 +19,8 @@ OLLAMA_URL_ENV_VARS = ("OLLAMA_URL",)
 OLLAMA_MODEL_ENV_VARS = ("OLLAMA_MODEL", "OLLAMA_MODEL_NAME")
 
 MAX_SEARCH_RESULTS = 5
+MAX_TAXONOMY_LEVELS = 9
+PRODUCT_TAXONOMY_FILENAME = "taxonomy.en-US.txt"
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +165,46 @@ def categorize_receipt_items(
     return transaction
 
 
+def classify_receipt_items_by_product_taxonomy(
+    transaction: Transaction,
+    *,
+    client: CategoryModelClient | None = None,
+    taxonomy: dict[str, object] | None = None,
+) -> Transaction:
+    if transaction.receipt is None:
+        raise ValueError("transaction does not contain a receipt")
+
+    active_client = client if client is not None else create_ollama_category_client()
+    active_taxonomy = taxonomy if taxonomy is not None else load_product_taxonomy()
+
+    for index, item in enumerate(transaction.receipt.items, start=1):
+        logger.info("Classifying receipt item %s by product taxonomy", index)
+        choices = tuple(active_taxonomy.keys())
+        node: dict[str, object] = active_taxonomy
+        selected_path: list[str] = []
+
+        while choices and len(selected_path) < MAX_TAXONOMY_LEVELS:
+            choice = _choose_taxonomy_category(
+                client=active_client,
+                prompt=_product_taxonomy_prompt(item, selected_path, choices),
+                choices=choices,
+                selected_path=selected_path,
+            )
+            if choice is None:
+                break
+            selected_path.append(choice)
+            child = node.get(choice)
+            if not isinstance(child, dict) or not child:
+                break
+            node = cast(dict[str, object], child)
+            choices = tuple(node.keys())
+
+        _set_item_taxonomy(item, selected_path)
+        logger.info("Classified receipt item %s as %s", index, " > ".join(selected_path))
+
+    return transaction
+
+
 def load_budget_categories() -> dict[str, object]:
     categories_file = resources.files("receipts_ai.models").joinpath("budget_categories.json")
     with categories_file.open("r", encoding="utf-8") as file:
@@ -169,6 +212,28 @@ def load_budget_categories() -> dict[str, object]:
     if not isinstance(payload, dict):
         raise RuntimeError("budget_categories.json must contain a JSON object")
     return cast(dict[str, object], payload)
+
+
+def load_product_taxonomy(path: Path | None = None) -> dict[str, object]:
+    taxonomy_path = path if path is not None else _default_product_taxonomy_path()
+    taxonomy: dict[str, object] = {}
+    with taxonomy_path.open("r", encoding="utf-8") as file:
+        for line in file:
+            stripped_line = line.strip()
+            if not stripped_line or stripped_line.startswith("#"):
+                continue
+            parts = tuple(part.strip() for part in stripped_line.split(">") if part.strip())
+            if not parts:
+                continue
+            node = taxonomy
+            for part in parts:
+                child = node.setdefault(part, {})
+                if not isinstance(child, dict):
+                    raise RuntimeError(f"taxonomy path conflicts at {part!r}")
+                node = cast(dict[str, object], child)
+    if not taxonomy:
+        raise RuntimeError(f"{taxonomy_path} did not contain product taxonomy entries")
+    return taxonomy
 
 
 def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple[str, ...]) -> str:
@@ -180,6 +245,30 @@ def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple
             f"model returned an invalid category {response!r}; expected one of: {options}"
         )
     return choice
+
+
+def _choose_taxonomy_category(
+    *,
+    client: CategoryModelClient,
+    prompt: str,
+    choices: tuple[str, ...],
+    selected_path: list[str],
+) -> str | None:
+    response = client.complete(prompt)
+    choice = _normalize_choice(response, choices)
+    if choice is not None:
+        return choice
+
+    if selected_path and _normalize_choice(response, tuple(selected_path)) is not None:
+        logger.info(
+            "Model repeated selected taxonomy path category %r; stopping taxonomy walk", response
+        )
+        return None
+
+    options = ", ".join(choices)
+    raise RuntimeError(
+        f"model returned an invalid category {response!r}; expected one of: {options}"
+    )
 
 
 def _top_level_prompt(item: ReceiptItem, categories: tuple[str, ...]) -> str:
@@ -196,6 +285,23 @@ def _leaf_category_prompt(
     return _category_prompt(
         f"Top level category: {top_level_category}\nChoose the best specific budget category.",
         categories=categories,
+        search_results=_search_results_text(item),
+    )
+
+
+def _product_taxonomy_prompt(
+    item: ReceiptItem, selected_path: list[str], choices: tuple[str, ...]
+) -> str:
+    path_text = " > ".join(selected_path)
+    instruction = (
+        "Based on these search result titles and descriptions, "
+        "pick the most appropriate product type from the following choices."
+    )
+    if path_text:
+        instruction = f"Selected product taxonomy path: {path_text}\n{instruction}"
+    return _category_prompt(
+        instruction,
+        categories=choices,
         search_results=_search_results_text(item),
     )
 
@@ -256,6 +362,24 @@ def _leaf_categories(node: object) -> list[str]:
         else:
             leaves.append(category)
     return leaves
+
+
+def _set_item_taxonomy(item: ReceiptItem, selected_path: list[str]) -> None:
+    for level in range(1, MAX_TAXONOMY_LEVELS + 1):
+        value = selected_path[level - 1] if level <= len(selected_path) else None
+        setattr(item, f"taxonomy{level}", value)
+
+
+def _default_product_taxonomy_path() -> Path:
+    package_taxonomy = resources.files("receipts_ai.models").joinpath(PRODUCT_TAXONOMY_FILENAME)
+    if package_taxonomy.is_file():
+        return Path(str(package_taxonomy))
+
+    repo_taxonomy = Path(__file__).resolve().parents[3] / "models" / PRODUCT_TAXONOMY_FILENAME
+    if repo_taxonomy.is_file():
+        return repo_taxonomy
+
+    raise RuntimeError(f"could not find {PRODUCT_TAXONOMY_FILENAME}")
 
 
 def _normalize_choice(response: str, choices: tuple[str, ...]) -> str | None:

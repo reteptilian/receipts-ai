@@ -40,6 +40,8 @@ def test_writes_one_csv_row_per_receipt_item():
                 unit_price="3.50",
                 amount="7.00",
                 category_id="Fast Food & Coffee",
+                taxonomy1="Food, Beverages & Tobacco",
+                taxonomy2="Beverages",
             ),
             ReceiptItem(description="Bagel", amount="3.00", confidence=0.91),
         ],
@@ -76,6 +78,15 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_amount": "7.00",
             "item_line_type": "item",
             "item_category_id": "Fast Food & Coffee",
+            "item_taxonomy_1": "Food, Beverages & Tobacco",
+            "item_taxonomy_2": "Beverages",
+            "item_taxonomy_3": "",
+            "item_taxonomy_4": "",
+            "item_taxonomy_5": "",
+            "item_taxonomy_6": "",
+            "item_taxonomy_7": "",
+            "item_taxonomy_8": "",
+            "item_taxonomy_9": "",
             "item_confidence": "",
         },
         {
@@ -101,6 +112,15 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_amount": "3.00",
             "item_line_type": "item",
             "item_category_id": "",
+            "item_taxonomy_1": "",
+            "item_taxonomy_2": "",
+            "item_taxonomy_3": "",
+            "item_taxonomy_4": "",
+            "item_taxonomy_5": "",
+            "item_taxonomy_6": "",
+            "item_taxonomy_7": "",
+            "item_taxonomy_8": "",
+            "item_taxonomy_9": "",
             "item_confidence": "0.91",
         },
     ]
@@ -375,6 +395,14 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
         transaction_to_categorize.receipt.items[0].category_id = "Fast Food & Coffee"
         return transaction_to_categorize
 
+    def fake_classify_receipt_items_by_product_taxonomy(
+        transaction_to_classify: Transaction, *, client: object
+    ) -> Transaction:
+        assert client.__class__.__name__ == "CachedCategoryModelClient"
+        assert transaction_to_classify.receipt is not None
+        transaction_to_classify.receipt.items[0].taxonomy1 = "Food, Beverages & Tobacco"
+        return transaction_to_classify
+
     monkeypatch.setattr(
         sys,
         "argv",
@@ -394,11 +422,17 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
         fake_enrich_receipt_items_with_brave_search,
     )
     monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
+    monkeypatch.setattr(
+        receipts_ai,
+        "classify_receipt_items_by_product_taxonomy",
+        fake_classify_receipt_items_by_product_taxonomy,
+    )
 
     main()
 
     assert transaction.receipt is not None
     assert transaction.receipt.items[0].category_id == "Fast Food & Coffee"
+    assert transaction.receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"
 
 
 def test_main_can_categorize_items_after_brave_search(
@@ -443,6 +477,15 @@ def test_main_can_categorize_items_after_brave_search(
         transaction_to_categorize.receipt.items[0].category_id = "Groceries"
         return transaction_to_categorize
 
+    def fake_classify_receipt_items_by_product_taxonomy(
+        transaction_to_classify: Transaction,
+    ) -> Transaction:
+        calls.append("taxonomy")
+        assert transaction_to_classify.receipt is not None
+        assert transaction_to_classify.receipt.items[0].brave_search_result == "search payload"
+        transaction_to_classify.receipt.items[0].taxonomy1 = "Food, Beverages & Tobacco"
+        return transaction_to_classify
+
     monkeypatch.setattr(
         sys,
         "argv",
@@ -466,8 +509,14 @@ def test_main_can_categorize_items_after_brave_search(
         fake_enrich_receipt_items_with_brave_search,
     )
     monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
+    monkeypatch.setattr(
+        receipts_ai,
+        "classify_receipt_items_by_product_taxonomy",
+        fake_classify_receipt_items_by_product_taxonomy,
+    )
 
     main()
 
-    assert calls == ["brave", "categorize"]
+    assert calls == ["brave", "categorize", "taxonomy"]
     assert receipt.items[0].category_id == "Groceries"
+    assert receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"

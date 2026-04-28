@@ -129,6 +129,33 @@ class ReceiptItem(BaseModel):
     ]
     line_type: Annotated[LineType | None, Field(alias="lineType")] = LineType.item
     category_id: Annotated[str | None, Field(alias="categoryId", min_length=1)] = None
+    taxonomy1: Annotated[
+        str | None, Field(description="First-level product taxonomy category.", min_length=1)
+    ] = None
+    taxonomy2: Annotated[
+        str | None, Field(description="Second-level product taxonomy category.", min_length=1)
+    ] = None
+    taxonomy3: Annotated[
+        str | None, Field(description="Third-level product taxonomy category.", min_length=1)
+    ] = None
+    taxonomy4: Annotated[
+        str | None, Field(description="Fourth-level product taxonomy category.", min_length=1)
+    ] = None
+    taxonomy5: Annotated[
+        str | None, Field(description="Fifth-level product taxonomy category.", min_length=1)
+    ] = None
+    taxonomy6: Annotated[
+        str | None, Field(description="Sixth-level product taxonomy category.", min_length=1)
+    ] = None
+    taxonomy7: Annotated[
+        str | None, Field(description="Seventh-level product taxonomy category.", min_length=1)
+    ] = None
+    taxonomy8: Annotated[
+        str | None, Field(description="Eighth-level product taxonomy category.", min_length=1)
+    ] = None
+    taxonomy9: Annotated[
+        str | None, Field(description="Ninth-level product taxonomy category.", min_length=1)
+    ] = None
     confidence: Annotated[
         float | None,
         Field(

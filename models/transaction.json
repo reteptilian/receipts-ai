@@ -209,6 +209,42 @@
         "categoryId": {
           "$ref": "#/$defs/nonEmptyString"
         },
+        "taxonomy1": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "First-level product taxonomy category."
+        },
+        "taxonomy2": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Second-level product taxonomy category."
+        },
+        "taxonomy3": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Third-level product taxonomy category."
+        },
+        "taxonomy4": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Fourth-level product taxonomy category."
+        },
+        "taxonomy5": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Fifth-level product taxonomy category."
+        },
+        "taxonomy6": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Sixth-level product taxonomy category."
+        },
+        "taxonomy7": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Seventh-level product taxonomy category."
+        },
+        "taxonomy8": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Eighth-level product taxonomy category."
+        },
+        "taxonomy9": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Ninth-level product taxonomy category."
+        },
         "confidence": {
           "type": "number",
           "minimum": 0,
