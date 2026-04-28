@@ -1,0 +1,65 @@
+{
+  "Housing & Utilities": {
+    "Mortgage & Rent": {},
+    "Property Taxes": {},
+    "Homeowners Insurance": {},
+    "Maintenance & Repairs": {},
+    "Electricity": {},
+    "Gas": {},
+    "Water & Sewer": {},
+    "Trash & Recycling": {},
+    "Internet": {},
+    "Mobile Phone": {}
+  },
+  "Food & Dining": {
+    "Groceries": {},
+    "Restaurants & Dining Out": {},
+    "Fast Food & Coffee": {},
+    "Alcohol & Bars": {}
+  },
+  "Auto & Transportation": {
+    "Car Payment": {},
+    "Gas & Fuel": {},
+    "Auto Insurance": {},
+    "Auto Maintenance": {},
+    "Public Transit": {},
+    "Parking & Tolls": {}
+  },
+  "Health & Wellness": {
+    "Health Insurance": {},
+    "Medical & Doctor Visits": {},
+    "Pharmacy": {},
+    "Dental": {},
+    "Vision": {},
+    "Fitness & Gym": {}
+  },
+  "Personal & Shopping": {
+    "Clothing": {},
+    "Personal Care & Hair": {},
+    "Household Supplies": {},
+    "Electronics & Software": {}
+  },
+  "Entertainment & Leisure": {
+    "Streaming Services": {},
+    "Hobbies": {},
+    "Movies & Concerts": {},
+    "Travel & Vacation": {}
+  },
+  "Financial & Debt": {
+    "Credit Card Interest": {},
+    "Student Loans": {},
+    "Bank Fees": {},
+    "Investment Transfers": {}
+  },
+  "Pets & Family": {
+    "Pet Food & Supplies": {},
+    "Veterinary": {},
+    "Childcare & Daycare": {},
+    "School Supplies": {}
+  },
+  "Giving & Miscellaneous": {
+    "Gifts": {},
+    "Charitable Donations": {},
+    "Uncategorized": {}
+  }
+}

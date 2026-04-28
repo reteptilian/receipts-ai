@@ -39,6 +39,7 @@ def test_writes_one_csv_row_per_receipt_item():
                 quantity=2,
                 unit_price="3.50",
                 amount="7.00",
+                category_id="Fast Food & Coffee",
             ),
             ReceiptItem(description="Bagel", amount="3.00", confidence=0.91),
         ],
@@ -74,7 +75,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_unit_price": "3.50",
             "item_amount": "7.00",
             "item_line_type": "item",
-            "item_category_id": "",
+            "item_category_id": "Fast Food & Coffee",
             "item_confidence": "",
         },
         {
@@ -171,6 +172,18 @@ def test_transaction_json_output_wraps_nested_receipt_struct():
     assert '"rawDescription": "COF"' in output.getvalue()
 
 
+def test_json_output_includes_receipt_item_category():
+    receipt = Receipt(
+        total="4.49",
+        items=[ReceiptItem(description="Saltines", amount="4.49", category_id="Groceries")],
+    )
+    output = StringIO()
+
+    write_receipt_json(receipt, output)
+
+    assert '"categoryId": "Groceries"' in output.getvalue()
+
+
 def test_main_can_enrich_items_with_brave_search(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -238,3 +251,75 @@ def test_main_can_enrich_items_with_brave_search(
 
     assert calls == [transaction]
     assert receipt.items[0].brave_search_result == "search payload"
+
+
+def test_main_can_categorize_items_after_brave_search(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"receipt")
+    receipt = Receipt(
+        items=[ReceiptItem(description="Saltines", raw_description="NBSC SALTINE", amount="4.49")]
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="FredMeyer",
+        amount="-4.49",
+        currency="USD",
+        receipt=receipt,
+    )
+    calls: list[str] = []
+
+    def fake_analyze_receipt_file(path: Path) -> dict[str, Path]:
+        return {"result": path}
+
+    def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:
+        return transaction
+
+    def fake_enrich_receipt_items_with_brave_search(
+        transaction_to_enrich: Transaction, *, request_delay_seconds: float | None = None
+    ) -> Transaction:
+        assert request_delay_seconds == 0.25
+        calls.append("brave")
+        assert transaction_to_enrich.receipt is not None
+        transaction_to_enrich.receipt.items[0].brave_search_result = "search payload"
+        return transaction_to_enrich
+
+    def fake_categorize_receipt_items(transaction_to_categorize: Transaction) -> Transaction:
+        calls.append("categorize")
+        assert transaction_to_categorize.receipt is not None
+        assert transaction_to_categorize.receipt.items[0].brave_search_result == "search payload"
+        transaction_to_categorize.receipt.items[0].category_id = "Groceries"
+        return transaction_to_categorize
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai",
+            "--categorize-items",
+            "--brave-search-delay-seconds",
+            "0.25",
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        receipts_ai,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "enrich_receipt_items_with_brave_search",
+        fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
+
+    main()
+
+    assert calls == ["brave", "categorize"]
+    assert receipt.items[0].category_id == "Groceries"

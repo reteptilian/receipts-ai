@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TextIO
 
 from receipts_ai.brave_search import enrich_receipt_items_with_brave_search
+from receipts_ai.categorization import categorize_receipt_items
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.models.transaction import Receipt, Transaction
 from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
@@ -67,6 +68,11 @@ def main() -> None:
         help="Sleep this many seconds between Brave Search requests.",
     )
     parser.add_argument(
+        "--categorize-items",
+        action="store_true",
+        help="Use Ollama to populate each receipt item categoryId from Brave Search results.",
+    )
+    parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
         default="WARNING",
@@ -80,10 +86,12 @@ def main() -> None:
     if transaction.receipt is None:
         raise ValueError("transaction does not contain a receipt")
 
-    if args.brave_search:
+    if args.brave_search or args.categorize_items:
         enrich_receipt_items_with_brave_search(
             transaction, request_delay_seconds=args.brave_search_delay_seconds
         )
+    if args.categorize_items:
+        categorize_receipt_items(transaction)
     _write_transaction(transaction, output_format=args.format, output_path=args.output)
 
 
