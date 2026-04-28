@@ -45,12 +45,18 @@ def test_receipt_item_accepts_raw_description_alias():
             "rawDescription": "NBSC SALTINE",
             "braveSearchResult": "Nabisco Premium Saltine Crackers - search result",
             "amount": "4.49",
+            "discountAmount": "-1.50",
+            "discountDescription": "/1779212",
+            "netAmount": "2.99",
         }
     )
 
     assert item.description == "Saltine Crackers"
     assert item.raw_description == "NBSC SALTINE"
     assert item.brave_search_result == "Nabisco Premium Saltine Crackers - search result"
+    assert item.discount_amount == "-1.50"
+    assert item.discount_description == "/1779212"
+    assert item.net_amount == "2.99"
 
 
 def test_transaction_rejects_invalid_currency():

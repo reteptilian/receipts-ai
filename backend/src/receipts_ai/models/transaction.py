@@ -127,6 +127,30 @@ class ReceiptItem(BaseModel):
             pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
         ),
     ]
+    discount_amount: Annotated[
+        str | None,
+        Field(
+            alias="discountAmount",
+            description="Signed discount amount applied to this item, when a following discount line was merged into it.",
+            pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+        ),
+    ] = None
+    discount_description: Annotated[
+        str | None,
+        Field(
+            alias="discountDescription",
+            description="Raw description from a discount line merged into this item.",
+            min_length=1,
+        ),
+    ] = None
+    net_amount: Annotated[
+        str | None,
+        Field(
+            alias="netAmount",
+            description="Final item amount after applying any item-level discount amount.",
+            pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+        ),
+    ] = None
     line_type: Annotated[LineType | None, Field(alias="lineType")] = LineType.item
     category_id: Annotated[str | None, Field(alias="categoryId", min_length=1)] = None
     taxonomy1: Annotated[

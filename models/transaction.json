@@ -201,6 +201,18 @@
           "$ref": "#/$defs/decimalString",
           "description": "Signed line amount, including discounts or returns when negative."
         },
+        "discountAmount": {
+          "$ref": "#/$defs/decimalString",
+          "description": "Signed discount amount applied to this item, when a following discount line was merged into it."
+        },
+        "discountDescription": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Raw description from a discount line merged into this item."
+        },
+        "netAmount": {
+          "$ref": "#/$defs/decimalString",
+          "description": "Final item amount after applying any item-level discount amount."
+        },
         "lineType": {
           "type": "string",
           "enum": ["item", "tax", "tip", "service_charge", "shipping", "fee", "discount", "return", "other"],

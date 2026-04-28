@@ -103,6 +103,128 @@ def test_extracts_optional_item_quantity_and_unit_price():
     assert receipt.items[0].amount == "7.0"
 
 
+def test_merges_costco_coupon_discounts_into_preceding_item():
+    payload = {
+        "content": "COSTCO\nSPARKLING WATER 11.99\n/1779212 -3.00\nBANANAS 2.49",
+        "modelId": "prebuilt-receipt",
+        "documents": [
+            {
+                "confidence": 0.9,
+                "fields": {
+                    "MerchantName": {"valueString": "COSTCO"},
+                    "TransactionDate": {"valueDate": "2026-04-27"},
+                    "Total": {
+                        "type": "currency",
+                        "valueCurrency": {"amount": 11.48, "currencyCode": "USD"},
+                    },
+                    "Items": {
+                        "type": "array",
+                        "valueArray": [
+                            {
+                                "confidence": 0.98,
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "SPARKLING WATER"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": 11.99},
+                                    },
+                                },
+                            },
+                            {
+                                "confidence": 0.97,
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "/1779212"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": -3.0},
+                                    },
+                                },
+                            },
+                            {
+                                "confidence": 0.99,
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "BANANAS"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": 2.49},
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    receipt = receipt_from_document_intelligence_result(payload)
+
+    assert [(item.description, item.amount) for item in receipt.items] == [
+        ("SPARKLING WATER", "11.99"),
+        ("BANANAS", "2.49"),
+    ]
+    assert receipt.items[0].discount_amount == "-3.0"
+    assert receipt.items[0].discount_description == "/1779212"
+    assert receipt.items[0].net_amount == "8.99"
+    assert receipt.items[1].discount_amount is None
+    assert receipt.items[1].net_amount is None
+
+
+def test_does_not_merge_coupon_shaped_discount_for_other_payees():
+    payload = {
+        "content": "OTHER STORE\nSPARKLING WATER 11.99\n/1779212 -3.00",
+        "modelId": "prebuilt-receipt",
+        "documents": [
+            {
+                "confidence": 0.9,
+                "fields": {
+                    "MerchantName": {"valueString": "Other Store"},
+                    "TransactionDate": {"valueDate": "2026-04-27"},
+                    "Total": {
+                        "type": "currency",
+                        "valueCurrency": {"amount": 8.99, "currencyCode": "USD"},
+                    },
+                    "Items": {
+                        "type": "array",
+                        "valueArray": [
+                            {
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "SPARKLING WATER"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": 11.99},
+                                    },
+                                },
+                            },
+                            {
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "/1779212"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": -3.0},
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    receipt = receipt_from_document_intelligence_result(payload)
+
+    assert [(item.description, item.amount) for item in receipt.items] == [
+        ("SPARKLING WATER", "11.99"),
+        ("/1779212", "-3.0"),
+    ]
+
+
 def test_receipt_extractor_preserves_legacy_receipt_return_type():
     payload = json.loads((FIXTURE_DIR / "fred_meyer_receipt.json").read_text())
 

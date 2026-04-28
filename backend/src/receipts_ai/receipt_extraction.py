@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, cast
@@ -48,7 +49,7 @@ def transaction_from_document_intelligence_result(result: Any) -> Transaction:
     if total is None:
         raise ValueError("document intelligence result does not contain a receipt total")
 
-    items = _receipt_items(fields.get("Items"))
+    items = _receipt_items(fields.get("Items"), payee=payee)
     currency = _currency_code(total_field) or "USD"
 
     receipt = Receipt(
@@ -72,7 +73,7 @@ def transaction_from_document_intelligence_result(result: Any) -> Transaction:
     )
 
 
-def _receipt_items(items_field: Any) -> list[ReceiptItem]:
+def _receipt_items(items_field: Any, *, payee: str) -> list[ReceiptItem]:
     items: list[ReceiptItem] = []
     for item_field in _list_value(_dict_value(items_field).get("valueArray")):
         item = _dict_value(item_field)
@@ -96,7 +97,49 @@ def _receipt_items(items_field: Any) -> list[ReceiptItem]:
 
     if not items:
         raise ValueError("document intelligence result does not contain receipt line items")
-    return items
+    return _merge_vendor_discount_items(items, payee=payee)
+
+
+def _merge_vendor_discount_items(items: list[ReceiptItem], *, payee: str) -> list[ReceiptItem]:
+    if payee.strip().upper() != "COSTCO":
+        return items
+
+    merged_items: list[ReceiptItem] = []
+    for item in items:
+        if _is_costco_coupon_discount(item) and merged_items:
+            _apply_discount(merged_items[-1], item)
+            continue
+        merged_items.append(item)
+    return merged_items
+
+
+def _is_costco_coupon_discount(item: ReceiptItem) -> bool:
+    if re.fullmatch(r"/\d+", item.description.strip()) is None:
+        return False
+
+    try:
+        return Decimal(item.amount) < 0
+    except InvalidOperation:
+        return False
+
+
+def _apply_discount(item: ReceiptItem, discount: ReceiptItem) -> None:
+    discount_amount = Decimal(discount.amount)
+    if item.discount_amount is not None:
+        discount_amount += Decimal(item.discount_amount)
+
+    item.discount_amount = format(discount_amount, "f")
+    item.discount_description = _combined_discount_description(
+        item.discount_description,
+        discount.raw_description or discount.description,
+    )
+    item.net_amount = format(Decimal(item.amount) + discount_amount, "f")
+
+
+def _combined_discount_description(existing: str | None, new: str) -> str:
+    if existing is None:
+        return new
+    return f"{existing}; {new}"
 
 
 def _nested_field(parent: dict[str, Any], field_name: str, value_name: str) -> Any:
