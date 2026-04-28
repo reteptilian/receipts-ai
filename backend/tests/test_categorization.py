@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import shlex
 import urllib.error
 import urllib.request
 from datetime import date
@@ -756,6 +757,47 @@ def test_url_lib_ollama_client_debug_logs_generate_stats(
         "model=llama3.2 total=11.500s load=0.500s prompt_eval=2.000s "
         "eval=3.000s prompt_tokens=42 eval_tokens=9 eval_tokens_per_second=3.00"
     ) in caplog.text
+
+
+def test_url_lib_ollama_client_debug_logs_curl_reproduction_command(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        assert request.full_url == "http://example.test:11434/api/generate"
+        assert timeout == 30.0
+        return FakeResponse({"response": "Groceries"})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = UrlLibOllamaClient(url="http://example.test:11434", model="llama3.2")
+
+    with caplog.at_level("DEBUG", logger="receipts_ai.categorization"):
+        client.complete("Choose one\nWith a second line")
+
+    prefix = "Ollama generate curl reproduction command: "
+    message = next(record.message for record in caplog.records if record.message.startswith(prefix))
+    command_parts = shlex.split(message.removeprefix(prefix))
+
+    assert command_parts == [
+        "curl",
+        "-sS",
+        "http://example.test:11434/api/generate",
+        "-H",
+        "Accept: application/json",
+        "-H",
+        "Content-Type: application/json",
+        "-d",
+        json.dumps(
+            {
+                "model": "llama3.2",
+                "options": {"temperature": 0},
+                "prompt": "Choose one\nWith a second line",
+                "stream": False,
+                "think": False,
+            },
+            sort_keys=True,
+        ),
+    ]
 
 
 def test_url_lib_ollama_client_error_includes_endpoint(monkeypatch: pytest.MonkeyPatch):

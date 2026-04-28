@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import re
+import shlex
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -157,6 +158,10 @@ class UrlLibOllamaClient:
             _format_ollama_request_value(options),
             len(payload),
         )
+        logger.debug(
+            "Ollama generate curl reproduction command: %s",
+            _ollama_curl_command(self.generate_url, request_payload),
+        )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                 response_payload = response.read().decode("utf-8")
@@ -216,6 +221,23 @@ def _format_ollama_request_value(value: object) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     except TypeError:
         return repr(value)
+
+
+def _ollama_curl_command(url: str, request_payload: dict[str, object]) -> str:
+    payload = json.dumps(request_payload, ensure_ascii=False, sort_keys=True)
+    return " ".join(
+        (
+            "curl",
+            "-sS",
+            shlex.quote(url),
+            "-H",
+            shlex.quote("Accept: application/json"),
+            "-H",
+            shlex.quote("Content-Type: application/json"),
+            "-d",
+            shlex.quote(payload),
+        )
+    )
 
 
 def _log_ollama_generate_stats(response: dict[str, object], *, url: str, model: str) -> None:
