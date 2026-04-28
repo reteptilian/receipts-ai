@@ -507,6 +507,55 @@ def test_url_lib_ollama_client_posts_generate_request(monkeypatch: pytest.Monkey
         "model": "llama3.2",
         "prompt": "Choose one",
         "stream": False,
+        "think": False,
+        "options": {"temperature": 0},
+    }
+
+
+def test_url_lib_ollama_client_can_request_choice_schema(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    requests: list[urllib.request.Request] = []
+
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        assert timeout == 30.0
+        requests.append(request)
+        return FakeResponse({"response": '{"category":"Groceries"}'})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = UrlLibOllamaClient(url="http://example.test:11434", model="qwen3")
+
+    result = client.complete_choice(
+        "Choose one",
+        choices=("Groceries", "Restaurants & Dining Out"),
+    )
+
+    assert result == "Groceries"
+    request_data = requests[0].data
+    assert isinstance(request_data, bytes)
+    payload = json.loads(request_data)
+    assert payload == {
+        "model": "qwen3",
+        "prompt": (
+            "Choose one\n\n"
+            "Return only JSON matching this schema. Do not include explanation text.\n"
+            '{"type": "object", "properties": {"category": {"type": "string", '
+            '"enum": ["Groceries", "Restaurants & Dining Out"]}}, '
+            '"required": ["category"], "additionalProperties": false}'
+        ),
+        "stream": False,
+        "think": False,
+        "format": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["Groceries", "Restaurants & Dining Out"],
+                }
+            },
+            "required": ["category"],
+            "additionalProperties": False,
+        },
         "options": {"temperature": 0},
     }
 
@@ -548,6 +597,7 @@ def test_url_lib_ollama_client_can_request_choice_probabilities(
         "model": "llama3.2",
         "prompt": "Choose one",
         "stream": False,
+        "think": False,
         "logprobs": True,
         "top_logprobs": 5,
         "options": {"temperature": 0, "logprobs": True, "top_logprobs": 5},
@@ -572,6 +622,35 @@ def test_cached_category_model_client_reuses_json_file(tmp_path: Path):
     assert second_client.prompts == []
     payload = json.loads(cache_path.read_text(encoding="utf-8"))
     assert payload["ollama"][0]["request"] == {"prompt": "Choose one"}
+    assert payload["ollama"][0]["response"] == "Groceries"
+
+
+def test_cached_category_model_client_reuses_choice_response(tmp_path: Path):
+    cache_path = tmp_path / "api-cache.json"
+    first_client = FakeCategoryClient(["Groceries"])
+    cached_client = CachedCategoryModelClient(client=first_client, cache=JsonCallCache(cache_path))
+
+    first_result = cached_client.complete_choice(
+        "Choose one", choices=("Groceries", "Restaurants & Dining Out")
+    )
+
+    second_client = FakeCategoryClient(["Should not be used"])
+    second_cached_client = CachedCategoryModelClient(
+        client=second_client, cache=JsonCallCache(cache_path)
+    )
+    second_result = second_cached_client.complete_choice(
+        "Choose one", choices=("Groceries", "Restaurants & Dining Out")
+    )
+
+    assert first_result == second_result == "Groceries"
+    assert first_client.prompts == ["Choose one"]
+    assert second_client.prompts == []
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert payload["ollama"][0]["request"] == {
+        "prompt": "Choose one",
+        "choices": ["Groceries", "Restaurants & Dining Out"],
+        "format": "category_choice_schema_v1",
+    }
     assert payload["ollama"][0]["response"] == "Groceries"
 
 

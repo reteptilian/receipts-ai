@@ -69,6 +69,26 @@ class UrlLibOllamaClient:
     def complete(self, prompt: str) -> str:
         return self._generate(prompt, options={"temperature": 0}).response
 
+    def complete_choice(self, prompt: str, *, choices: tuple[str, ...]) -> str:
+        if not choices:
+            raise ValueError("choices must not be empty")
+
+        schema = _category_choice_schema(choices)
+        schema_prompt = (
+            f"{prompt}\n\n"
+            "Return only JSON matching this schema. Do not include explanation text.\n"
+            f"{json.dumps(schema, ensure_ascii=False)}"
+        )
+        completion = self._generate(
+            schema_prompt,
+            options={"temperature": 0},
+            output_format=schema,
+        )
+        choice = _category_choice_from_json_response(completion.response, choices)
+        if choice is not None:
+            return choice
+        return completion.response
+
     def complete_with_probabilities(
         self, prompt: str, *, choices: tuple[str, ...]
     ) -> CategoryCompletion:
@@ -92,6 +112,7 @@ class UrlLibOllamaClient:
         prompt: str,
         *,
         options: dict[str, object],
+        output_format: str | dict[str, object] | None = None,
         logprobs: bool | None = None,
         top_logprobs: int | None = None,
     ) -> _OllamaCompletion:
@@ -103,8 +124,11 @@ class UrlLibOllamaClient:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "think": False,
             "options": options,
         }
+        if output_format is not None:
+            request_payload["format"] = output_format
         if logprobs is not None:
             request_payload["logprobs"] = logprobs
         if top_logprobs is not None:
@@ -239,6 +263,22 @@ class CachedCategoryModelClient:
         response = self._active_client().complete(prompt)
         self.cache.set("ollama", request, response)
         logger.info("Cached Ollama response: prompt_chars=%s", len(prompt))
+        return response
+
+    def complete_choice(self, prompt: str, *, choices: tuple[str, ...]) -> str:
+        request = {
+            "prompt": prompt,
+            "choices": list(choices),
+            "format": "category_choice_schema_v1",
+        }
+        cached_response = self.cache.get("ollama", request)
+        if isinstance(cached_response, str):
+            logger.info("Using cached Ollama choice response: prompt_chars=%s", len(prompt))
+            return cached_response
+
+        response = _complete_choice(self._active_client(), prompt, choices=choices)
+        self.cache.set("ollama", request, response)
+        logger.info("Cached Ollama choice response: prompt_chars=%s", len(prompt))
         return response
 
     def complete_with_probabilities(
@@ -421,7 +461,7 @@ def load_product_taxonomy(path: Path | None = None) -> dict[str, object]:
 
 
 def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple[str, ...]) -> str:
-    response = client.complete(prompt)
+    response = _complete_choice(client, prompt, choices=choices)
     choice = _normalize_choice(response, choices)
     if choice is None:
         options = ", ".join(choices)
@@ -429,6 +469,16 @@ def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple
             f"model returned an invalid category {response!r}; expected one of: {options}"
         )
     return choice
+
+
+def _complete_choice(client: CategoryModelClient, prompt: str, *, choices: tuple[str, ...]) -> str:
+    complete_choice = getattr(client, "complete_choice", None)
+    if callable(complete_choice):
+        response = complete_choice(prompt, choices=choices)
+        if isinstance(response, str):
+            return response
+
+    return client.complete(prompt)
 
 
 def _search_taxonomy_path(
@@ -813,6 +863,39 @@ def _set_item_taxonomy(item: ReceiptItem, selected_path: list[str]) -> None:
     for level in range(1, MAX_TAXONOMY_LEVELS + 1):
         value = selected_path[level - 1] if level <= len(selected_path) else None
         setattr(item, f"taxonomy{level}", value)
+
+
+def _category_choice_schema(choices: tuple[str, ...]) -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "category": {
+                "type": "string",
+                "enum": list(choices),
+            }
+        },
+        "required": ["category"],
+        "additionalProperties": False,
+    }
+
+
+def _category_choice_from_json_response(
+    response: str, choices: tuple[str, ...]
+) -> str | None:
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(payload, str):
+        return _normalize_choice(payload, choices)
+    if not isinstance(payload, dict):
+        return None
+
+    category = cast(dict[str, object], payload).get("category")
+    if not isinstance(category, str):
+        return None
+    return _normalize_choice(category, choices)
 
 
 def _default_product_taxonomy_path() -> Path:
