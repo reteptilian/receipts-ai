@@ -716,6 +716,14 @@ def test_url_lib_ollama_client_logs_endpoint_and_model(
         "Received Ollama generate response: url=http://example.test:11434/api/generate "
         "model=llama3.2"
     ) in caplog.text
+    assert "timeout_seconds=30.0" in caplog.text
+    assert "stream=False" in caplog.text
+    assert "think=False" in caplog.text
+    assert "format=unset" in caplog.text
+    assert "logprobs=unset" in caplog.text
+    assert "top_logprobs=unset" in caplog.text
+    assert 'options={"temperature":0}' in caplog.text
+    assert "payload_bytes=" in caplog.text
 
 
 def test_url_lib_ollama_client_debug_logs_generate_stats(

@@ -142,10 +142,20 @@ class UrlLibOllamaClient:
         )
 
         logger.info(
-            "Sending Ollama generate request: url=%s model=%s prompt_chars=%s",
+            "Sending Ollama generate request: url=%s model=%s prompt_chars=%s "
+            "timeout_seconds=%s stream=%s think=%s format=%s logprobs=%s "
+            "top_logprobs=%s options=%s payload_bytes=%s",
             self.generate_url,
             self.model,
             len(prompt),
+            self.timeout_seconds,
+            request_payload["stream"],
+            request_payload["think"],
+            _format_ollama_request_value(request_payload.get("format")),
+            request_payload.get("logprobs", "unset"),
+            request_payload.get("top_logprobs", "unset"),
+            _format_ollama_request_value(options),
+            len(payload),
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
@@ -197,6 +207,15 @@ class UrlLibOllamaClient:
 class _OllamaCompletion:
     response: str
     raw_response: dict[str, object]
+
+
+def _format_ollama_request_value(value: object) -> str:
+    if value is None:
+        return "unset"
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except TypeError:
+        return repr(value)
 
 
 def _log_ollama_generate_stats(response: dict[str, object], *, url: str, model: str) -> None:
