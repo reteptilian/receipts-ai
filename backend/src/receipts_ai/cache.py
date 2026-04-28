@@ -36,6 +36,13 @@ class JsonCallCache:
             entries.append(replacement)
         self._save()
 
+    def invalidate_namespace(self, namespace: str) -> int:
+        entries = self._entries(namespace)
+        deleted_count = len(entries)
+        entries.clear()
+        self._save()
+        return deleted_count
+
     def _load(self) -> dict[str, object]:
         if not self.path.exists():
             return {
