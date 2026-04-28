@@ -17,8 +17,10 @@ from receipts_ai.cache import JsonCallCache
 from receipts_ai.models.transaction import ReceiptItem, Transaction
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 30.0
 OLLAMA_URL_ENV_VARS = ("OLLAMA_URL",)
 OLLAMA_MODEL_ENV_VARS = ("OLLAMA_MODEL", "OLLAMA_MODEL_NAME")
+OLLAMA_TIMEOUT_ENV_VARS = ("OLLAMA_TIMEOUT_SECONDS",)
 
 MAX_SEARCH_RESULTS = 5
 MAX_TAXONOMY_SEARCH_PATHS = 5
@@ -54,7 +56,9 @@ class _TaxonomySearchPath:
 
 
 class UrlLibOllamaClient:
-    def __init__(self, *, url: str, model: str, timeout_seconds: float = 30.0) -> None:
+    def __init__(
+        self, *, url: str, model: str, timeout_seconds: float = DEFAULT_OLLAMA_TIMEOUT_SECONDS
+    ) -> None:
         self.url = url.rstrip("/")
         self.generate_url = (
             self.url if self.url.endswith("/api/generate") else f"{self.url}/api/generate"
@@ -122,6 +126,13 @@ class UrlLibOllamaClient:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                 response_payload = response.read().decode("utf-8")
+        except TimeoutError as exc:
+            # socket.timeout is an alias of TimeoutError on supported Python versions.
+            raise RuntimeError(
+                f"Ollama request to {self.generate_url} timed out: "
+                f"model={self.model} prompt_chars={len(prompt)} "
+                f"timeout_seconds={self.timeout_seconds}"
+            ) from exc
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(
@@ -150,6 +161,11 @@ class UrlLibOllamaClient:
             "logprobs" in result_object,
             ", ".join(sorted(result_object.keys())),
         )
+        _log_ollama_generate_stats(
+            result_object,
+            url=self.generate_url,
+            model=self.model,
+        )
         return _OllamaCompletion(response=response_text, raw_response=result_object)
 
 
@@ -157,6 +173,46 @@ class UrlLibOllamaClient:
 class _OllamaCompletion:
     response: str
     raw_response: dict[str, object]
+
+
+def _log_ollama_generate_stats(response: dict[str, object], *, url: str, model: str) -> None:
+    logger.debug(
+        "Ollama generate stats: url=%s model=%s total=%s load=%s "
+        "prompt_eval=%s eval=%s prompt_tokens=%s eval_tokens=%s eval_tokens_per_second=%s",
+        url,
+        model,
+        _format_ollama_duration(response.get("total_duration")),
+        _format_ollama_duration(response.get("load_duration")),
+        _format_ollama_duration(response.get("prompt_eval_duration")),
+        _format_ollama_duration(response.get("eval_duration")),
+        _format_ollama_count(response.get("prompt_eval_count")),
+        _format_ollama_count(response.get("eval_count")),
+        _format_ollama_eval_rate(response),
+    )
+
+
+def _format_ollama_duration(value: object) -> str:
+    if not isinstance(value, int | float):
+        return "unknown"
+    return f"{float(value) / 1_000_000_000:.3f}s"
+
+
+def _format_ollama_count(value: object) -> str:
+    if not isinstance(value, int | float):
+        return "unknown"
+    return str(int(value))
+
+
+def _format_ollama_eval_rate(response: dict[str, object]) -> str:
+    eval_count = response.get("eval_count")
+    eval_duration = response.get("eval_duration")
+    if (
+        not isinstance(eval_count, int | float)
+        or not isinstance(eval_duration, int | float)
+        or eval_duration <= 0
+    ):
+        return "unknown"
+    return f"{float(eval_count) / (float(eval_duration) / 1_000_000_000):.2f}"
 
 
 class CachedCategoryModelClient:
@@ -235,7 +291,11 @@ class CachedCategoryModelClient:
 
 
 def create_ollama_category_client() -> CategoryModelClient:
-    return UrlLibOllamaClient(url=_ollama_url(), model=_ollama_model())
+    return UrlLibOllamaClient(
+        url=_ollama_url(),
+        model=_ollama_model(),
+        timeout_seconds=_ollama_timeout_seconds(),
+    )
 
 
 def clean_receipt_item_descriptions(
@@ -939,3 +999,19 @@ def _ollama_model() -> str:
 
     env_var_list = ", ".join(OLLAMA_MODEL_ENV_VARS)
     raise RuntimeError(f"Set one of these environment variables: {env_var_list}")
+
+
+def _ollama_timeout_seconds() -> float:
+    for env_var in OLLAMA_TIMEOUT_ENV_VARS:
+        value = os.getenv(env_var)
+        if not value:
+            continue
+        try:
+            timeout_seconds = float(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{env_var} must be a number of seconds") from exc
+        if timeout_seconds <= 0:
+            raise RuntimeError(f"{env_var} must be greater than 0")
+        return timeout_seconds
+
+    return DEFAULT_OLLAMA_TIMEOUT_SECONDS

@@ -436,6 +436,7 @@ def test_categorize_receipt_items_rejects_non_leaf_category_response():
 def test_create_ollama_category_client_uses_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OLLAMA_URL", "http://example.test:11434/")
     monkeypatch.setenv("OLLAMA_MODEL", "llama3.2")
+    monkeypatch.setenv("OLLAMA_TIMEOUT_SECONDS", "45.5")
 
     client = create_ollama_category_client()
 
@@ -443,6 +444,7 @@ def test_create_ollama_category_client_uses_env(monkeypatch: pytest.MonkeyPatch)
     assert client.url == "http://example.test:11434"
     assert client.generate_url == "http://example.test:11434/api/generate"
     assert client.model == "llama3.2"
+    assert client.timeout_seconds == 45.5
 
 
 def test_create_ollama_category_client_defaults_url_and_requires_model(
@@ -451,6 +453,7 @@ def test_create_ollama_category_client_defaults_url_and_requires_model(
     monkeypatch.delenv("OLLAMA_URL", raising=False)
     monkeypatch.delenv("OLLAMA_MODEL", raising=False)
     monkeypatch.delenv("OLLAMA_MODEL_NAME", raising=False)
+    monkeypatch.delenv("OLLAMA_TIMEOUT_SECONDS", raising=False)
 
     with pytest.raises(RuntimeError, match="OLLAMA_MODEL"):
         create_ollama_category_client()
@@ -460,6 +463,22 @@ def test_create_ollama_category_client_defaults_url_and_requires_model(
     assert isinstance(client, UrlLibOllamaClient)
     assert client.url == DEFAULT_OLLAMA_URL
     assert client.generate_url == f"{DEFAULT_OLLAMA_URL}/api/generate"
+    assert client.timeout_seconds == 30.0
+
+
+def test_create_ollama_category_client_rejects_invalid_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("OLLAMA_MODEL", "llama3.2")
+    monkeypatch.setenv("OLLAMA_TIMEOUT_SECONDS", "not-a-number")
+
+    with pytest.raises(RuntimeError, match="OLLAMA_TIMEOUT_SECONDS must be a number"):
+        create_ollama_category_client()
+
+    monkeypatch.setenv("OLLAMA_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(RuntimeError, match="OLLAMA_TIMEOUT_SECONDS must be greater than 0"):
+        create_ollama_category_client()
 
 
 def test_url_lib_ollama_client_posts_generate_request(monkeypatch: pytest.MonkeyPatch):
@@ -620,6 +639,38 @@ def test_url_lib_ollama_client_logs_endpoint_and_model(
     ) in caplog.text
 
 
+def test_url_lib_ollama_client_debug_logs_generate_stats(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        assert request.full_url == "http://example.test:11434/api/generate"
+        assert timeout == 30.0
+        return FakeResponse(
+            {
+                "response": "Groceries",
+                "total_duration": 11_500_000_000,
+                "load_duration": 500_000_000,
+                "prompt_eval_count": 42,
+                "prompt_eval_duration": 2_000_000_000,
+                "eval_count": 9,
+                "eval_duration": 3_000_000_000,
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = UrlLibOllamaClient(url="http://example.test:11434", model="llama3.2")
+
+    with caplog.at_level("DEBUG", logger="receipts_ai.categorization"):
+        client.complete("Choose one")
+
+    assert (
+        "Ollama generate stats: url=http://example.test:11434/api/generate "
+        "model=llama3.2 total=11.500s load=0.500s prompt_eval=2.000s "
+        "eval=3.000s prompt_tokens=42 eval_tokens=9 eval_tokens_per_second=3.00"
+    ) in caplog.text
+
+
 def test_url_lib_ollama_client_error_includes_endpoint(monkeypatch: pytest.MonkeyPatch):
     def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
         assert timeout == 30.0
@@ -639,3 +690,25 @@ def test_url_lib_ollama_client_error_includes_endpoint(monkeypatch: pytest.Monke
         match="Ollama request to http://example.test:11434/api/generate failed with HTTP 404",
     ):
         client.complete("Choose one")
+
+
+def test_url_lib_ollama_client_timeout_error_includes_context(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_urlopen(_request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        assert timeout == 12.5
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = UrlLibOllamaClient(
+        url="http://example.test:11434", model="llama3.2", timeout_seconds=12.5
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        client.complete("Choose one")
+
+    message = str(exc_info.value)
+    assert "Ollama request to http://example.test:11434/api/generate timed out" in message
+    assert "model=llama3.2" in message
+    assert "prompt_chars=10" in message
+    assert "timeout_seconds=12.5" in message
