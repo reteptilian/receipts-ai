@@ -40,6 +40,7 @@ classifiers = [
 
 dependencies = [
     "azure-ai-documentintelligence>=1.0.2",
+    "firebase-admin>=7.4.0",
     "pydantic>=2.12.5",
 ]
 
