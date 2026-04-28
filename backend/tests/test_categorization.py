@@ -6,11 +6,14 @@ import urllib.request
 from datetime import date
 from email.message import Message
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
+from receipts_ai.cache import JsonCallCache
 from receipts_ai.categorization import (
     DEFAULT_OLLAMA_URL,
+    CachedCategoryModelClient,
     UrlLibOllamaClient,
     categorize_receipt_items,
     create_ollama_category_client,
@@ -170,6 +173,48 @@ def test_url_lib_ollama_client_posts_generate_request(monkeypatch: pytest.Monkey
         "stream": False,
         "options": {"temperature": 0},
     }
+
+
+def test_cached_category_model_client_reuses_json_file(tmp_path: Path):
+    cache_path = tmp_path / "api-cache.json"
+    first_client = FakeCategoryClient(["Groceries"])
+    cached_client = CachedCategoryModelClient(client=first_client, cache=JsonCallCache(cache_path))
+
+    first_result = cached_client.complete("Choose one")
+
+    second_client = FakeCategoryClient(["Should not be used"])
+    second_cached_client = CachedCategoryModelClient(
+        client=second_client, cache=JsonCallCache(cache_path)
+    )
+    second_result = second_cached_client.complete("Choose one")
+
+    assert first_result == second_result == "Groceries"
+    assert first_client.prompts == ["Choose one"]
+    assert second_client.prompts == []
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert payload["ollama"][0]["request"] == {"prompt": "Choose one"}
+    assert payload["ollama"][0]["response"] == "Groceries"
+
+
+def test_cached_category_model_client_does_not_create_client_on_cache_hit(tmp_path: Path):
+    cache_path = tmp_path / "api-cache.json"
+    cache = JsonCallCache(cache_path)
+    cache.set("ollama", {"prompt": "Choose one"}, "Groceries")
+    factory_calls = 0
+
+    def client_factory() -> FakeCategoryClient:
+        nonlocal factory_calls
+        factory_calls += 1
+        return FakeCategoryClient(["Should not be used"])
+
+    client = CachedCategoryModelClient(
+        cache=JsonCallCache(cache_path), client_factory=client_factory
+    )
+
+    result = client.complete("Choose one")
+
+    assert result == "Groceries"
+    assert factory_calls == 0
 
 
 def test_url_lib_ollama_client_accepts_generate_endpoint_url(

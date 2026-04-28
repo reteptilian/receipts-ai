@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Protocol, cast
+
+from receipts_ai.cache import JsonCallCache
 
 DEFAULT_RECEIPT_MODEL_ID = "prebuilt-receipt"
 ENDPOINT_ENV_VARS = (
@@ -15,23 +19,55 @@ KEY_ENV_VARS = (
     "DOCUMENTINTELLIGENCE_API_KEY",
 )
 
+logger = logging.getLogger(__name__)
+
 
 class AnalyzeDocumentClient(Protocol):
     def begin_analyze_document(self, model_id: str, body: object) -> Any: ...
 
 
-def analyze_receipt_file(path: str | Path, *, client: AnalyzeDocumentClient | None = None) -> Any:
-    return analyze_receipt_bytes(Path(path).read_bytes(), client=client)
+def analyze_receipt_file(
+    path: str | Path,
+    *,
+    client: AnalyzeDocumentClient | None = None,
+    cache: JsonCallCache | None = None,
+) -> Any:
+    return analyze_receipt_bytes(Path(path).read_bytes(), client=client, cache=cache)
 
 
-def analyze_receipt_bytes(document: bytes, *, client: AnalyzeDocumentClient | None = None) -> Any:
+def analyze_receipt_bytes(
+    document: bytes,
+    *,
+    client: AnalyzeDocumentClient | None = None,
+    cache: JsonCallCache | None = None,
+) -> Any:
     if not document:
         raise ValueError("document must not be empty")
+
+    cache_request = {
+        "document_sha256": hashlib.sha256(document).hexdigest(),
+        "model_id": DEFAULT_RECEIPT_MODEL_ID,
+    }
+    if cache is not None:
+        cached_response = cache.get("azure_document_intelligence", cache_request)
+        if cached_response is not None:
+            logger.info(
+                "Using cached Azure Document Intelligence response: document_sha256=%s",
+                cache_request["document_sha256"],
+            )
+            return cached_response
 
     active_client = client if client is not None else create_document_intelligence_client()
     request = _new_analyze_document_request(document)
     poller = active_client.begin_analyze_document(DEFAULT_RECEIPT_MODEL_ID, request)
-    return poller.result()
+    result = poller.result()
+    if cache is not None:
+        cache.set("azure_document_intelligence", cache_request, to_jsonable(result))
+        logger.info(
+            "Cached Azure Document Intelligence response: document_sha256=%s",
+            cache_request["document_sha256"],
+        )
+    return result
 
 
 def create_document_intelligence_client() -> AnalyzeDocumentClient:

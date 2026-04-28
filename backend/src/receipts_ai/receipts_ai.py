@@ -7,8 +7,17 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
-from receipts_ai.brave_search import enrich_receipt_items_with_brave_search
-from receipts_ai.categorization import categorize_receipt_items
+from receipts_ai.brave_search import (
+    CachedBraveSearchClient,
+    create_brave_search_client,
+    enrich_receipt_items_with_brave_search,
+)
+from receipts_ai.cache import JsonCallCache
+from receipts_ai.categorization import (
+    CachedCategoryModelClient,
+    categorize_receipt_items,
+    create_ollama_category_client,
+)
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.models.transaction import Receipt, Transaction
 from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
@@ -73,6 +82,11 @@ def main() -> None:
         help="Use Ollama to populate each receipt item categoryId from Brave Search results.",
     )
     parser.add_argument(
+        "--cache-file",
+        type=Path,
+        help="Cache Azure Document Intelligence, Brave Search, and Ollama responses in this JSON file.",
+    )
+    parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
         default="WARNING",
@@ -81,17 +95,39 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
-    result = analyze_receipt_file(args.receipt)
+    cache = JsonCallCache(args.cache_file) if args.cache_file is not None else None
+    result = (
+        analyze_receipt_file(args.receipt, cache=cache)
+        if cache is not None
+        else analyze_receipt_file(args.receipt)
+    )
     transaction = transaction_from_document_intelligence_result(result)
     if transaction.receipt is None:
         raise ValueError("transaction does not contain a receipt")
 
     if args.brave_search or args.categorize_items:
-        enrich_receipt_items_with_brave_search(
-            transaction, request_delay_seconds=args.brave_search_delay_seconds
-        )
+        if cache is not None:
+            enrich_receipt_items_with_brave_search(
+                transaction,
+                client=CachedBraveSearchClient(
+                    cache=cache, client_factory=create_brave_search_client
+                ),
+                request_delay_seconds=args.brave_search_delay_seconds,
+            )
+        else:
+            enrich_receipt_items_with_brave_search(
+                transaction, request_delay_seconds=args.brave_search_delay_seconds
+            )
     if args.categorize_items:
-        categorize_receipt_items(transaction)
+        if cache is not None:
+            categorize_receipt_items(
+                transaction,
+                client=CachedCategoryModelClient(
+                    cache=cache, client_factory=create_ollama_category_client
+                ),
+            )
+        else:
+            categorize_receipt_items(transaction)
     _write_transaction(transaction, output_format=args.format, output_path=args.output)
 
 

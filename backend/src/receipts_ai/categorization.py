@@ -6,9 +6,11 @@ import os
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from importlib import resources
 from typing import Protocol, cast
 
+from receipts_ai.cache import JsonCallCache
 from receipts_ai.models.transaction import ReceiptItem, Transaction
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
@@ -86,6 +88,40 @@ class UrlLibOllamaClient:
             len(response_text),
         )
         return response_text
+
+
+class CachedCategoryModelClient:
+    def __init__(
+        self,
+        *,
+        cache: JsonCallCache,
+        client: CategoryModelClient | None = None,
+        client_factory: Callable[[], CategoryModelClient] | None = None,
+    ) -> None:
+        if client is None and client_factory is None:
+            raise ValueError("client or client_factory is required")
+        self.cache = cache
+        self._client = client
+        self._client_factory = client_factory
+
+    def complete(self, prompt: str) -> str:
+        request = {"prompt": prompt}
+        cached_response = self.cache.get("ollama", request)
+        if isinstance(cached_response, str):
+            logger.info("Using cached Ollama response: prompt_chars=%s", len(prompt))
+            return cached_response
+
+        response = self._active_client().complete(prompt)
+        self.cache.set("ollama", request, response)
+        logger.info("Cached Ollama response: prompt_chars=%s", len(prompt))
+        return response
+
+    def _active_client(self) -> CategoryModelClient:
+        if self._client is None:
+            if self._client_factory is None:
+                raise RuntimeError("client_factory is not configured")
+            self._client = self._client_factory()
+        return self._client
 
 
 def create_ollama_category_client() -> CategoryModelClient:

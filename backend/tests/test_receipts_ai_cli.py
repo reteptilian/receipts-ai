@@ -253,6 +253,154 @@ def test_main_can_enrich_items_with_brave_search(
     assert receipt.items[0].brave_search_result == "search payload"
 
 
+def test_main_wraps_brave_search_client_when_cache_file_is_provided(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"receipt")
+    cache_path = tmp_path / "api-cache.json"
+    receipt = Receipt(
+        items=[ReceiptItem(description="Coffee", raw_description="COF", amount="7.00")]
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=receipt,
+    )
+
+    class FakeBraveClient:
+        def search(self, query: str) -> dict[str, object]:
+            return {"query": query}
+
+    def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:
+        return transaction
+
+    def fake_analyze_receipt_file(path: Path, *, cache: object) -> dict[str, Path]:
+        assert cache.__class__.__name__ == "JsonCallCache"
+        return {"result": path}
+
+    def fake_enrich_receipt_items_with_brave_search(
+        transaction_to_enrich: Transaction,
+        *,
+        client: object,
+        request_delay_seconds: float | None = None,
+    ) -> Transaction:
+        assert request_delay_seconds is None
+        assert client.__class__.__name__ == "CachedBraveSearchClient"
+        assert transaction_to_enrich.receipt is not None
+        transaction_to_enrich.receipt.items[0].brave_search_result = "search payload"
+        return transaction_to_enrich
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai",
+            "--brave-search",
+            "--cache-file",
+            str(cache_path),
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        receipts_ai,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+    monkeypatch.setattr(receipts_ai, "create_brave_search_client", lambda: FakeBraveClient())
+    monkeypatch.setattr(
+        receipts_ai,
+        "enrich_receipt_items_with_brave_search",
+        fake_enrich_receipt_items_with_brave_search,
+    )
+
+    main()
+
+    assert receipt.items[0].brave_search_result == "search payload"
+
+
+def test_main_wraps_ollama_client_when_cache_file_is_provided(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"receipt")
+    cache_path = tmp_path / "api-cache.json"
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+    )
+
+    class FakeBraveClient:
+        def search(self, query: str) -> dict[str, object]:
+            return {"query": query}
+
+    class FakeCategoryClient:
+        def complete(self, prompt: str) -> str:
+            return "Food & Dining" if "top level" in prompt else "Fast Food & Coffee"
+
+    def fake_analyze_receipt_file(path: Path, *, cache: object) -> dict[str, Path]:
+        assert cache.__class__.__name__ == "JsonCallCache"
+        return {"result": path}
+
+    def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:
+        return transaction
+
+    def fake_enrich_receipt_items_with_brave_search(
+        transaction_to_enrich: Transaction,
+        *,
+        client: object,
+        request_delay_seconds: float | None = None,
+    ) -> Transaction:
+        assert client.__class__.__name__ == "CachedBraveSearchClient"
+        assert request_delay_seconds is None
+        return transaction_to_enrich
+
+    def fake_categorize_receipt_items(
+        transaction_to_categorize: Transaction, *, client: object
+    ) -> Transaction:
+        assert client.__class__.__name__ == "CachedCategoryModelClient"
+        assert transaction_to_categorize.receipt is not None
+        transaction_to_categorize.receipt.items[0].category_id = "Fast Food & Coffee"
+        return transaction_to_categorize
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["receipts-ai", "--categorize-items", "--cache-file", str(cache_path), str(receipt_path)],
+    )
+    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        receipts_ai,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+    monkeypatch.setattr(receipts_ai, "create_brave_search_client", lambda: FakeBraveClient())
+    monkeypatch.setattr(receipts_ai, "create_ollama_category_client", lambda: FakeCategoryClient())
+    monkeypatch.setattr(
+        receipts_ai,
+        "enrich_receipt_items_with_brave_search",
+        fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
+
+    main()
+
+    assert transaction.receipt is not None
+    assert transaction.receipt.items[0].category_id == "Fast Food & Coffee"
+
+
 def test_main_can_categorize_items_after_brave_search(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

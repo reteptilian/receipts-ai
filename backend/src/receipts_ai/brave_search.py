@@ -11,6 +11,7 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Any, Protocol, cast
 
+from receipts_ai.cache import JsonCallCache
 from receipts_ai.models.transaction import ReceiptItem, Transaction
 
 DEFAULT_BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
@@ -68,6 +69,43 @@ class UrlLibBraveSearchClient:
         return result
 
 
+class CachedBraveSearchClient:
+    def __init__(
+        self,
+        *,
+        cache: JsonCallCache,
+        client: BraveSearchClient | None = None,
+        client_factory: Callable[[], BraveSearchClient] | None = None,
+    ) -> None:
+        if client is None and client_factory is None:
+            raise ValueError("client or client_factory is required")
+        self.cache = cache
+        self._client = client
+        self._client_factory = client_factory
+
+    def search(self, query: str) -> Any:
+        request = {"query": query}
+        cached_response = self.cache.get("brave_search", request)
+        if cached_response is not None:
+            logger.info("Using cached Brave Search response for query: %s", query)
+            return cached_response
+
+        result = self._active_client().search(query)
+        self.cache.set("brave_search", request, result)
+        logger.info("Cached Brave Search response for query: %s", query)
+        return result
+
+    def is_cached(self, query: str) -> bool:
+        return self.cache.get("brave_search", {"query": query}) is not None
+
+    def _active_client(self) -> BraveSearchClient:
+        if self._client is None:
+            if self._client_factory is None:
+                raise RuntimeError("client_factory is not configured")
+            self._client = self._client_factory()
+        return self._client
+
+
 def create_brave_search_client() -> BraveSearchClient:
     return UrlLibBraveSearchClient(endpoint=_brave_search_endpoint(), key=_brave_search_key())
 
@@ -91,11 +129,17 @@ def enrich_receipt_items_with_brave_search(
     if active_request_delay_seconds < 0:
         raise ValueError("request_delay_seconds must not be negative")
 
+    sent_live_request = False
     for index, item in enumerate(transaction.receipt.items):
         query = _receipt_item_query(transaction.payee, item)
         if not query:
             continue
-        if index > 0 and active_request_delay_seconds > 0:
+        query_is_cached = (
+            active_client.is_cached(query)
+            if isinstance(active_client, CachedBraveSearchClient)
+            else False
+        )
+        if sent_live_request and not query_is_cached and active_request_delay_seconds > 0:
             logger.info(
                 "Sleeping %.2f seconds before the next Brave Search query",
                 active_request_delay_seconds,
@@ -103,6 +147,8 @@ def enrich_receipt_items_with_brave_search(
             sleep(active_request_delay_seconds)
         logger.info("Enriching receipt item %s with Brave Search: %s", index + 1, query)
         result = active_client.search(query)
+        if not query_is_cached:
+            sent_live_request = True
         item.brave_search_result = json.dumps(_search_result_summaries(result), sort_keys=True)
         logger.info("Stored Brave Search response on receipt item %s", index + 1)
     return transaction
