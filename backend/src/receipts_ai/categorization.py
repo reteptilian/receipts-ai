@@ -15,6 +15,8 @@ DEFAULT_OLLAMA_URL = "http://localhost:11434"
 OLLAMA_URL_ENV_VARS = ("OLLAMA_URL",)
 OLLAMA_MODEL_ENV_VARS = ("OLLAMA_MODEL", "OLLAMA_MODEL_NAME")
 
+MAX_SEARCH_RESULTS = 5
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,6 +37,7 @@ class UrlLibOllamaClient:
         if not prompt:
             raise ValueError("prompt must not be empty")
 
+        logger.debug("Prompt: %s", prompt)
         payload = json.dumps(
             {
                 "model": self.model,
@@ -200,7 +203,7 @@ def _search_results_text(item: ReceiptItem) -> str:
             )
         )
 
-    return "\n".join(lines) if lines else "No search results."
+    return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
 
 
 def _leaf_categories(node: object) -> list[str]:
