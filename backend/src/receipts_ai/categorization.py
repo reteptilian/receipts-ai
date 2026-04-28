@@ -68,7 +68,9 @@ class UrlLibOllamaClient:
         self.timeout_seconds = timeout_seconds
 
     def complete(self, prompt: str) -> str:
-        return self._generate(prompt, options={"temperature": 0}).response
+        return self._generate(
+            prompt, options={"temperature": 0, "num_predict": 64, "stop": ["\n"]}
+        ).response
 
     def complete_choice(self, prompt: str, *, choices: tuple[str, ...]) -> str:
         if not choices:
@@ -920,9 +922,7 @@ def _category_choice_schema(choices: tuple[str, ...]) -> dict[str, object]:
     }
 
 
-def _category_choice_from_json_response(
-    response: str, choices: tuple[str, ...]
-) -> str | None:
+def _category_choice_from_json_response(response: str, choices: tuple[str, ...]) -> str | None:
     try:
         payload = json.loads(response)
     except json.JSONDecodeError:
