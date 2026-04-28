@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import sys
 from datetime import date
 from io import StringIO
@@ -19,6 +20,8 @@ from receipts_ai.models.transaction import (
 from receipts_ai.receipts_ai import (
     CSV_FIELDNAMES,
     main,
+    transaction_firestore_document,
+    upsert_transaction_to_firestore,
     write_receipt_items_csv,
     write_receipt_json,
     write_transaction_json,
@@ -199,6 +202,90 @@ def test_transaction_json_output_wraps_nested_receipt_struct():
     assert '"payee": "Coffee Shop"' in output.getvalue()
     assert '"receipt": {' in output.getvalue()
     assert '"rawDescription": "COF"' in output.getvalue()
+
+
+def test_transaction_firestore_document_uses_json_safe_aliases():
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(
+            total="7.00",
+            items=[ReceiptItem(description="Coffee", raw_description="COF", amount="7.00")],
+        ),
+    )
+
+    document = transaction_firestore_document(transaction)
+
+    assert document["transactionDate"] == "2026-04-27"
+    assert document["source"] == "receipt"
+    assert document["receipt"] == {
+        "total": "7.00",
+        "items": [
+            {
+                "description": "Coffee",
+                "rawDescription": "COF",
+                "amount": "7.00",
+                "lineType": "item",
+            }
+        ],
+    }
+
+
+def test_upsert_transaction_to_firestore_merges_transaction_document(
+    caplog: pytest.LogCaptureFixture,
+):
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+    )
+    calls: list[tuple[str, str, dict[str, object], bool]] = []
+
+    class FakeDocument:
+        def __init__(self, collection: str, document_id: str) -> None:
+            self.collection = collection
+            self.document_id = document_id
+
+        def set(self, document_data: dict[str, object], *, merge: bool = False) -> None:
+            calls.append((self.collection, self.document_id, document_data, merge))
+
+    class FakeCollection:
+        def __init__(self, collection: str) -> None:
+            self.collection = collection
+
+        def document(self, document_id: str) -> FakeDocument:
+            return FakeDocument(self.collection, document_id)
+
+    class FakeFirestoreClient:
+        def collection(self, collection_path: str) -> FakeCollection:
+            return FakeCollection(collection_path)
+
+    with caplog.at_level(logging.INFO, logger=receipts_ai.__name__):
+        upsert_transaction_to_firestore(
+            transaction, client=FakeFirestoreClient(), collection="test-transactions"
+        )
+
+    assert calls == [
+        (
+            "test-transactions",
+            "receipt_1",
+            transaction_firestore_document(transaction),
+            True,
+        )
+    ]
+    assert "Upserting transaction receipt_1 to Firestore collection test-transactions" in caplog.text
+    assert (
+        "Firestore upsert completed for transaction receipt_1 in collection test-transactions"
+        in caplog.text
+    )
 
 
 def test_json_output_includes_receipt_item_category():
@@ -583,3 +670,88 @@ def test_main_can_categorize_items_after_brave_search(
     assert calls == ["brave", "clean", "categorize", "taxonomy"]
     assert receipt.items[0].category_id == "Groceries"
     assert receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"
+
+
+def test_main_can_upsert_processed_transaction_to_firestore(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"receipt")
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+    )
+    upserts: list[tuple[Transaction, str]] = []
+
+    def fake_analyze_receipt_file(path: Path) -> dict[str, Path]:
+        return {"result": path}
+
+    def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:
+        return transaction
+
+    def fake_enrich_receipt_items_with_brave_search(
+        transaction_to_enrich: Transaction, *, request_delay_seconds: float | None = None
+    ) -> Transaction:
+        assert request_delay_seconds is None
+        assert transaction_to_enrich.receipt is not None
+        transaction_to_enrich.receipt.items[0].brave_search_result = "search payload"
+        return transaction_to_enrich
+
+    def fake_clean_receipt_item_descriptions(
+        transaction_to_clean: Transaction,
+    ) -> Transaction:
+        assert transaction_to_clean.receipt is not None
+        transaction_to_clean.receipt.items[0].description = "Clean Coffee"
+        return transaction_to_clean
+
+    def fake_upsert_transaction_to_firestore(
+        transaction_to_upsert: Transaction, *, collection: str
+    ) -> None:
+        upserts.append((transaction_to_upsert, collection))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai",
+            "--brave-search",
+            "--upsert-firestore",
+            "--firestore-collection",
+            "processed-transactions",
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        receipts_ai,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "enrich_receipt_items_with_brave_search",
+        fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "clean_receipt_item_descriptions",
+        fake_clean_receipt_item_descriptions,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "upsert_transaction_to_firestore",
+        fake_upsert_transaction_to_firestore,
+    )
+
+    main()
+
+    assert upserts == [(transaction, "processed-transactions")]
+    assert transaction.receipt is not None
+    assert transaction.receipt.items[0].description == "Clean Coffee"
+    assert transaction.receipt.items[0].brave_search_result == "search payload"

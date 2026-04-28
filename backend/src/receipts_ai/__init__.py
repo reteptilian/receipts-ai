@@ -7,10 +7,13 @@ __all__ = (  # noqa: F405
     "clean_receipt_item_descriptions",
     "create_brave_search_client",
     "create_document_intelligence_client",
+    "create_firestore_client",
     "create_ollama_category_client",
     "enrich_receipt_items_with_brave_search",
     "main",
     "receipt_from_document_intelligence_result",
+    "transaction_firestore_document",
+    "upsert_transaction_to_firestore",
 )
 
 from .brave_search import *  # noqa: F403

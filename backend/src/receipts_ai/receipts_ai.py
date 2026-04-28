@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import TextIO
+from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
 
 from receipts_ai.brave_search import (
     CachedBraveSearchClient,
@@ -23,6 +25,9 @@ from receipts_ai.categorization import (
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.models.transaction import Receipt, Transaction
 from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
+
+if TYPE_CHECKING:
+    from firebase_admin import App
 
 CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
@@ -61,6 +66,29 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "item_taxonomy_9",
     "item_confidence",
 )
+
+DEFAULT_FIRESTORE_COLLECTION = "transactions"
+DEFAULT_FIREBASE_EMULATOR_PROJECT_ID = "receipts-ai-local"
+FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR = "FIREBASE_SERVICE_ACCT_KEY_FILEPATH"
+FIRESTORE_EMULATOR_HOST_ENV_VAR = "FIRESTORE_EMULATOR_HOST"
+FIRESTORE_PROJECT_ID_ENV_VARS = (
+    "FIREBASE_PROJECT_ID",
+    "GOOGLE_CLOUD_PROJECT",
+    "GCLOUD_PROJECT",
+)
+LOGGER = logging.getLogger(__name__)
+
+
+class FirestoreDocumentReference(Protocol):
+    def set(self, document_data: dict[str, Any], *, merge: bool = False) -> object: ...
+
+
+class FirestoreCollectionReference(Protocol):
+    def document(self, document_id: str) -> FirestoreDocumentReference: ...
+
+
+class FirestoreClient(Protocol):
+    def collection(self, collection_path: str) -> FirestoreCollectionReference: ...
 
 
 def main() -> None:
@@ -105,6 +133,20 @@ def main() -> None:
         "--cache-file",
         type=Path,
         help="Cache Azure Document Intelligence, Brave Search, and Ollama responses in this JSON file.",
+    )
+    parser.add_argument(
+        "--upsert-firestore",
+        action="store_true",
+        help=(
+            "Upsert the processed transaction into Cloud Firestore. Set "
+            "FIRESTORE_EMULATOR_HOST for a local emulator or "
+            "FIREBASE_SERVICE_ACCT_KEY_FILEPATH for production."
+        ),
+    )
+    parser.add_argument(
+        "--firestore-collection",
+        default=DEFAULT_FIRESTORE_COLLECTION,
+        help=f"Firestore collection to upsert into. Defaults to {DEFAULT_FIRESTORE_COLLECTION}.",
     )
     parser.add_argument(
         "--log-level",
@@ -155,7 +197,133 @@ def main() -> None:
         else:
             categorize_receipt_items(transaction)
             classify_receipt_items_by_product_taxonomy(transaction)
+    if args.upsert_firestore:
+        upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
     _write_transaction(transaction, output_format=args.format, output_path=args.output)
+
+
+def create_firestore_client() -> FirestoreClient:
+    emulator_host = os.getenv(FIRESTORE_EMULATOR_HOST_ENV_VAR)
+    service_account_key_filepath = os.getenv(FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR)
+
+    if emulator_host:
+        LOGGER.info(
+            "Creating Firestore client for emulator at %s using project %s",
+            emulator_host,
+            _firestore_project_id(),
+        )
+        return _create_firestore_emulator_client()
+
+    if service_account_key_filepath:
+        LOGGER.info(
+            "Creating Firestore client from service account file %s",
+            service_account_key_filepath,
+        )
+        return _create_firestore_service_account_client(Path(service_account_key_filepath))
+
+    raise RuntimeError(
+        "Set FIRESTORE_EMULATOR_HOST to use the local Firestore emulator or "
+        "FIREBASE_SERVICE_ACCT_KEY_FILEPATH to use production Cloud Firestore."
+    )
+
+
+def upsert_transaction_to_firestore(
+    transaction: Transaction,
+    *,
+    client: FirestoreClient | None = None,
+    collection: str = DEFAULT_FIRESTORE_COLLECTION,
+) -> None:
+    if not collection:
+        raise ValueError("collection must not be empty")
+
+    firestore_client = client if client is not None else create_firestore_client()
+    document = transaction_firestore_document(transaction)
+    item_count = len(transaction.receipt.items) if transaction.receipt is not None else 0
+    LOGGER.info(
+        "Upserting transaction %s to Firestore collection %s with %d receipt item(s)",
+        transaction.id,
+        collection,
+        item_count,
+    )
+    LOGGER.debug(
+        "Firestore document %s/%s top-level fields: %s",
+        collection,
+        transaction.id,
+        sorted(document),
+    )
+    try:
+        firestore_client.collection(collection).document(transaction.id).set(document, merge=True)
+    except Exception:
+        LOGGER.exception(
+            "Firestore upsert failed for transaction %s in collection %s",
+            transaction.id,
+            collection,
+        )
+        raise
+    LOGGER.info(
+        "Firestore upsert completed for transaction %s in collection %s",
+        transaction.id,
+        collection,
+    )
+
+
+def transaction_firestore_document(transaction: Transaction) -> dict[str, Any]:
+    return transaction.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def _create_firestore_emulator_client() -> FirestoreClient:
+    from firebase_admin import firestore
+    from google.auth.credentials import AnonymousCredentials
+
+    # from google.cloud import firestore
+
+    project_id = _firestore_project_id()
+    cred = AnonymousCredentials()
+    LOGGER.debug("Initializing Firebase app for Firestore emulator with project %s", project_id)
+    app = _firebase_app(
+        name="receipts-ai-firestore-emulator", options={"projectId": project_id}, credential=cred
+    )
+    return cast(FirestoreClient, cast(object, firestore.client(app=app)))
+
+
+def _create_firestore_service_account_client(service_account_key_filepath: Path) -> FirestoreClient:
+    from firebase_admin import credentials, firestore
+
+    if not service_account_key_filepath.is_file():
+        raise RuntimeError(
+            f"{FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR} must point to a service account JSON file"
+        )
+
+    LOGGER.debug("Initializing Firebase app with service account credentials")
+    credential = credentials.Certificate(str(service_account_key_filepath))
+    app = _firebase_app(name="receipts-ai-firestore-service-account", credential=credential)
+    return cast(FirestoreClient, cast(object, firestore.client(app=app)))
+
+
+def _firebase_app(
+    *,
+    name: str,
+    credential: Any | None = None,
+    options: dict[str, str] | None = None,
+) -> App:
+    import firebase_admin
+
+    try:
+        return cast("App", firebase_admin.get_app(name))
+    except ValueError:
+        initialize_app = cast(  # type: ignore[reportUnknownMemberType]
+            "Callable[[Any | None, dict[str, str] | None, str], App]",
+            firebase_admin.initialize_app,
+        )
+        return initialize_app(credential, options, name)
+
+
+def _firestore_project_id() -> str:
+    for env_var in FIRESTORE_PROJECT_ID_ENV_VARS:
+        value = os.getenv(env_var)
+        if value:
+            return value
+    return DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
 
 
 def _write_transaction(
