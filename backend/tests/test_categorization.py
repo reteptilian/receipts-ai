@@ -20,6 +20,7 @@ from receipts_ai.categorization import (
     UrlLibOllamaClient,
     categorize_receipt_items,
     classify_receipt_items_by_product_taxonomy,
+    clean_receipt_item_descriptions,
     create_ollama_category_client,
     load_budget_categories,
     load_product_taxonomy,
@@ -103,6 +104,48 @@ def test_load_product_taxonomy_parses_greater_than_levels(tmp_path: Path):
             },
         },
     }
+
+
+def test_clean_receipt_item_descriptions_uses_raw_text_and_top_five_search_results():
+    item = ReceiptItem(
+        description="Confusing receipt text",
+        raw_description="NBSC SALTINE",
+        amount="4.49",
+        brave_search_result=json.dumps(
+            [
+                {
+                    "title": "Nabisco Premium Saltine Crackers",
+                    "description": "Original saltine crackers in a family-size box.",
+                },
+                {"title": "Result 2", "description": "Description 2"},
+                {"title": "Result 3", "description": "Description 3"},
+                {"title": "Result 4", "description": "Description 4"},
+                {"title": "Result 5", "description": "Description 5"},
+                {"title": "Result 6", "description": "Description 6"},
+            ]
+        ),
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="FredMeyer",
+        amount="-4.49",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    client = FakeCategoryClient(['"Nabisco Premium Saltine Crackers"\nExplanation omitted'])
+
+    result = clean_receipt_item_descriptions(transaction, client=client)
+
+    assert result is transaction
+    assert item.description == "Nabisco Premium Saltine Crackers"
+    assert len(client.prompts) == 1
+    assert "Raw receipt text: NBSC SALTINE" in client.prompts[0]
+    assert "Nabisco Premium Saltine Crackers" in client.prompts[0]
+    assert "Original saltine crackers in a family-size box." in client.prompts[0]
+    assert "Result 5" in client.prompts[0]
+    assert "Result 6" not in client.prompts[0]
 
 
 def test_categorize_receipt_items_uses_search_results_and_leaf_category_only():

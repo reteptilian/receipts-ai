@@ -4,6 +4,7 @@ __all__ = (  # noqa: F405
     "analyze_receipt_file",
     "categorize_receipt_items",
     "classify_receipt_items_by_product_taxonomy",
+    "clean_receipt_item_descriptions",
     "create_brave_search_client",
     "create_document_intelligence_client",
     "create_ollama_category_client",

@@ -261,10 +261,23 @@ def test_main_can_enrich_items_with_brave_search(
         transaction_to_enrich.receipt.items[0].brave_search_result = "search payload"
         return transaction_to_enrich
 
+    def fake_clean_receipt_item_descriptions(
+        transaction_to_clean: Transaction,
+    ) -> Transaction:
+        assert transaction_to_clean.receipt is not None
+        assert transaction_to_clean.receipt.items[0].brave_search_result == "search payload"
+        transaction_to_clean.receipt.items[0].description = "Coffee"
+        return transaction_to_clean
+
     monkeypatch.setattr(
         receipts_ai,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "clean_receipt_item_descriptions",
+        fake_clean_receipt_item_descriptions,
     )
 
     main()
@@ -316,6 +329,14 @@ def test_main_wraps_brave_search_client_when_cache_file_is_provided(
         transaction_to_enrich.receipt.items[0].brave_search_result = "search payload"
         return transaction_to_enrich
 
+    def fake_clean_receipt_item_descriptions(
+        transaction_to_clean: Transaction, *, client: object
+    ) -> Transaction:
+        assert client.__class__.__name__ == "CachedCategoryModelClient"
+        assert transaction_to_clean.receipt is not None
+        assert transaction_to_clean.receipt.items[0].brave_search_result == "search payload"
+        return transaction_to_clean
+
     monkeypatch.setattr(
         sys,
         "argv",
@@ -338,6 +359,11 @@ def test_main_wraps_brave_search_client_when_cache_file_is_provided(
         receipts_ai,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "clean_receipt_item_descriptions",
+        fake_clean_receipt_item_descriptions,
     )
 
     main()
@@ -395,6 +421,14 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
         transaction_to_categorize.receipt.items[0].category_id = "Fast Food & Coffee"
         return transaction_to_categorize
 
+    def fake_clean_receipt_item_descriptions(
+        transaction_to_clean: Transaction, *, client: object
+    ) -> Transaction:
+        assert client.__class__.__name__ == "CachedCategoryModelClient"
+        assert transaction_to_clean.receipt is not None
+        transaction_to_clean.receipt.items[0].description = "Coffee"
+        return transaction_to_clean
+
     def fake_classify_receipt_items_by_product_taxonomy(
         transaction_to_classify: Transaction, *, client: object
     ) -> Transaction:
@@ -420,6 +454,11 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
         receipts_ai,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "clean_receipt_item_descriptions",
+        fake_clean_receipt_item_descriptions,
     )
     monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
     monkeypatch.setattr(
@@ -474,8 +513,18 @@ def test_main_can_categorize_items_after_brave_search(
         calls.append("categorize")
         assert transaction_to_categorize.receipt is not None
         assert transaction_to_categorize.receipt.items[0].brave_search_result == "search payload"
+        assert transaction_to_categorize.receipt.items[0].description == "Nabisco Saltine Crackers"
         transaction_to_categorize.receipt.items[0].category_id = "Groceries"
         return transaction_to_categorize
+
+    def fake_clean_receipt_item_descriptions(
+        transaction_to_clean: Transaction,
+    ) -> Transaction:
+        calls.append("clean")
+        assert transaction_to_clean.receipt is not None
+        assert transaction_to_clean.receipt.items[0].brave_search_result == "search payload"
+        transaction_to_clean.receipt.items[0].description = "Nabisco Saltine Crackers"
+        return transaction_to_clean
 
     def fake_classify_receipt_items_by_product_taxonomy(
         transaction_to_classify: Transaction,
@@ -508,6 +557,11 @@ def test_main_can_categorize_items_after_brave_search(
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
     )
+    monkeypatch.setattr(
+        receipts_ai,
+        "clean_receipt_item_descriptions",
+        fake_clean_receipt_item_descriptions,
+    )
     monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
     monkeypatch.setattr(
         receipts_ai,
@@ -517,6 +571,6 @@ def test_main_can_categorize_items_after_brave_search(
 
     main()
 
-    assert calls == ["brave", "categorize", "taxonomy"]
+    assert calls == ["brave", "clean", "categorize", "taxonomy"]
     assert receipt.items[0].category_id == "Groceries"
     assert receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"

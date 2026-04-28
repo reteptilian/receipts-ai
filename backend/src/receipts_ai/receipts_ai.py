@@ -17,6 +17,7 @@ from receipts_ai.categorization import (
     CachedCategoryModelClient,
     categorize_receipt_items,
     classify_receipt_items_by_product_taxonomy,
+    clean_receipt_item_descriptions,
     create_ollama_category_client,
 )
 from receipts_ai.document_intelligence import analyze_receipt_file
@@ -79,7 +80,10 @@ def main() -> None:
     parser.add_argument(
         "--brave-search",
         action="store_true",
-        help="Populate each receipt item braveSearchResult with raw Brave Search JSON.",
+        help=(
+            "Populate each receipt item braveSearchResult with Brave Search summaries "
+            "and clean item descriptions with Ollama."
+        ),
     )
     parser.add_argument(
         "--brave-search-delay-seconds",
@@ -118,6 +122,12 @@ def main() -> None:
     if transaction.receipt is None:
         raise ValueError("transaction does not contain a receipt")
 
+    category_client = (
+        CachedCategoryModelClient(cache=cache, client_factory=create_ollama_category_client)
+        if cache is not None
+        else None
+    )
+
     if args.brave_search or args.categorize_items:
         if cache is not None:
             enrich_receipt_items_with_brave_search(
@@ -131,15 +141,13 @@ def main() -> None:
             enrich_receipt_items_with_brave_search(
                 transaction, request_delay_seconds=args.brave_search_delay_seconds
             )
+        if category_client is not None:
+            clean_receipt_item_descriptions(transaction, client=category_client)
+        else:
+            clean_receipt_item_descriptions(transaction)
     if args.categorize_items:
-        if cache is not None:
-            category_client = CachedCategoryModelClient(
-                cache=cache, client_factory=create_ollama_category_client
-            )
-            categorize_receipt_items(
-                transaction,
-                client=category_client,
-            )
+        if category_client is not None:
+            categorize_receipt_items(transaction, client=category_client)
             classify_receipt_items_by_product_taxonomy(transaction, client=category_client)
         else:
             categorize_receipt_items(transaction)

@@ -238,6 +238,37 @@ def create_ollama_category_client() -> CategoryModelClient:
     return UrlLibOllamaClient(url=_ollama_url(), model=_ollama_model())
 
 
+def clean_receipt_item_descriptions(
+    transaction: Transaction,
+    *,
+    client: CategoryModelClient | None = None,
+) -> Transaction:
+    if transaction.receipt is None:
+        raise ValueError("transaction does not contain a receipt")
+
+    active_client = client if client is not None else create_ollama_category_client()
+
+    for index, item in enumerate(transaction.receipt.items, start=1):
+        logger.info("Cleaning receipt item description %s", index)
+        cleaned_description = _clean_description_response(
+            active_client.complete(_description_prompt(item))
+        )
+        if cleaned_description:
+            item.description = cleaned_description
+            logger.info(
+                "Cleaned receipt item description %s as %s",
+                index,
+                cleaned_description,
+            )
+        else:
+            logger.warning(
+                "Skipping empty cleaned receipt item description for item %s",
+                index,
+            )
+
+    return transaction
+
+
 def categorize_receipt_items(
     transaction: Transaction,
     *,
@@ -633,6 +664,21 @@ def _product_taxonomy_prompt(
     )
 
 
+def _description_prompt(item: ReceiptItem) -> str:
+    raw_description = item.raw_description or item.description
+    return (
+        "Create a clean, unabbreviated, user-facing description for this receipt item.\n"
+        "Use the raw receipt text as the primary clue, and use only the search result "
+        "titles and descriptions below to resolve cryptic abbreviations.\n"
+        "Expand likely product and brand abbreviations, remove receipt-only codes, "
+        "SKU fragments, prices, quantities, and store bookkeeping text.\n"
+        "Do not invent details that are not supported by the raw text or search results.\n"
+        "Return only the cleaned item description, with no quotes, bullets, or explanation.\n\n"
+        f"Raw receipt text: {raw_description}\n\n"
+        f"Search results:\n{_search_results_text(item)}"
+    )
+
+
 def _category_prompt(instruction: str, *, categories: tuple[str, ...], search_results: str) -> str:
     options = "\n".join(f"- {category}" for category in categories)
     return (
@@ -673,6 +719,15 @@ def _search_results_text(item: ReceiptItem) -> str:
         )
 
     return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
+
+
+def _clean_description_response(response: str) -> str:
+    lines = [line.strip() for line in response.splitlines() if line.strip()]
+    if not lines:
+        return ""
+
+    cleaned = lines[0].strip(" \t-*:\"'`")
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _leaf_categories(node: object) -> list[str]:
