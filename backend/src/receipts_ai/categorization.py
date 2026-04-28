@@ -820,18 +820,24 @@ def _product_taxonomy_prompt(
 def _description_prompt(item: ReceiptItem) -> str:
     raw_description = item.raw_description or item.description
     return (
-        "Create a clean, unabbreviated, user-facing description for this receipt item.\n"
-        "Use the raw receipt text as the primary clue, and use only the search result "
-        "titles and descriptions below to resolve cryptic abbreviations.\n"
-        "Note that the search results are ordered with the most relevant results\n"
-        "first and be aware that some search results may lead you astray.\n"
-        "Expand likely product and brand abbreviations, remove receipt-only codes, "
-        "SKU fragments, prices, quantities, and store bookkeeping text.\n"
-        "Do not invent details that are not supported by the raw text or search results.\n"
+        "Convert the raw receipt text into a clean product name using the search results. Remove prices, item numbers, and store info.\n"
         "Return only the cleaned item description, with no quotes, bullets, or explanation.\n\n"
         f"Raw receipt text: {raw_description}\n\n"
         f"Search results:\n{_search_results_text(item)}"
     )
+    # return (
+    #     "Create a clean, unabbreviated, user-facing description for this receipt item.\n"
+    #     "Use the raw receipt text as the primary clue, and use only the search result "
+    #     "titles and descriptions below to resolve cryptic abbreviations.\n"
+    #     "Note that the search results are ordered with the most relevant results\n"
+    #     "first and be aware that some search results may lead you astray.\n"
+    #     "Expand likely product and brand abbreviations, remove receipt-only codes, "
+    #     "SKU fragments, prices, quantities, and store bookkeeping text.\n"
+    #     "Do not invent details that are not supported by the raw text or search results.\n"
+    #     "Return only the cleaned item description, with no quotes, bullets, or explanation.\n\n"
+    #     f"Raw receipt text: {raw_description}\n\n"
+    #     f"Search results:\n{_search_results_text(item)}"
+    # )
 
 
 def _category_prompt(
