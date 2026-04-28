@@ -355,6 +355,52 @@ def test_classify_receipt_items_by_product_taxonomy_stops_at_parent_on_low_proba
     assert len(client.prompts) == 4
 
 
+def test_classify_receipt_items_by_product_taxonomy_maps_single_token_aliases():
+    item = ReceiptItem(
+        description="Organic Gala Apples 3 lbs",
+        amount="5.99",
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Grocery",
+        amount="-5.99",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    taxonomy: dict[str, object] = {
+        "Bakery": {},
+        "Candied & Chocolate Covered Fruit": {},
+        "Candy & Chocolate": {},
+        "Condiments & Sauces": {},
+        "Cooking & Baking Ingredients": {},
+        "Dairy Products": {},
+        "Dips & Spreads": {},
+        "Food Gift Baskets": {},
+        "Frozen Desserts & Novelties": {},
+        "Fruits & Vegetables": {},
+    }
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="J",
+                probabilities=(
+                    CategoryChoiceProbability("J", 1.0),
+                    CategoryChoiceProbability("I", 0.0),
+                ),
+            ),
+        ]
+    )
+
+    classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
+
+    assert item.taxonomy1 == "Fruits & Vegetables"
+    assert "I: Frozen Desserts & Novelties" in client.prompts[0]
+    assert "J: Fruits & Vegetables" in client.prompts[0]
+    assert client.prompts[0].endswith("Label: ")
+
+
 def test_classify_receipt_items_by_product_taxonomy_searches_multiple_probable_paths():
     item = ReceiptItem(
         description="Sparkling cider",
@@ -509,7 +555,7 @@ def test_url_lib_ollama_client_posts_generate_request(monkeypatch: pytest.Monkey
         "prompt": "Choose one",
         "stream": False,
         "think": False,
-        "options": {"temperature": 0},
+        "options": {"temperature": 0, "num_predict": 64, "stop": ["\n"]},
     }
 
 
@@ -601,7 +647,7 @@ def test_url_lib_ollama_client_can_request_choice_probabilities(
         "think": False,
         "logprobs": True,
         "top_logprobs": 5,
-        "options": {"temperature": 0, "logprobs": True, "top_logprobs": 5},
+        "options": {"temperature": 0, "num_predict": 1, "logprobs": True, "top_logprobs": 5},
     }
 
 
@@ -767,7 +813,7 @@ def test_url_lib_ollama_client_logs_endpoint_and_model(
     assert "format=unset" in caplog.text
     assert "logprobs=unset" in caplog.text
     assert "top_logprobs=unset" in caplog.text
-    assert 'options={"temperature":0}' in caplog.text
+    assert 'options={"num_predict":64,"stop":["\\n"],"temperature":0}' in caplog.text
     assert "payload_bytes=" in caplog.text
 
 
@@ -834,7 +880,7 @@ def test_url_lib_ollama_client_debug_logs_curl_reproduction_command(
         json.dumps(
             {
                 "model": "llama3.2",
-                "options": {"temperature": 0},
+                "options": {"temperature": 0, "num_predict": 64, "stop": ["\n"]},
                 "prompt": "Choose one\nWith a second line",
                 "stream": False,
                 "think": False,

@@ -29,6 +29,13 @@ MAX_TAXONOMY_LEVELS = 9
 TAXONOMY_MIN_CHOICE_PROBABILITY = 0.35
 TAXONOMY_MIN_SEARCH_PROBABILITY = 0.15
 PRODUCT_TAXONOMY_FILENAME = "taxonomy.en-US.txt"
+TAXONOMY_ALIAS_CACHE_VERSION = "taxonomy_alias_v1"
+TAXONOMY_CHOICE_ALIASES = tuple(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789"
+    "!#$%&?@^_~+=/|<>()[]{}"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +104,7 @@ class UrlLibOllamaClient:
     ) -> CategoryCompletion:
         completion = self._generate(
             prompt,
-            options={"temperature": 0, "logprobs": True, "top_logprobs": 5},
+            options={"temperature": 0, "num_predict": 1, "logprobs": True, "top_logprobs": 5},
             logprobs=True,
             top_logprobs=5,
         )
@@ -331,6 +338,7 @@ class CachedCategoryModelClient:
             "prompt": prompt,
             "logprobs": True,
             "top_logprobs": 5,
+            "format": TAXONOMY_ALIAS_CACHE_VERSION,
         }
         cached_response = self.cache.get("ollama", request)
         if isinstance(cached_response, dict):
@@ -425,7 +433,7 @@ def categorize_receipt_items(
     active_categories = categories if categories is not None else load_budget_categories()
     top_level_categories = tuple(active_categories.keys())
 
-    for index, item in enumerate(transaction.receipt.items, start=1):
+    for item in transaction.receipt.items:
         logger.info("Categorizing receipt item %s", item.description)
         top_level_category = _choose_category(
             client=active_client,
@@ -458,7 +466,7 @@ def classify_receipt_items_by_product_taxonomy(
     active_client = client if client is not None else create_ollama_category_client()
     active_taxonomy = taxonomy if taxonomy is not None else load_product_taxonomy()
 
-    for index, item in enumerate(transaction.receipt.items, start=1):
+    for item in transaction.receipt.items:
         logger.info("Classifying receipt item %s by product taxonomy", item.description)
         selected_path = _search_taxonomy_path(
             item=item,
@@ -574,7 +582,7 @@ def _search_taxonomy_path(
         )
         choice_results = _choose_taxonomy_categories(
             client=client,
-            prompt=_product_taxonomy_prompt(item, list(current.path), choices),
+            item=item,
             choices=choices,
             selected_path=list(current.path),
         )
@@ -705,14 +713,29 @@ def _preferred_taxonomy_candidate(
 def _choose_taxonomy_categories(
     *,
     client: CategoryModelClient,
-    prompt: str,
+    item: ReceiptItem,
     choices: tuple[str, ...],
     selected_path: list[str],
 ) -> tuple[CategoryChoiceProbability, ...]:
-    completion = _complete_with_probabilities(client, prompt, choices=choices)
-    probabilities = tuple(result for result in completion.probabilities if result.choice in choices)
+    choice_aliases = _taxonomy_choice_aliases(choices)
+    alias_to_choice = {alias: choice for choice, alias in choice_aliases.items()}
+    alias_choices = tuple(alias_to_choice)
+    completion = _complete_with_probabilities(
+        client,
+        _product_taxonomy_alias_prompt(item, selected_path, choice_aliases),
+        choices=alias_choices,
+    )
+    probabilities = _taxonomy_choice_probabilities_from_aliases(
+        completion.probabilities,
+        alias_to_choice=alias_to_choice,
+        choices=choices,
+    )
     if probabilities:
         return probabilities
+
+    response_alias = _normalize_choice_alias(completion.response, alias_to_choice)
+    if response_alias is not None:
+        return (CategoryChoiceProbability(choice=alias_to_choice[response_alias], probability=1.0),)
 
     choice = _normalize_choice(completion.response, choices)
     if choice is not None:
@@ -729,6 +752,56 @@ def _choose_taxonomy_categories(
     raise RuntimeError(
         f"model returned an invalid category {completion.response!r}; expected one of: {options}"
     )
+
+
+def _taxonomy_choice_aliases(choices: tuple[str, ...]) -> dict[str, str]:
+    if len(choices) <= len(TAXONOMY_CHOICE_ALIASES):
+        aliases = TAXONOMY_CHOICE_ALIASES[: len(choices)]
+    else:
+        aliases = tuple(str(index) for index in range(1, len(choices) + 1))
+    return dict(zip(choices, aliases, strict=True))
+
+
+def _taxonomy_choice_probabilities_from_aliases(
+    probabilities: tuple[CategoryChoiceProbability, ...],
+    *,
+    alias_to_choice: dict[str, str],
+    choices: tuple[str, ...],
+) -> tuple[CategoryChoiceProbability, ...]:
+    results: dict[str, float] = {}
+    for result in probabilities:
+        alias = _normalize_choice_alias(result.choice, alias_to_choice)
+        if alias is not None:
+            choice = alias_to_choice[alias]
+        elif result.choice in choices:
+            choice = result.choice
+        else:
+            continue
+        results[choice] = max(results.get(choice, 0.0), result.probability)
+
+    return tuple(
+        CategoryChoiceProbability(choice=choice, probability=probability)
+        for choice, probability in sorted(results.items(), key=lambda item: item[1], reverse=True)
+    )
+
+
+def _normalize_choice_alias(response: str, alias_to_choice: dict[str, str]) -> str | None:
+    cleaned_response = response.strip()
+    if cleaned_response in alias_to_choice:
+        return cleaned_response
+
+    cleaned_response = cleaned_response.strip("-*:\"'`.,;")
+    if cleaned_response in alias_to_choice:
+        return cleaned_response
+
+    for line in response.splitlines():
+        cleaned_line = line.strip()
+        if cleaned_line in alias_to_choice:
+            return cleaned_line
+        cleaned_line = cleaned_line.strip("-*:\"'`.,;")
+        if cleaned_line in alias_to_choice:
+            return cleaned_line
+    return None
 
 
 def _complete_with_probabilities(
@@ -800,20 +873,20 @@ def _leaf_category_prompt(
     )
 
 
-def _product_taxonomy_prompt(
-    item: ReceiptItem, selected_path: list[str], choices: tuple[str, ...]
+def _product_taxonomy_alias_prompt(
+    item: ReceiptItem, selected_path: list[str], choice_aliases: dict[str, str]
 ) -> str:
-    # path_text = " > ".join(selected_path)
-    instruction = (
+    path_text = " > ".join(selected_path)
+    path_prefix = f"Selected product taxonomy path: {path_text}\n" if path_text else ""
+    labels = "\n".join(f"{alias}: {choice}" for choice, alias in choice_aliases.items())
+    return (
+        f"{path_prefix}"
         "Based on this receipt item description, "
-        "pick the most appropriate product type from the following choices."
-    )
-    # if path_text:
-    # instruction = f"Selected product taxonomy path: {path_text}\n{instruction}"
-    return _category_prompt(
-        instruction,
-        categories=choices,
-        item_description=item.description,
+        "pick the most appropriate product type label.\n"
+        "Respond with exactly one label token.\n\n"
+        f"Labels:\n{labels}\n\n"
+        f"Receipt item description: {item.description}\n"
+        "Label: "
     )
 
 
@@ -1030,11 +1103,15 @@ def _raw_top_logprob_entries(response: dict[str, object]) -> list[tuple[str, flo
 
 def _raw_top_logprob_entries_from_tokens(tokens: list[object]) -> list[tuple[str, float]]:
     entries: list[tuple[str, float]] = []
-    first_token = next((token for token in tokens if isinstance(token, dict)), None)
+    first_token: dict[str, object] | None = None
+    for token_object in tokens:
+        if isinstance(token_object, dict):
+            first_token = cast(dict[str, object], token_object)
+            break
     if first_token is None:
         return entries
 
-    token = cast(dict[str, object], first_token)
+    token = first_token
     top_logprobs = token.get("top_logprobs")
     if isinstance(top_logprobs, list):
         entries.extend(_raw_top_logprob_entries_from_top_logprobs(cast(list[object], top_logprobs)))
