@@ -148,9 +148,9 @@ def test_clean_receipt_item_descriptions_uses_raw_text_and_top_five_search_resul
     assert "Result 6" not in client.prompts[0]
 
 
-def test_categorize_receipt_items_uses_search_results_and_leaf_category_only():
+def test_categorize_receipt_items_uses_clean_description_and_leaf_category_only():
     item = ReceiptItem(
-        description="Confusing receipt text",
+        description="Nabisco Premium Saltine Crackers",
         raw_description="RAW CONFUSING CODE",
         amount="4.49",
         brave_search_result=json.dumps(
@@ -182,15 +182,16 @@ def test_categorize_receipt_items_uses_search_results_and_leaf_category_only():
     assert "Groceries" not in client.prompts[0]
     assert "Groceries" in client.prompts[1]
     assert "Food & Dining" not in client.prompts[1].split("Options:", maxsplit=1)[1]
-    assert "Premium Saltines" in client.prompts[0]
-    assert "Crisp crackers sold in grocery stores." in client.prompts[1]
+    assert "Receipt item description: Nabisco Premium Saltine Crackers" in client.prompts[0]
+    assert "Receipt item description: Nabisco Premium Saltine Crackers" in client.prompts[1]
+    assert "Premium Saltines" not in "\n".join(client.prompts)
+    assert "Crisp crackers sold in grocery stores." not in "\n".join(client.prompts)
     assert "RAW CONFUSING CODE" not in "\n".join(client.prompts)
-    assert "Confusing receipt text" not in "\n".join(client.prompts)
 
 
 def test_classify_receipt_items_by_product_taxonomy_walks_each_level():
     item = ReceiptItem(
-        description="Confusing receipt text",
+        description="Nabisco Premium Saltine Crackers",
         raw_description="RAW CONFUSING CODE",
         amount="4.49",
         taxonomy4="Stale Value",
@@ -250,12 +251,13 @@ def test_classify_receipt_items_by_product_taxonomy_walks_each_level():
     assert "Food Items" in client.prompts[1]
     assert "Bakery" in client.prompts[2]
     assert "Crackers" in client.prompts[3]
-    assert "Premium Saltines" in client.prompts[0]
-    assert "Crisp crackers sold in grocery stores." in client.prompts[3]
-    assert "Result 5" in client.prompts[3]
+    assert "Receipt item description: Nabisco Premium Saltine Crackers" in client.prompts[0]
+    assert "Receipt item description: Nabisco Premium Saltine Crackers" in client.prompts[3]
+    assert "Premium Saltines" not in "\n".join(client.prompts)
+    assert "Crisp crackers sold in grocery stores." not in "\n".join(client.prompts)
+    assert "Result 5" not in "\n".join(client.prompts)
     assert "Result 6" not in "\n".join(client.prompts)
     assert "RAW CONFUSING CODE" not in "\n".join(client.prompts)
-    assert "Confusing receipt text" not in "\n".join(client.prompts)
 
 
 def test_classify_receipt_items_by_product_taxonomy_stops_when_model_repeats_parent():

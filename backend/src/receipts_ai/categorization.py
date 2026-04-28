@@ -633,7 +633,7 @@ def _top_level_prompt(item: ReceiptItem, categories: tuple[str, ...]) -> str:
     return _category_prompt(
         "Choose the best top level budget category.",
         categories=categories,
-        search_results=_search_results_text(item),
+        item_description=item.description,
     )
 
 
@@ -643,7 +643,7 @@ def _leaf_category_prompt(
     return _category_prompt(
         f"Top level category: {top_level_category}\nChoose the best specific budget category.",
         categories=categories,
-        search_results=_search_results_text(item),
+        item_description=item.description,
     )
 
 
@@ -652,7 +652,7 @@ def _product_taxonomy_prompt(
 ) -> str:
     path_text = " > ".join(selected_path)
     instruction = (
-        "Based on these search result titles and descriptions, "
+        "Based on this receipt item description, "
         "pick the most appropriate product type from the following choices."
     )
     if path_text:
@@ -660,7 +660,7 @@ def _product_taxonomy_prompt(
     return _category_prompt(
         instruction,
         categories=choices,
-        search_results=_search_results_text(item),
+        item_description=item.description,
     )
 
 
@@ -670,6 +670,8 @@ def _description_prompt(item: ReceiptItem) -> str:
         "Create a clean, unabbreviated, user-facing description for this receipt item.\n"
         "Use the raw receipt text as the primary clue, and use only the search result "
         "titles and descriptions below to resolve cryptic abbreviations.\n"
+        "Note that the search results are ordered with the most relevant results\n"
+        "first and be aware that some search results may lead you astray.\n"
         "Expand likely product and brand abbreviations, remove receipt-only codes, "
         "SKU fragments, prices, quantities, and store bookkeeping text.\n"
         "Do not invent details that are not supported by the raw text or search results.\n"
@@ -679,14 +681,15 @@ def _description_prompt(item: ReceiptItem) -> str:
     )
 
 
-def _category_prompt(instruction: str, *, categories: tuple[str, ...], search_results: str) -> str:
+def _category_prompt(
+    instruction: str, *, categories: tuple[str, ...], item_description: str
+) -> str:
     options = "\n".join(f"- {category}" for category in categories)
     return (
         f"{instruction}\n"
-        "Return only one exact category name from Options.\n"
-        "Use only these search result titles and descriptions for the receipt item.\n\n"
+        "Return only one exact category name from Options.\n\n"
         f"Options:\n{options}\n\n"
-        f"Search results:\n{search_results}"
+        f"Receipt item description: {item_description}"
     )
 
 
