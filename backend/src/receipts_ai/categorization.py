@@ -122,7 +122,7 @@ class UrlLibOllamaClient:
         if not prompt:
             raise ValueError("prompt must not be empty")
 
-        logger.debug("Prompt: %s", prompt)
+        # logger.debug("Prompt: %s", prompt)
         request_payload: dict[str, object] = {
             "model": self.model,
             "prompt": prompt,
@@ -426,7 +426,7 @@ def categorize_receipt_items(
     top_level_categories = tuple(active_categories.keys())
 
     for index, item in enumerate(transaction.receipt.items, start=1):
-        logger.info("Categorizing receipt item %s", index)
+        logger.info("Categorizing receipt item %s", item.description)
         top_level_category = _choose_category(
             client=active_client,
             prompt=_top_level_prompt(item, top_level_categories),
@@ -441,7 +441,7 @@ def categorize_receipt_items(
             prompt=_leaf_category_prompt(item, top_level_category, leaf_categories),
             choices=leaf_categories,
         )
-        logger.info("Categorized receipt item %s as %s", index, item.category_id)
+        logger.info("Categorized receipt item %s as %s", item.description, item.category_id)
 
     return transaction
 
@@ -459,7 +459,7 @@ def classify_receipt_items_by_product_taxonomy(
     active_taxonomy = taxonomy if taxonomy is not None else load_product_taxonomy()
 
     for index, item in enumerate(transaction.receipt.items, start=1):
-        logger.info("Classifying receipt item %s by product taxonomy", index)
+        logger.info("Classifying receipt item %s by product taxonomy", item.description)
         selected_path = _search_taxonomy_path(
             item=item,
             taxonomy=active_taxonomy,
@@ -467,7 +467,7 @@ def classify_receipt_items_by_product_taxonomy(
         )
 
         _set_item_taxonomy(item, list(selected_path))
-        logger.info("Classified receipt item %s as %s", index, " > ".join(selected_path))
+        logger.info("Classified receipt item %s as %s", item.description, " > ".join(selected_path))
 
     return transaction
 
@@ -803,13 +803,13 @@ def _leaf_category_prompt(
 def _product_taxonomy_prompt(
     item: ReceiptItem, selected_path: list[str], choices: tuple[str, ...]
 ) -> str:
-    path_text = " > ".join(selected_path)
+    # path_text = " > ".join(selected_path)
     instruction = (
         "Based on this receipt item description, "
         "pick the most appropriate product type from the following choices."
     )
-    if path_text:
-        instruction = f"Selected product taxonomy path: {path_text}\n{instruction}"
+    # if path_text:
+    # instruction = f"Selected product taxonomy path: {path_text}\n{instruction}"
     return _category_prompt(
         instruction,
         categories=choices,
@@ -1030,20 +1030,19 @@ def _raw_top_logprob_entries(response: dict[str, object]) -> list[tuple[str, flo
 
 def _raw_top_logprob_entries_from_tokens(tokens: list[object]) -> list[tuple[str, float]]:
     entries: list[tuple[str, float]] = []
-    for token_object in tokens:
-        if not isinstance(token_object, dict):
-            continue
-        token = cast(dict[str, object], token_object)
-        top_logprobs = token.get("top_logprobs")
-        if isinstance(top_logprobs, list):
-            entries.extend(
-                _raw_top_logprob_entries_from_top_logprobs(cast(list[object], top_logprobs))
-            )
+    first_token = next((token for token in tokens if isinstance(token, dict)), None)
+    if first_token is None:
+        return entries
 
-        token_text = token.get("token")
-        log_probability = token.get("logprob")
-        if isinstance(token_text, str) and isinstance(log_probability, int | float):
-            entries.append((token_text, float(log_probability)))
+    token = cast(dict[str, object], first_token)
+    top_logprobs = token.get("top_logprobs")
+    if isinstance(top_logprobs, list):
+        entries.extend(_raw_top_logprob_entries_from_top_logprobs(cast(list[object], top_logprobs)))
+
+    token_text = token.get("token")
+    log_probability = token.get("logprob")
+    if isinstance(token_text, str) and isinstance(log_probability, int | float):
+        entries.append((token_text, float(log_probability)))
     return entries
 
 

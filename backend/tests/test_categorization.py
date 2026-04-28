@@ -605,6 +605,50 @@ def test_url_lib_ollama_client_can_request_choice_probabilities(
     }
 
 
+def test_url_lib_ollama_client_uses_first_token_logprobs_for_choice_probabilities(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        _ = request
+        _ = timeout
+        return FakeResponse(
+            {
+                "response": "Food Items",
+                "logprobs": {
+                    "content": [
+                        {
+                            "token": "Food",
+                            "logprob": -0.2,
+                            "top_logprobs": [
+                                {"token": "Food", "logprob": -0.2},
+                                {"token": "Beverages", "logprob": -1.5},
+                            ],
+                        },
+                        {
+                            "token": " Items",
+                            "logprob": -0.01,
+                            "top_logprobs": [
+                                {"token": "Beverages", "logprob": -0.01},
+                                {"token": " Items", "logprob": -0.01},
+                            ],
+                        },
+                    ]
+                },
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = UrlLibOllamaClient(url="http://example.test:11434", model="llama3.2")
+
+    completion = client.complete_with_probabilities(
+        "Choose one", choices=("Food Items", "Beverages")
+    )
+
+    assert [result.choice for result in completion.probabilities] == ["Food Items", "Beverages"]
+    assert math.isclose(completion.probabilities[0].probability, math.exp(-0.2))
+    assert math.isclose(completion.probabilities[1].probability, math.exp(-1.5))
+
+
 def test_cached_category_model_client_reuses_json_file(tmp_path: Path):
     cache_path = tmp_path / "api-cache.json"
     first_client = FakeCategoryClient(["Groceries"])
