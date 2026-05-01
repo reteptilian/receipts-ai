@@ -18,13 +18,18 @@ from receipts_ai.categorization import (
     CachedCategoryModelClient,
     CategoryChoiceProbability,
     CategoryCompletion,
+    TaxonomyEmbeddingEntry,
+    TaxonomyEmbeddingIndex,
     UrlLibOllamaClient,
     categorize_receipt_items,
     classify_receipt_items_by_product_taxonomy,
+    classify_receipt_items_by_product_taxonomy_vector_search,
     clean_receipt_item_descriptions,
     create_ollama_category_client,
     load_budget_categories,
     load_product_taxonomy,
+    load_product_taxonomy_embeddings,
+    search_product_taxonomy_embeddings,
 )
 from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
 
@@ -54,6 +59,16 @@ class FakeProbabilityCategoryClient:
         _ = choices
         self.prompts.append(prompt)
         return self.responses.pop(0)
+
+
+class FakeTaxonomyEmbeddingClient:
+    def __init__(self, embedding: tuple[float, ...]) -> None:
+        self.embedding = embedding
+        self.texts: list[str] = []
+
+    def embed(self, text: str) -> tuple[float, ...]:
+        self.texts.append(text)
+        return self.embedding
 
 
 class FakeResponse:
@@ -105,6 +120,82 @@ def test_load_product_taxonomy_parses_greater_than_levels(tmp_path: Path):
             },
         },
     }
+
+
+def test_load_product_taxonomy_embeddings_parses_vector_artifact(tmp_path: Path):
+    embeddings_path = tmp_path / "taxonomy_embeddings.json"
+    embeddings_path.write_text(
+        json.dumps(
+            {
+                "embedding_model": "test-model",
+                "embedding_dimension": 2,
+                "entries": [
+                    {
+                        "path": "Electronics > Audio > Headphones",
+                        "parts": ["Electronics", "Audio", "Headphones"],
+                        "embedding": [1.0, 0.0],
+                    },
+                    {
+                        "path": "Food, Beverages & Tobacco > Food Items > Bakery > Crackers",
+                        "parts": ["Food, Beverages & Tobacco", "Food Items", "Bakery", "Crackers"],
+                        "embedding": [0.0, 1.0],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    taxonomy_embeddings = load_product_taxonomy_embeddings(embeddings_path)
+
+    assert taxonomy_embeddings.embedding_model == "test-model"
+    assert taxonomy_embeddings.embedding_dimension == 2
+    assert taxonomy_embeddings.entries == (
+        TaxonomyEmbeddingEntry(
+            path=("Electronics", "Audio", "Headphones"),
+            embedding=(1.0, 0.0),
+        ),
+        TaxonomyEmbeddingEntry(
+            path=("Food, Beverages & Tobacco", "Food Items", "Bakery", "Crackers"),
+            embedding=(0.0, 1.0),
+        ),
+    )
+
+
+def test_search_product_taxonomy_embeddings_returns_nearest_paths():
+    taxonomy_embeddings = TaxonomyEmbeddingIndex(
+        embedding_model="test-model",
+        embedding_dimension=2,
+        entries=(
+            TaxonomyEmbeddingEntry(
+                path=("Food, Beverages & Tobacco", "Food Items", "Bakery", "Crackers"),
+                embedding=(0.0, 1.0),
+            ),
+            TaxonomyEmbeddingEntry(
+                path=("Electronics", "Audio", "Speakers"),
+                embedding=(0.8, 0.2),
+            ),
+            TaxonomyEmbeddingEntry(
+                path=("Electronics", "Audio", "Headphones"),
+                embedding=(1.0, 0.0),
+            ),
+        ),
+    )
+    embedding_client = FakeTaxonomyEmbeddingClient((1.0, 0.0))
+
+    results = search_product_taxonomy_embeddings(
+        "Apple AirPods Pro 3",
+        taxonomy_embeddings=taxonomy_embeddings,
+        embedding_client=embedding_client,
+        candidate_count=2,
+    )
+
+    assert embedding_client.texts == ["Apple AirPods Pro 3"]
+    assert [result.path for result in results] == [
+        ("Electronics", "Audio", "Headphones"),
+        ("Electronics", "Audio", "Speakers"),
+    ]
+    assert [result.score for result in results] == [1.0, 0.8]
 
 
 def test_clean_receipt_item_descriptions_uses_raw_text_and_top_five_search_results():
@@ -457,6 +548,63 @@ def test_classify_receipt_items_by_product_taxonomy_searches_multiple_probable_p
     assert (
         "Selected product taxonomy path: Food, Beverages & Tobacco > Beverages" in client.prompts[3]
     )
+
+
+def test_classify_receipt_items_by_product_taxonomy_vector_search_ranks_nearest_paths():
+    item = ReceiptItem(
+        description="Apple AirPods Pro 3",
+        amount="249.00",
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Apple",
+        amount="-249.00",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    taxonomy_embeddings = TaxonomyEmbeddingIndex(
+        embedding_model="test-model",
+        embedding_dimension=2,
+        entries=(
+            TaxonomyEmbeddingEntry(
+                path=("Food, Beverages & Tobacco", "Food Items", "Bakery", "Crackers"),
+                embedding=(0.0, 1.0),
+            ),
+            TaxonomyEmbeddingEntry(
+                path=("Electronics", "Audio", "Speakers"),
+                embedding=(0.8, 0.2),
+            ),
+            TaxonomyEmbeddingEntry(
+                path=("Electronics", "Audio", "Headphones"),
+                embedding=(1.0, 0.0),
+            ),
+        ),
+    )
+    embedding_client = FakeTaxonomyEmbeddingClient((1.0, 0.0))
+    client = FakeCategoryClient(["Electronics > Audio > Headphones"])
+
+    result = classify_receipt_items_by_product_taxonomy_vector_search(
+        transaction,
+        client=client,
+        embedding_client=embedding_client,
+        taxonomy_embeddings=taxonomy_embeddings,
+        candidate_count=2,
+    )
+
+    assert result is transaction
+    assert item.taxonomy1 == "Electronics"
+    assert item.taxonomy2 == "Audio"
+    assert item.taxonomy3 == "Headphones"
+    assert item.taxonomy4 is None
+    assert embedding_client.texts == ["Apple AirPods Pro 3"]
+    assert len(client.prompts) == 1
+    assert "Choose the correct Google Product Category path" in client.prompts[0]
+    assert "Electronics > Audio > Headphones" in client.prompts[0]
+    assert "Electronics > Audio > Speakers" in client.prompts[0]
+    assert "Food, Beverages & Tobacco > Food Items > Bakery > Crackers" not in client.prompts[0]
+    assert "Receipt item description: Apple AirPods Pro 3" in client.prompts[0]
 
 
 def test_categorize_receipt_items_rejects_non_leaf_category_response():

@@ -726,6 +726,108 @@ def test_main_can_categorize_items_after_brave_search(
     assert receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"
 
 
+def test_main_can_use_vector_product_taxonomy_method(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"receipt")
+    receipt = Receipt(items=[ReceiptItem(description="Apple AirPods Pro 3", amount="249.00")])
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Apple",
+        amount="-249.00",
+        currency="USD",
+        receipt=receipt,
+    )
+    calls: list[str] = []
+
+    def fake_analyze_receipt_file(path: Path) -> dict[str, Path]:
+        return {"result": path}
+
+    def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:
+        return transaction
+
+    def fake_enrich_receipt_items_with_brave_search(
+        transaction_to_enrich: Transaction, *, request_delay_seconds: float | None = None
+    ) -> Transaction:
+        _ = request_delay_seconds
+        calls.append("brave")
+        return transaction_to_enrich
+
+    def fake_clean_receipt_item_descriptions(transaction_to_clean: Transaction) -> Transaction:
+        calls.append("clean")
+        return transaction_to_clean
+
+    def fake_categorize_receipt_items(transaction_to_categorize: Transaction) -> Transaction:
+        calls.append("categorize")
+        assert transaction_to_categorize.receipt is not None
+        transaction_to_categorize.receipt.items[0].category_id = "Electronics"
+        return transaction_to_categorize
+
+    def fake_classify_receipt_items_by_product_taxonomy_vector_search(
+        transaction_to_classify: Transaction,
+    ) -> Transaction:
+        calls.append("vector-taxonomy")
+        assert transaction_to_classify.receipt is not None
+        transaction_to_classify.receipt.items[0].taxonomy1 = "Electronics"
+        transaction_to_classify.receipt.items[0].taxonomy2 = "Audio"
+        transaction_to_classify.receipt.items[0].taxonomy3 = "Headphones"
+        return transaction_to_classify
+
+    def fail_greedy_taxonomy(_transaction: Transaction) -> Transaction:
+        raise AssertionError("greedy taxonomy should not be called")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai",
+            "--categorize-items",
+            "--product-taxonomy-method",
+            "vector",
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        receipts_ai,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "enrich_receipt_items_with_brave_search",
+        fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "clean_receipt_item_descriptions",
+        fake_clean_receipt_item_descriptions,
+    )
+    monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
+    monkeypatch.setattr(
+        receipts_ai,
+        "classify_receipt_items_by_product_taxonomy",
+        fail_greedy_taxonomy,
+    )
+    monkeypatch.setattr(
+        receipts_ai,
+        "classify_receipt_items_by_product_taxonomy_vector_search",
+        fake_classify_receipt_items_by_product_taxonomy_vector_search,
+    )
+
+    main()
+
+    assert calls == ["brave", "clean", "categorize", "vector-taxonomy"]
+    assert receipt.items[0].category_id == "Electronics"
+    assert receipt.items[0].taxonomy1 == "Electronics"
+    assert receipt.items[0].taxonomy2 == "Audio"
+    assert receipt.items[0].taxonomy3 == "Headphones"
+
+
 def test_main_can_upsert_processed_transaction_to_firestore(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

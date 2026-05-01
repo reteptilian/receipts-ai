@@ -17,8 +17,10 @@ from receipts_ai.brave_search import (
 from receipts_ai.cache import JsonCallCache
 from receipts_ai.categorization import (
     CachedCategoryModelClient,
+    CategoryModelClient,
     categorize_receipt_items,
     classify_receipt_items_by_product_taxonomy,
+    classify_receipt_items_by_product_taxonomy_vector_search,
     clean_receipt_item_descriptions,
     create_ollama_category_client,
 )
@@ -152,6 +154,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--product-taxonomy-method",
+        choices=("greedy", "vector"),
+        default="greedy",
+        help=(
+            "Product taxonomy classification method used with --categorize-items. "
+            "'greedy' walks the taxonomy tree with Ollama; 'vector' retrieves nearest "
+            "taxonomy embedding paths and asks Ollama to rank them. Defaults to greedy."
+        ),
+    )
+    parser.add_argument(
         "--cache-file",
         type=Path,
         help="Cache Azure Document Intelligence, OpenAI, Brave Search, and Ollama responses in this JSON file.",
@@ -212,13 +224,44 @@ def main() -> None:
     if args.categorize_items:
         if category_client is not None:
             categorize_receipt_items(transaction, client=category_client)
-            classify_receipt_items_by_product_taxonomy(transaction, client=category_client)
+            _classify_receipt_items_by_product_taxonomy(
+                transaction,
+                method=args.product_taxonomy_method,
+                client=category_client,
+            )
         else:
             categorize_receipt_items(transaction)
-            classify_receipt_items_by_product_taxonomy(transaction)
+            _classify_receipt_items_by_product_taxonomy(
+                transaction,
+                method=args.product_taxonomy_method,
+            )
     if args.upsert_firestore:
         upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
     _write_transaction(transaction, output_format=args.format, output_path=args.output)
+
+
+def _classify_receipt_items_by_product_taxonomy(
+    transaction: Transaction,
+    *,
+    method: str,
+    client: CategoryModelClient | None = None,
+) -> Transaction:
+    if method == "greedy":
+        return (
+            classify_receipt_items_by_product_taxonomy(transaction, client=client)
+            if client is not None
+            else classify_receipt_items_by_product_taxonomy(transaction)
+        )
+    if method == "vector":
+        return (
+            classify_receipt_items_by_product_taxonomy_vector_search(
+                transaction,
+                client=client,
+            )
+            if client is not None
+            else classify_receipt_items_by_product_taxonomy_vector_search(transaction)
+        )
+    raise ValueError(f"unsupported product taxonomy method: {method}")
 
 
 def _process_receipt(

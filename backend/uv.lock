@@ -1715,12 +1715,13 @@ wheels = [
 
 [[package]]
 name = "receipts-ai"
-version = "0.0.1.dev40+d46015d"
+version = "0.0.1.dev41+5042c5d"
 source = { editable = "." }
 dependencies = [
     { name = "azure-ai-documentintelligence" },
     { name = "firebase-admin" },
     { name = "pydantic" },
+    { name = "sentence-transformers" },
 ]
 
 [package.dev-dependencies]
@@ -1733,7 +1734,6 @@ dev = [
     { name = "pytest-sugar" },
     { name = "rich" },
     { name = "ruff" },
-    { name = "sentence-transformers" },
 ]
 
 [package.metadata]
@@ -1741,6 +1741,7 @@ requires-dist = [
     { name = "azure-ai-documentintelligence", specifier = ">=1.0.2" },
     { name = "firebase-admin", specifier = ">=7.4.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "sentence-transformers", specifier = ">=5.0.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -1753,7 +1754,6 @@ dev = [
     { name = "pytest-sugar", specifier = ">=1.1.1" },
     { name = "rich", specifier = ">=14.3.2" },
     { name = "ruff", specifier = ">=0.15.1" },
-    { name = "sentence-transformers", specifier = ">=5.0.0" },
 ]
 
 [[package]]

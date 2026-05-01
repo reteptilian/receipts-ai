@@ -25,10 +25,16 @@ OLLAMA_TIMEOUT_ENV_VARS = ("OLLAMA_TIMEOUT_SECONDS",)
 
 MAX_SEARCH_RESULTS = 5
 MAX_TAXONOMY_SEARCH_PATHS = 5
+MAX_TAXONOMY_VECTOR_CANDIDATES = 20
 MAX_TAXONOMY_LEVELS = 9
 TAXONOMY_MIN_CHOICE_PROBABILITY = 0.35
 TAXONOMY_MIN_SEARCH_PROBABILITY = 0.15
 PRODUCT_TAXONOMY_FILENAME = "taxonomy.en-US.txt"
+PRODUCT_TAXONOMY_EMBEDDINGS_FILENAME = "taxonomy_embeddings.json"
+DEFAULT_TAXONOMY_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
+TAXONOMY_EMBEDDING_QUERY_PREFIX = (
+    "Represent this sentence for searching relevant product taxonomy categories: "
+)
 TAXONOMY_ALIAS_CACHE_VERSION = "taxonomy_alias_v1"
 TAXONOMY_CHOICE_ALIASES = tuple(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -42,6 +48,22 @@ logger = logging.getLogger(__name__)
 
 class CategoryModelClient(Protocol):
     def complete(self, prompt: str) -> str: ...
+
+
+class TaxonomyEmbeddingClient(Protocol):
+    def embed(self, text: str) -> tuple[float, ...]: ...
+
+
+class _SentenceTransformerModel(Protocol):
+    def encode(
+        self,
+        sentences: list[str],
+        *,
+        batch_size: int,
+        normalize_embeddings: bool,
+        convert_to_numpy: bool,
+        show_progress_bar: bool,
+    ) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -61,6 +83,33 @@ class _TaxonomySearchPath:
     path: tuple[str, ...]
     node: dict[str, object]
     probability: float
+
+
+@dataclass(frozen=True)
+class TaxonomyEmbeddingEntry:
+    path: tuple[str, ...]
+    embedding: tuple[float, ...]
+
+    @property
+    def path_text(self) -> str:
+        return _format_taxonomy_path(self.path)
+
+
+@dataclass(frozen=True)
+class TaxonomyEmbeddingIndex:
+    embedding_model: str
+    embedding_dimension: int
+    entries: tuple[TaxonomyEmbeddingEntry, ...]
+
+
+@dataclass(frozen=True)
+class TaxonomyEmbeddingSearchResult:
+    path: tuple[str, ...]
+    score: float
+
+    @property
+    def path_text(self) -> str:
+        return _format_taxonomy_path(self.path)
 
 
 class UrlLibOllamaClient:
@@ -221,6 +270,32 @@ class UrlLibOllamaClient:
 class _OllamaCompletion:
     response: str
     raw_response: dict[str, object]
+
+
+class SentenceTransformerTaxonomyEmbeddingClient:
+    def __init__(
+        self,
+        model_name: str = DEFAULT_TAXONOMY_EMBEDDING_MODEL,
+        *,
+        local_files_only: bool = True,
+    ) -> None:
+        from sentence_transformers import SentenceTransformer
+
+        self.model_name = model_name
+        self.model: _SentenceTransformerModel = cast(
+            _SentenceTransformerModel,
+            cast(object, SentenceTransformer(model_name, local_files_only=local_files_only)),
+        )
+
+    def embed(self, text: str) -> tuple[float, ...]:
+        embeddings = self.model.encode(
+            [f"{TAXONOMY_EMBEDDING_QUERY_PREFIX}{text}"],
+            batch_size=1,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        return _single_embedding_vector(embeddings)
 
 
 def _format_ollama_request_value(value: object) -> str:
@@ -480,6 +555,54 @@ def classify_receipt_items_by_product_taxonomy(
     return transaction
 
 
+def classify_receipt_items_by_product_taxonomy_vector_search(
+    transaction: Transaction,
+    *,
+    client: CategoryModelClient | None = None,
+    embedding_client: TaxonomyEmbeddingClient | None = None,
+    taxonomy_embeddings: TaxonomyEmbeddingIndex | None = None,
+    candidate_count: int = MAX_TAXONOMY_VECTOR_CANDIDATES,
+) -> Transaction:
+    if transaction.receipt is None:
+        raise ValueError("transaction does not contain a receipt")
+    if candidate_count < 1:
+        raise ValueError("candidate_count must be at least 1")
+
+    active_client = client if client is not None else create_ollama_category_client()
+    active_embeddings = (
+        taxonomy_embeddings
+        if taxonomy_embeddings is not None
+        else load_product_taxonomy_embeddings()
+    )
+    active_embedding_client = (
+        embedding_client
+        if embedding_client is not None
+        else create_taxonomy_embedding_client(active_embeddings.embedding_model)
+    )
+
+    for item in transaction.receipt.items:
+        logger.info(
+            "Classifying receipt item %s by product taxonomy vector search",
+            item.description,
+        )
+        candidates = search_product_taxonomy_embeddings(
+            item.description,
+            taxonomy_embeddings=active_embeddings,
+            embedding_client=active_embedding_client,
+            candidate_count=candidate_count,
+        )
+        selected_path = _rank_taxonomy_embedding_candidates(
+            item=item,
+            candidates=candidates,
+            client=active_client,
+        )
+
+        _set_item_taxonomy(item, list(selected_path))
+        logger.info("Classified receipt item %s as %s", item.description, " > ".join(selected_path))
+
+    return transaction
+
+
 def load_budget_categories() -> dict[str, object]:
     categories_file = resources.files("receipts_ai.models").joinpath("budget_categories.json")
     with categories_file.open("r", encoding="utf-8") as file:
@@ -509,6 +632,80 @@ def load_product_taxonomy(path: Path | None = None) -> dict[str, object]:
     if not taxonomy:
         raise RuntimeError(f"{taxonomy_path} did not contain product taxonomy entries")
     return taxonomy
+
+
+def load_product_taxonomy_embeddings(path: Path | None = None) -> TaxonomyEmbeddingIndex:
+    embeddings_path = path if path is not None else _default_product_taxonomy_embeddings_path()
+    try:
+        payload: object = json.loads(embeddings_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{embeddings_path} did not contain valid JSON") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{embeddings_path} must contain a JSON object")
+    payload_object = cast(dict[str, object], payload)
+
+    embedding_model = payload_object.get("embedding_model")
+    embedding_dimension = payload_object.get("embedding_dimension")
+    raw_entries = payload_object.get("entries")
+    if not isinstance(embedding_model, str) or not embedding_model:
+        raise RuntimeError(f"{embeddings_path} is missing embedding_model")
+    if not isinstance(embedding_dimension, int) or embedding_dimension < 1:
+        raise RuntimeError(f"{embeddings_path} has an invalid embedding_dimension")
+    if not isinstance(raw_entries, list):
+        raise RuntimeError(f"{embeddings_path} is missing entries")
+
+    entries = tuple(
+        _taxonomy_embedding_entry_from_json(entry, dimension=embedding_dimension)
+        for entry in cast(list[object], raw_entries)
+    )
+    if not entries:
+        raise RuntimeError(f"{embeddings_path} did not contain taxonomy embedding entries")
+
+    return TaxonomyEmbeddingIndex(
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        entries=entries,
+    )
+
+
+def create_taxonomy_embedding_client(
+    model_name: str = DEFAULT_TAXONOMY_EMBEDDING_MODEL,
+    *,
+    local_files_only: bool = True,
+) -> TaxonomyEmbeddingClient:
+    return SentenceTransformerTaxonomyEmbeddingClient(
+        model_name,
+        local_files_only=local_files_only,
+    )
+
+
+def search_product_taxonomy_embeddings(
+    text: str,
+    *,
+    taxonomy_embeddings: TaxonomyEmbeddingIndex,
+    embedding_client: TaxonomyEmbeddingClient,
+    candidate_count: int = MAX_TAXONOMY_VECTOR_CANDIDATES,
+) -> tuple[TaxonomyEmbeddingSearchResult, ...]:
+    if candidate_count < 1:
+        raise ValueError("candidate_count must be at least 1")
+    query_embedding = embedding_client.embed(text)
+    if len(query_embedding) != taxonomy_embeddings.embedding_dimension:
+        raise RuntimeError(
+            f"query embedding dimension {len(query_embedding)} did not match "
+            f"taxonomy embedding dimension {taxonomy_embeddings.embedding_dimension}"
+        )
+
+    results = (
+        TaxonomyEmbeddingSearchResult(
+            path=entry.path,
+            score=_dot_product(query_embedding, entry.embedding),
+        )
+        for entry in taxonomy_embeddings.entries
+    )
+    return tuple(
+        sorted(results, key=lambda result: result.score, reverse=True)[:candidate_count]
+    )
 
 
 def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple[str, ...]) -> str:
@@ -754,6 +951,24 @@ def _choose_taxonomy_categories(
     )
 
 
+def _rank_taxonomy_embedding_candidates(
+    *,
+    item: ReceiptItem,
+    candidates: tuple[TaxonomyEmbeddingSearchResult, ...],
+    client: CategoryModelClient,
+) -> tuple[str, ...]:
+    choices = tuple(candidate.path_text for candidate in candidates)
+    if not choices:
+        raise RuntimeError("taxonomy vector search did not return any candidates")
+
+    selected_path = _choose_category(
+        client=client,
+        prompt=_product_taxonomy_vector_ranking_prompt(item, candidates),
+        choices=choices,
+    )
+    return tuple(part.strip() for part in selected_path.split(">") if part.strip())
+
+
 def _taxonomy_choice_aliases(choices: tuple[str, ...]) -> dict[str, str]:
     if len(choices) <= len(TAXONOMY_CHOICE_ALIASES):
         aliases = TAXONOMY_CHOICE_ALIASES[: len(choices)]
@@ -887,6 +1102,22 @@ def _product_taxonomy_alias_prompt(
         f"Labels:\n{labels}\n\n"
         f"Receipt item description: {item.description}\n"
         "Label: "
+    )
+
+
+def _product_taxonomy_vector_ranking_prompt(
+    item: ReceiptItem,
+    candidates: tuple[TaxonomyEmbeddingSearchResult, ...],
+) -> str:
+    candidate_lines = "\n".join(
+        f"- {candidate.path_text}" for candidate in candidates
+    )
+    return (
+        "Choose the correct Google Product Category path for this receipt item.\n"
+        "Return only one exact path from Candidates.\n\n"
+        f"Candidates:\n{candidate_lines}\n\n"
+        f"Receipt item description: {item.description}\n"
+        "Path: "
     )
 
 
@@ -1028,6 +1259,85 @@ def _default_product_taxonomy_path() -> Path:
         return repo_taxonomy
 
     raise RuntimeError(f"could not find {PRODUCT_TAXONOMY_FILENAME}")
+
+
+def _default_product_taxonomy_embeddings_path() -> Path:
+    package_embeddings = resources.files("receipts_ai.models").joinpath(
+        PRODUCT_TAXONOMY_EMBEDDINGS_FILENAME
+    )
+    if package_embeddings.is_file():
+        return Path(str(package_embeddings))
+
+    repo_embeddings = (
+        Path(__file__).resolve().parents[3]
+        / "backend"
+        / "src"
+        / "receipts_ai"
+        / "models"
+        / PRODUCT_TAXONOMY_EMBEDDINGS_FILENAME
+    )
+    if repo_embeddings.is_file():
+        return repo_embeddings
+
+    raise RuntimeError(
+        f"could not find {PRODUCT_TAXONOMY_EMBEDDINGS_FILENAME}; "
+        "run `uv run python devtools/build_taxonomy_embeddings.py` first"
+    )
+
+
+def _taxonomy_embedding_entry_from_json(
+    entry: object, *, dimension: int
+) -> TaxonomyEmbeddingEntry:
+    if not isinstance(entry, dict):
+        raise RuntimeError("taxonomy embedding entry must be a JSON object")
+    entry_object = cast(dict[str, object], entry)
+    parts = entry_object.get("parts")
+    embedding = entry_object.get("embedding")
+    if not isinstance(parts, list):
+        raise RuntimeError("taxonomy embedding entry has invalid parts")
+    parts_list = cast(list[object], parts)
+    if not parts_list or not all(
+        isinstance(part, str) and part for part in parts_list
+    ):
+        raise RuntimeError("taxonomy embedding entry has invalid parts")
+    vector = _embedding_vector_from_json(embedding)
+    if len(vector) != dimension:
+        raise RuntimeError(
+            f"taxonomy embedding vector dimension {len(vector)} did not match {dimension}"
+        )
+    return TaxonomyEmbeddingEntry(
+        path=tuple(cast(list[str], parts_list)),
+        embedding=vector,
+    )
+
+
+def _embedding_vector_from_json(vector: object) -> tuple[float, ...]:
+    if not isinstance(vector, list):
+        raise RuntimeError("embedding vector must be a JSON list")
+    values: list[float] = []
+    for value in cast(list[object], vector):
+        if not isinstance(value, int | float):
+            raise RuntimeError("embedding vector contains a non-numeric value")
+        values.append(float(value))
+    return tuple(values)
+
+
+def _single_embedding_vector(embeddings: object) -> tuple[float, ...]:
+    tolist = getattr(embeddings, "tolist", None)
+    if callable(tolist):
+        embeddings = tolist()
+    if not isinstance(embeddings, list):
+        raise RuntimeError("embedding model returned an unsupported query vector container")
+    embeddings_list = cast(list[object], embeddings)
+    if len(embeddings_list) != 1:
+        raise RuntimeError("embedding model returned an unsupported query vector container")
+    return _embedding_vector_from_json(embeddings_list[0])
+
+
+def _dot_product(left: tuple[float, ...], right: tuple[float, ...]) -> float:
+    if len(left) != len(right):
+        raise RuntimeError(f"vector dimension mismatch: {len(left)} != {len(right)}")
+    return sum(left_value * right_value for left_value, right_value in zip(left, right, strict=True))
 
 
 def _normalize_choice(response: str, choices: tuple[str, ...]) -> str | None:

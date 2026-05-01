@@ -42,6 +42,7 @@ dependencies = [
     "azure-ai-documentintelligence>=1.0.2",
     "firebase-admin>=7.4.0",
     "pydantic>=2.12.5",
+    "sentence-transformers>=5.0.0",
 ]
 
 
@@ -57,7 +58,6 @@ dev = [
     "rich>=14.3.2",
     "basedpyright>=1.38.0",
     "funlog>=0.2.1",
-    "sentence-transformers>=5.0.0",
 ]
 
 [project.scripts]
