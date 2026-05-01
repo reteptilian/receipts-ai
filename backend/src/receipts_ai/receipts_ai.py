@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import logging
 import os
 import sys
@@ -100,9 +101,15 @@ class FirestoreClient(Protocol):
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze a receipt with Azure Document Intelligence."
+        description="Analyze one or more receipts with Azure Document Intelligence."
     )
-    parser.add_argument("receipt", type=Path, help="Path to a receipt image or PDF.")
+    parser.add_argument(
+        "receipts",
+        metavar="receipt",
+        nargs="+",
+        type=Path,
+        help="Path to a receipt image or PDF. Provide multiple paths to process them together.",
+    )
     parser.add_argument(
         "--pipeline",
         choices=("azure", "openai"),
@@ -192,52 +199,94 @@ def main() -> None:
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
     cache = JsonCallCache(args.cache_file) if args.cache_file is not None else None
-    transaction = _process_receipt(
-        args.receipt, pipeline=args.pipeline, openai_model=args.openai_model, cache=cache
-    )
-    if transaction.receipt is None:
-        raise ValueError("transaction does not contain a receipt")
-
     category_client = (
         CachedCategoryModelClient(cache=cache, client_factory=create_ollama_category_client)
         if cache is not None
         else None
     )
 
-    if args.brave_search or args.categorize_items:
-        if cache is not None:
-            enrich_receipt_items_with_brave_search(
-                transaction,
-                client=CachedBraveSearchClient(
-                    cache=cache, client_factory=create_brave_search_client
-                ),
-                request_delay_seconds=args.brave_search_delay_seconds,
-            )
+    transactions: list[Transaction] = []
+    for receipt_path in args.receipts:
+        transaction = _process_receipt(
+            receipt_path, pipeline=args.pipeline, openai_model=args.openai_model, cache=cache
+        )
+        if transaction.receipt is None:
+            raise ValueError(f"transaction from {receipt_path} does not contain a receipt")
+
+        if args.brave_search or args.categorize_items:
+            if cache is not None:
+                enrich_receipt_items_with_brave_search(
+                    transaction,
+                    client=CachedBraveSearchClient(
+                        cache=cache, client_factory=create_brave_search_client
+                    ),
+                    request_delay_seconds=args.brave_search_delay_seconds,
+                )
+            else:
+                enrich_receipt_items_with_brave_search(
+                    transaction, request_delay_seconds=args.brave_search_delay_seconds
+                )
+            if category_client is not None:
+                clean_receipt_item_descriptions(transaction, client=category_client)
+            else:
+                clean_receipt_item_descriptions(transaction)
+        if args.categorize_items:
+            if category_client is not None:
+                categorize_receipt_items(transaction, client=category_client)
+                _classify_receipt_items_by_product_taxonomy(
+                    transaction,
+                    method=args.product_taxonomy_method,
+                    client=category_client,
+                )
+            else:
+                categorize_receipt_items(transaction)
+                _classify_receipt_items_by_product_taxonomy(
+                    transaction,
+                    method=args.product_taxonomy_method,
+                )
+        if args.upsert_firestore:
+            upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
+        transactions.append(transaction)
+
+    _write_transactions(transactions, output_format=args.format, output_path=args.output)
+
+
+def _write_transactions(
+    transactions: list[Transaction] | tuple[Transaction, ...],
+    *,
+    output_format: str,
+    output_path: Path | None = None,
+) -> None:
+    if output_path is None:
+        _write_transactions_to_file(transactions, output_format=output_format, file=sys.stdout)
+        return
+
+    with output_path.open("w", encoding="utf-8", newline="") as file:
+        _write_transactions_to_file(
+            transactions,
+            output_format=output_format,
+            file=file,
+        )
+
+
+def _write_transactions_to_file(
+    transactions: list[Transaction] | tuple[Transaction, ...],
+    *,
+    output_format: str,
+    file: TextIO,
+) -> None:
+    if output_format == "csv":
+        write_transactions_receipt_items_csv(transactions, file)
+        return
+
+    if output_format == "json":
+        if len(transactions) == 1:
+            write_transaction_json(transactions[0], file)
         else:
-            enrich_receipt_items_with_brave_search(
-                transaction, request_delay_seconds=args.brave_search_delay_seconds
-            )
-        if category_client is not None:
-            clean_receipt_item_descriptions(transaction, client=category_client)
-        else:
-            clean_receipt_item_descriptions(transaction)
-    if args.categorize_items:
-        if category_client is not None:
-            categorize_receipt_items(transaction, client=category_client)
-            _classify_receipt_items_by_product_taxonomy(
-                transaction,
-                method=args.product_taxonomy_method,
-                client=category_client,
-            )
-        else:
-            categorize_receipt_items(transaction)
-            _classify_receipt_items_by_product_taxonomy(
-                transaction,
-                method=args.product_taxonomy_method,
-            )
-    if args.upsert_firestore:
-        upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
-    _write_transaction(transaction, output_format=args.format, output_path=args.output)
+            write_transactions_json(transactions, file)
+        return
+
+    raise ValueError(f"unsupported output format: {output_format}")
 
 
 def _classify_receipt_items_by_product_taxonomy(
@@ -409,42 +458,43 @@ def _firestore_project_id() -> str:
     return DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
 
 
-def _write_transaction(
-    transaction: Transaction, *, output_format: str, output_path: Path | None = None
-) -> None:
-    if output_path is None:
-        _write_transaction_to_file(transaction, output_format=output_format, file=sys.stdout)
-        return
-
-    with output_path.open("w", encoding="utf-8", newline="") as file:
-        _write_transaction_to_file(transaction, output_format=output_format, file=file)
-
-
-def _write_transaction_to_file(
-    transaction: Transaction, *, output_format: str, file: TextIO
-) -> None:
-    if output_format == "csv":
-        write_transaction_receipt_items_csv(transaction, file)
-        return
-
-    if output_format == "json":
-        write_transaction_json(transaction, file)
-        return
-
-    raise ValueError(f"unsupported output format: {output_format}")
-
-
 def write_transaction_receipt_items_csv(transaction: Transaction, file: TextIO) -> None:
     if transaction.receipt is None:
         raise ValueError("transaction does not contain a receipt")
 
+    write_transactions_receipt_items_csv([transaction], file)
+
+
+def write_transactions_receipt_items_csv(
+    transactions: list[Transaction] | tuple[Transaction, ...], file: TextIO
+) -> None:
+    for transaction in transactions:
+        if transaction.receipt is None:
+            raise ValueError(f"transaction {transaction.id} does not contain a receipt")
+
     writer = csv.DictWriter(file, fieldnames=CSV_FIELDNAMES)
     writer.writeheader()
-    writer.writerows(_transaction_receipt_item_rows(transaction))
+    for transaction in transactions:
+        writer.writerows(_transaction_receipt_item_rows(transaction))
 
 
 def write_transaction_json(transaction: Transaction, file: TextIO) -> None:
     file.write(transaction.model_dump_json(by_alias=True, indent=2, exclude_none=True))
+    file.write("\n")
+
+
+def write_transactions_json(
+    transactions: list[Transaction] | tuple[Transaction, ...], file: TextIO
+) -> None:
+    file.write(
+        json.dumps(
+            [
+                transaction.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for transaction in transactions
+            ],
+            indent=2,
+        )
+    )
     file.write("\n")
 
 

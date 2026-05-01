@@ -7,7 +7,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 from typing_extensions import TypeAliasType
 
 
@@ -188,6 +188,12 @@ class ReceiptItem(BaseModel):
             le=1.0,
         ),
     ] = None
+
+    @model_validator(mode="after")
+    def fill_net_amount(self) -> ReceiptItem:
+        if self.net_amount is None:
+            self.net_amount = self.amount
+        return self
 
 
 class ExtractionMetadata(BaseModel):

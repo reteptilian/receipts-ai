@@ -170,7 +170,7 @@ def test_merges_costco_coupon_discounts_into_preceding_item():
     assert receipt.items[0].discount_description == "/1779212"
     assert receipt.items[0].net_amount == "8.99"
     assert receipt.items[1].discount_amount is None
-    assert receipt.items[1].net_amount is None
+    assert receipt.items[1].net_amount == "2.49"
 
 
 def test_does_not_merge_coupon_shaped_discount_for_other_payees():

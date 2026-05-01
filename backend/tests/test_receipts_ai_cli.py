@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import sys
 from datetime import date
@@ -26,6 +27,7 @@ from receipts_ai.receipts_ai import (
     write_receipt_json,
     write_transaction_json,
     write_transaction_receipt_items_csv,
+    write_transactions_json,
 )
 
 
@@ -121,7 +123,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_amount": "3.00",
             "item_discount_amount": "",
             "item_discount_description": "",
-            "item_net_amount": "",
+            "item_net_amount": "3.00",
             "item_line_type": "item",
             "item_category_id": "",
             "item_taxonomy_1": "",
@@ -204,6 +206,37 @@ def test_transaction_json_output_wraps_nested_receipt_struct():
     assert '"rawDescription": "COF"' in output.getvalue()
 
 
+def test_transactions_json_output_writes_json_array():
+    transactions = [
+        Transaction(
+            id="receipt_1",
+            source=Source.receipt,
+            transaction_date=date(2026, 4, 27),
+            payee="Coffee Shop",
+            amount="-7.00",
+            currency="USD",
+            receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+        ),
+        Transaction(
+            id="receipt_2",
+            source=Source.receipt,
+            transaction_date=date(2026, 4, 28),
+            payee="Bakery",
+            amount="-5.00",
+            currency="USD",
+            receipt=Receipt(items=[ReceiptItem(description="Bagel", amount="5.00")]),
+        ),
+    ]
+    output = StringIO()
+
+    write_transactions_json(transactions, output)
+
+    payload = json.loads(output.getvalue())
+    assert [transaction["id"] for transaction in payload] == ["receipt_1", "receipt_2"]
+    assert payload[0]["receipt"]["items"][0]["description"] == "Coffee"
+    assert payload[1]["receipt"]["items"][0]["description"] == "Bagel"
+
+
 def test_transaction_firestore_document_uses_json_safe_aliases():
     transaction = Transaction(
         id="receipt_1",
@@ -229,6 +262,7 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
                 "description": "Coffee",
                 "rawDescription": "COF",
                 "amount": "7.00",
+                "netAmount": "7.00",
                 "lineType": "item",
             }
         ],
@@ -434,6 +468,64 @@ def test_main_can_use_openai_pipeline(
     main()
 
     assert calls == [(receipt_path, "gpt-test", None)]
+
+
+def test_main_processes_multiple_receipts_as_combined_csv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    receipt_1_path = tmp_path / "receipt-1.pdf"
+    receipt_2_path = tmp_path / "receipt-2.pdf"
+    receipt_1_path.write_bytes(b"receipt 1")
+    receipt_2_path.write_bytes(b"receipt 2")
+    analyze_calls: list[Path] = []
+
+    def fake_analyze_receipt_file(path: Path) -> Path:
+        analyze_calls.append(path)
+        return path
+
+    def fake_transaction_from_document_intelligence_result(result: object) -> Transaction:
+        assert isinstance(result, Path)
+        path = result
+        receipt_number = "001" if path == receipt_1_path else "002"
+        amount = "1.00" if path == receipt_1_path else "2.00"
+        return Transaction(
+            id=f"transaction_{receipt_number}",
+            source=Source.receipt,
+            transaction_date=date(2026, 4, 27),
+            payee=f"Store {receipt_number}",
+            amount=f"-{amount}",
+            currency="USD",
+            receipt=Receipt(
+                receipt_number=receipt_number,
+                items=[
+                    ReceiptItem(
+                        description=f"Item {receipt_number}",
+                        amount=amount,
+                    )
+                ],
+            ),
+        )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["receipts-ai", str(receipt_1_path), str(receipt_2_path)],
+    )
+    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        receipts_ai,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+
+    main()
+
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert analyze_calls == [receipt_1_path, receipt_2_path]
+    assert [row["transaction_id"] for row in rows] == ["transaction_001", "transaction_002"]
+    assert [row["item_description"] for row in rows] == ["Item 001", "Item 002"]
 
 
 def test_main_wraps_brave_search_client_when_cache_file_is_provided(
