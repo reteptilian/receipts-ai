@@ -281,7 +281,9 @@ def test_upsert_transaction_to_firestore_merges_transaction_document(
             True,
         )
     ]
-    assert "Upserting transaction receipt_1 to Firestore collection test-transactions" in caplog.text
+    assert (
+        "Upserting transaction receipt_1 to Firestore collection test-transactions" in caplog.text
+    )
     assert (
         "Firestore upsert completed for transaction receipt_1 in collection test-transactions"
         in caplog.text
@@ -380,6 +382,58 @@ def test_main_can_enrich_items_with_brave_search(
 
     assert calls == [transaction]
     assert receipt.items[0].brave_search_result == "search payload"
+
+
+def test_main_can_use_openai_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"receipt")
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+    )
+    calls: list[tuple[Path, str, object | None]] = []
+
+    def fake_transaction_from_openai_receipt(
+        path: Path, *, model: str, cache: object | None = None
+    ) -> Transaction:
+        calls.append((path, model, cache))
+        return transaction
+
+    def fail_analyze_receipt_file(_path: Path) -> object:
+        raise AssertionError("azure pipeline should not run")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai",
+            "--pipeline",
+            "openai",
+            "--openai-model",
+            "gpt-test",
+            "--format",
+            "json",
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fail_analyze_receipt_file)
+    monkeypatch.setattr(
+        receipts_ai,
+        "transaction_from_openai_receipt",
+        fake_transaction_from_openai_receipt,
+    )
+
+    main()
+
+    assert calls == [(receipt_path, "gpt-test", None)]
 
 
 def test_main_wraps_brave_search_client_when_cache_file_is_provided(

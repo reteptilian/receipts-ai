@@ -12,6 +12,7 @@ __all__ = (  # noqa: F405
     "enrich_receipt_items_with_brave_search",
     "main",
     "receipt_from_document_intelligence_result",
+    "transaction_from_openai_receipt",
     "transaction_firestore_document",
     "upsert_transaction_to_firestore",
 )
@@ -19,5 +20,6 @@ __all__ = (  # noqa: F405
 from .brave_search import *  # noqa: F403
 from .categorization import *  # noqa: F403
 from .document_intelligence import *  # noqa: F403
+from .openai_receipt_extraction import *  # noqa: F403
 from .receipt_extraction import *  # noqa: F403
 from .receipts_ai import *  # noqa: F403

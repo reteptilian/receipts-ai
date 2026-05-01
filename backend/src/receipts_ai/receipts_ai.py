@@ -24,6 +24,11 @@ from receipts_ai.categorization import (
 )
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.models.transaction import Receipt, Transaction
+from receipts_ai.openai_receipt_extraction import (
+    DEFAULT_OPENAI_MODEL,
+    OPENAI_MODEL_ENV_VAR,
+    transaction_from_openai_receipt,
+)
 from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
 
 if TYPE_CHECKING:
@@ -97,6 +102,23 @@ def main() -> None:
     )
     parser.add_argument("receipt", type=Path, help="Path to a receipt image or PDF.")
     parser.add_argument(
+        "--pipeline",
+        choices=("azure", "openai"),
+        default="azure",
+        help=(
+            "Receipt extraction pipeline to use. 'azure' keeps the existing Azure Document "
+            "Intelligence pipeline; 'openai' sends the receipt directly to OpenAI."
+        ),
+    )
+    parser.add_argument(
+        "--openai-model",
+        default=os.getenv(OPENAI_MODEL_ENV_VAR, DEFAULT_OPENAI_MODEL),
+        help=(
+            "OpenAI model for --pipeline openai. Can also be set with "
+            f"{OPENAI_MODEL_ENV_VAR}. Defaults to {DEFAULT_OPENAI_MODEL}."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=("csv", "json"),
         default="csv",
@@ -132,7 +154,7 @@ def main() -> None:
     parser.add_argument(
         "--cache-file",
         type=Path,
-        help="Cache Azure Document Intelligence, Brave Search, and Ollama responses in this JSON file.",
+        help="Cache Azure Document Intelligence, OpenAI, Brave Search, and Ollama responses in this JSON file.",
     )
     parser.add_argument(
         "--upsert-firestore",
@@ -158,12 +180,9 @@ def main() -> None:
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
     cache = JsonCallCache(args.cache_file) if args.cache_file is not None else None
-    result = (
-        analyze_receipt_file(args.receipt, cache=cache)
-        if cache is not None
-        else analyze_receipt_file(args.receipt)
+    transaction = _process_receipt(
+        args.receipt, pipeline=args.pipeline, openai_model=args.openai_model, cache=cache
     )
-    transaction = transaction_from_document_intelligence_result(result)
     if transaction.receipt is None:
         raise ValueError("transaction does not contain a receipt")
 
@@ -200,6 +219,27 @@ def main() -> None:
     if args.upsert_firestore:
         upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
     _write_transaction(transaction, output_format=args.format, output_path=args.output)
+
+
+def _process_receipt(
+    receipt_path: Path,
+    *,
+    pipeline: str,
+    openai_model: str,
+    cache: JsonCallCache | None,
+) -> Transaction:
+    if pipeline == "azure":
+        result = (
+            analyze_receipt_file(receipt_path, cache=cache)
+            if cache is not None
+            else analyze_receipt_file(receipt_path)
+        )
+        return transaction_from_document_intelligence_result(result)
+
+    if pipeline == "openai":
+        return transaction_from_openai_receipt(receipt_path, model=openai_model, cache=cache)
+
+    raise ValueError(f"unsupported receipt pipeline: {pipeline}")
 
 
 def create_firestore_client() -> FirestoreClient:
