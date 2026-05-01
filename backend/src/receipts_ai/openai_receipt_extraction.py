@@ -262,16 +262,21 @@ def openai_receipt_cache_request(receipt_path: Path, *, model: str) -> dict[str,
 def _system_prompt(schema: Mapping[str, Any]) -> str:
     return "\n".join(
         (
-            "You extract itemized receipts into JSON for an expense tracking system.",
-            "Return exactly one JSON object that validates against the Transaction schema below.",
-            "Use the schema field aliases, such as transactionDate, categoryId, and rawDescription.",
-            "Set source to receipt. Set kind to expense unless the receipt is clearly income, transfer, or adjustment.",
-            "Use ISO dates. Use ISO 4217 currency codes, defaulting to USD when the receipt does not state one.",
-            "Encode all money amounts as decimal strings. The transaction amount is from the account perspective, so purchases are negative and receipt item amounts are normally positive.",
-            "Preserve itemized line items. Include discounts, returns, tax, tip, fees, shipping, and service charges as receipt items when visible.",
-            "Costco and similar receipts may show instant savings or coupon discounts as a separate raw line immediately after the item they apply to. These lines often look like a long numeric code, a slash code, and a trailing negative amount, for example '0000376418 /1721554 3.50-'. When an instant-savings line immediately follows an item, collapse it into the previous receipt item instead of returning it as a separate item: keep the previous item amount as the pre-discount amount, set discountAmount to the signed negative discount, set discountDescription to the raw discount line text, and set netAmount to item amount plus discountAmount. If multiple savings lines apply to the same item, combine them into one signed discountAmount and join their raw texts in discountDescription.",
+            "Role: You are a specialized financial data extraction agent. "
+            "Task: Analyze the attached receipt image and convert it into a structured JSON format. "
+            "Step 1: Visual Extraction – Extract all line items, quantities, and prices exactly as they appear. "
+            "Step 2: Semantic Decoding – For each item, look at the cryptic abbreviation and use your internal"
+            'knowledge to determine the full, human-readable product name (e.g., "Hlf Gal 2% Mlk" -> "Half Gallon 2% Milk").'
+            "Step 3: Return exactly one JSON object that validates against the Transaction schema below. ",
+            "Use the schema field aliases, such as transactionDate, categoryId, and rawDescription. ",
+            "Set source to receipt. Set kind to expense unless the receipt is clearly income, transfer, or adjustment. ",
+            "Use ISO dates. Use ISO 4217 currency codes, defaulting to USD when the receipt does not state one. ",
+            "Encode all money amounts as decimal strings. The transaction amount is from the account perspective, so purchases are negative and receipt item amounts are normally positive. ",
+            "Include sales tax as its own item. ",
+            "Do not include items for summary receipts totals such as receipt total or total savings or total discounts. "
+            "Costco and similar receipts may show instant savings or coupon discounts as a separate raw line immediately after the item they apply to. These lines often look like a long numeric code, a slash code, and a trailing negative amount, for example '0000376418 /1721554 3.50-'. When an instant-savings line immediately follows an item, collapse it into the previous receipt item instead of returning it as a separate item: keep the previous item amount as the pre-discount amount, set discountAmount to the signed negative discount, set discountDescription to the raw discount line text, and set netAmount to item amount plus discountAmount. If multiple savings lines apply to the same item, combine them into one signed discountAmount and join their raw texts in discountDescription. ",
             "For example, if the receipt shows '1721554 JP RAINBOW 12.49' followed by '0000376418 /1721554 3.50-', return one item with rawDescription '1721554 JP RAINBOW', amount '12.49', discountAmount '-3.50', discountDescription '0000376418 /1721554 3.50-', and netAmount '8.99'.",
-            "Use null rather than guessing when optional values are not visible. Do not invent loyalty IDs, card numbers, or addresses.",
+            "Use null rather than guessing when optional values are not visible. Do not invent loyalty IDs, card numbers, or addresses. ",
             "Schema JSON:",
             json.dumps(schema, separators=(",", ":")),
         )
