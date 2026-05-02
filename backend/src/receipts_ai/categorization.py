@@ -1436,35 +1436,35 @@ def _search_results_text(item: ReceiptItem) -> str:
     return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
 
 
-def _transaction_search_results_text(transaction: Transaction) -> str:
-    if transaction.brave_search_result is None:
-        return "No search results."
+# def _transaction_search_results_text(transaction: Transaction) -> str:
+#     if transaction.brave_search_result is None:
+#         return "No search results."
 
-    try:
-        payload: object = json.loads(transaction.brave_search_result)
-    except json.JSONDecodeError:
-        return transaction.brave_search_result
+#     try:
+#         payload: object = json.loads(transaction.brave_search_result)
+#     except json.JSONDecodeError:
+#         return transaction.brave_search_result
 
-    if not isinstance(payload, list):
-        return "No search results."
+#     if not isinstance(payload, list):
+#         return "No search results."
 
-    lines: list[str] = []
-    for index, result_object in enumerate(cast(list[object], payload), start=1):
-        if not isinstance(result_object, dict):
-            continue
-        result = cast(dict[str, object], result_object)
-        title = result.get("title")
-        description = result.get("description")
-        lines.append(
-            "\n".join(
-                (
-                    f"{index}. Title: {title if isinstance(title, str) else ''}",
-                    f"Description: {description if isinstance(description, str) else ''}",
-                )
-            )
-        )
+#     lines: list[str] = []
+#     for index, result_object in enumerate(cast(list[object], payload), start=1):
+#         if not isinstance(result_object, dict):
+#             continue
+#         result = cast(dict[str, object], result_object)
+#         title = result.get("title")
+#         description = result.get("description")
+#         lines.append(
+#             "\n".join(
+#                 (
+#                     f"{index}. Title: {title if isinstance(title, str) else ''}",
+#                     f"Description: {description if isinstance(description, str) else ''}",
+#                 )
+#             )
+#         )
 
-    return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
+#     return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
 
 
 def _clean_description_response(response: str) -> str:
