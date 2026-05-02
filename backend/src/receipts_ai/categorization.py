@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from receipts_ai.cache import JsonCallCache
-from receipts_ai.models.transaction import ReceiptItem, Transaction
+from receipts_ai.models.transaction import CategoryAllocation, ReceiptItem, Source1, Transaction
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_TIMEOUT_SECONDS = 30.0
@@ -29,6 +29,8 @@ MAX_TAXONOMY_VECTOR_CANDIDATES = 20
 MAX_TAXONOMY_LEVELS = 9
 TAXONOMY_MIN_CHOICE_PROBABILITY = 0.35
 TAXONOMY_MIN_SEARCH_PROBABILITY = 0.15
+TRANSACTION_MIN_CATEGORY_CONFIDENCE = 0.35
+TRANSACTION_CATEGORY_CHOICE_ALIASES = tuple("1234567890!#$%&?@^_~+=/|<>[]{}")
 PRODUCT_TAXONOMY_FILENAME = "taxonomy.en-US.txt"
 PRODUCT_TAXONOMY_EMBEDDINGS_FILENAME = "taxonomy_embeddings.json"
 DEFAULT_TAXONOMY_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -529,6 +531,65 @@ def categorize_receipt_items(
     return transaction
 
 
+def categorize_transactions(
+    transactions: list[Transaction] | tuple[Transaction, ...],
+    *,
+    client: CategoryModelClient | None = None,
+    categories: dict[str, object] | None = None,
+    minimum_confidence: float = TRANSACTION_MIN_CATEGORY_CONFIDENCE,
+) -> list[Transaction] | tuple[Transaction, ...]:
+    if minimum_confidence < 0 or minimum_confidence > 1:
+        raise ValueError("minimum_confidence must be between 0 and 1")
+
+    active_client = client if client is not None else create_ollama_category_client()
+    active_categories = categories if categories is not None else load_budget_categories()
+    top_level_categories = tuple(active_categories.keys())
+
+    for transaction in transactions:
+        logger.info("Categorizing transaction %s", transaction.id)
+        top_level_choice = _choose_category_with_confidence(
+            client=active_client,
+            prompt=_transaction_top_level_prompt(transaction, top_level_categories),
+            choices=top_level_categories,
+        )
+        if top_level_choice is None or top_level_choice.probability < minimum_confidence:
+            logger.info("Skipping transaction %s because top-level confidence was low", transaction.id)
+            continue
+
+        leaf_categories = tuple(_leaf_categories(active_categories[top_level_choice.choice]))
+        if not leaf_categories:
+            raise RuntimeError(f"budget category has no leaf categories: {top_level_choice.choice}")
+
+        leaf_choice = _choose_category_with_confidence(
+            client=active_client,
+            prompt=_transaction_leaf_category_prompt(
+                transaction, top_level_choice.choice, leaf_categories
+            ),
+            choices=leaf_categories,
+        )
+        if leaf_choice is None or leaf_choice.probability < minimum_confidence:
+            logger.info("Skipping transaction %s because leaf confidence was low", transaction.id)
+            continue
+
+        confidence = min(top_level_choice.probability, leaf_choice.probability)
+        transaction.category_allocations = [
+            CategoryAllocation(
+                category_id=leaf_choice.choice,
+                amount=transaction.amount,
+                confidence=confidence,
+                source=Source1.model,
+            )
+        ]
+        logger.info(
+            "Categorized transaction %s as %s with confidence %.3f",
+            transaction.id,
+            leaf_choice.choice,
+            confidence,
+        )
+
+    return transactions
+
+
 def classify_receipt_items_by_product_taxonomy(
     transaction: Transaction,
     *,
@@ -717,6 +778,44 @@ def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple
             f"model returned an invalid category {response!r}; expected one of: {options}"
         )
     return choice
+
+
+def _choose_category_with_confidence(
+    *, client: CategoryModelClient, prompt: str, choices: tuple[str, ...]
+) -> CategoryChoiceProbability | None:
+    choice_aliases = _transaction_category_choice_aliases(choices)
+    alias_to_choice = {alias: choice for choice, alias in choice_aliases.items()}
+    alias_choices = tuple(alias_to_choice)
+    completion = _complete_with_probabilities(
+        client,
+        _category_alias_prompt(prompt, choice_aliases),
+        choices=alias_choices,
+    )
+    probabilities = _taxonomy_choice_probabilities_from_aliases(
+        completion.probabilities,
+        alias_to_choice=alias_to_choice,
+        choices=choices,
+    )
+    response_alias = _normalize_choice_alias(completion.response, alias_to_choice)
+    if response_alias is not None:
+        choice = alias_to_choice[response_alias]
+    else:
+        choice = _normalize_choice(completion.response, choices)
+    if choice is None:
+        logger.warning(
+            "Skipping transaction category response %r because it did not match any category label",
+            completion.response,
+        )
+        return None
+
+    for result in probabilities:
+        if result.choice == choice:
+            return result
+
+    if probabilities:
+        return CategoryChoiceProbability(choice=choice, probability=0.0)
+
+    return CategoryChoiceProbability(choice=choice, probability=1.0)
 
 
 def _complete_choice(client: CategoryModelClient, prompt: str, *, choices: tuple[str, ...]) -> str:
@@ -977,6 +1076,14 @@ def _taxonomy_choice_aliases(choices: tuple[str, ...]) -> dict[str, str]:
     return dict(zip(choices, aliases, strict=True))
 
 
+def _transaction_category_choice_aliases(choices: tuple[str, ...]) -> dict[str, str]:
+    if len(choices) <= len(TRANSACTION_CATEGORY_CHOICE_ALIASES):
+        aliases = TRANSACTION_CATEGORY_CHOICE_ALIASES[: len(choices)]
+    else:
+        aliases = tuple(str(index) for index in range(1, len(choices) + 1))
+    return dict(zip(choices, aliases, strict=True))
+
+
 def _taxonomy_choice_probabilities_from_aliases(
     probabilities: tuple[CategoryChoiceProbability, ...],
     *,
@@ -1088,6 +1195,26 @@ def _leaf_category_prompt(
     )
 
 
+def _transaction_top_level_prompt(
+    transaction: Transaction, categories: tuple[str, ...]
+) -> str:
+    return _transaction_category_prompt(
+        "Choose the best top level budget category.",
+        categories=categories,
+        transaction=transaction,
+    )
+
+
+def _transaction_leaf_category_prompt(
+    transaction: Transaction, top_level_category: str, categories: tuple[str, ...]
+) -> str:
+    return _transaction_category_prompt(
+        f"Top level category: {top_level_category}\nChoose the best specific budget category.",
+        categories=categories,
+        transaction=transaction,
+    )
+
+
 def _product_taxonomy_alias_prompt(
     item: ReceiptItem, selected_path: list[str], choice_aliases: dict[str, str]
 ) -> str:
@@ -1156,6 +1283,37 @@ def _category_prompt(
     )
 
 
+def _transaction_category_prompt(
+    instruction: str, *, categories: tuple[str, ...], transaction: Transaction
+) -> str:
+    options = "\n".join(f"- {category}" for category in categories)
+    return (
+        f"{instruction}\n"
+        "Return only one exact category name from Options.\n\n"
+        f"Options:\n{options}\n\n"
+        f"Raw transaction description: {_transaction_description_text(transaction)}\n\n"
+        f"Search results:\n{_transaction_search_results_text(transaction)}"
+    )
+
+
+def _category_alias_prompt(prompt: str, choice_aliases: dict[str, str]) -> str:
+    labels = "\n".join(f"{alias}: {choice}" for choice, alias in choice_aliases.items())
+    return (
+        f"{prompt}\n\n"
+        "Pick the most appropriate label.\n"
+        "Respond with exactly one label token, not the category name.\n\n"
+        f"Labels:\n{labels}\n\n"
+        "Label: "
+    )
+
+
+def _transaction_description_text(transaction: Transaction) -> str:
+    parts = [transaction.payee]
+    if transaction.description and transaction.description != transaction.payee:
+        parts.append(transaction.description)
+    return " ".join(part.strip() for part in parts if part.strip())
+
+
 def _search_results_text(item: ReceiptItem) -> str:
     if item.brave_search_result is None:
         return "No search results."
@@ -1164,6 +1322,37 @@ def _search_results_text(item: ReceiptItem) -> str:
         payload: object = json.loads(item.brave_search_result)
     except json.JSONDecodeError:
         return item.brave_search_result
+
+    if not isinstance(payload, list):
+        return "No search results."
+
+    lines: list[str] = []
+    for index, result_object in enumerate(cast(list[object], payload), start=1):
+        if not isinstance(result_object, dict):
+            continue
+        result = cast(dict[str, object], result_object)
+        title = result.get("title")
+        description = result.get("description")
+        lines.append(
+            "\n".join(
+                (
+                    f"{index}. Title: {title if isinstance(title, str) else ''}",
+                    f"Description: {description if isinstance(description, str) else ''}",
+                )
+            )
+        )
+
+    return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
+
+
+def _transaction_search_results_text(transaction: Transaction) -> str:
+    if transaction.brave_search_result is None:
+        return "No search results."
+
+    try:
+        payload: object = json.loads(transaction.brave_search_result)
+    except json.JSONDecodeError:
+        return transaction.brave_search_result
 
     if not isinstance(payload, list):
         return "No search results."

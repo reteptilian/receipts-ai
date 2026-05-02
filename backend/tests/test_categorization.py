@@ -22,6 +22,7 @@ from receipts_ai.categorization import (
     TaxonomyEmbeddingIndex,
     UrlLibOllamaClient,
     categorize_receipt_items,
+    categorize_transactions,
     classify_receipt_items_by_product_taxonomy,
     classify_receipt_items_by_product_taxonomy_vector_search,
     clean_receipt_item_descriptions,
@@ -279,6 +280,116 @@ def test_categorize_receipt_items_uses_clean_description_and_leaf_category_only(
     assert "Premium Saltines" not in "\n".join(client.prompts)
     assert "Crisp crackers sold in grocery stores." not in "\n".join(client.prompts)
     assert "RAW CONFUSING CODE" not in "\n".join(client.prompts)
+
+
+def test_categorize_transactions_sets_single_model_allocation_from_search_results():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="COSTCO WHSE",
+        description="POS PURCHASE COSTCO WHSE #123",
+        brave_search_result=json.dumps(
+            [
+                {
+                    "title": "Costco Wholesale",
+                    "description": "Warehouse store with groceries and household goods.",
+                }
+            ]
+        ),
+        amount="-42.19",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="Food & Dining",
+                probabilities=(CategoryChoiceProbability("Food & Dining", 0.91),),
+            ),
+            CategoryCompletion(
+                response="Groceries",
+                probabilities=(CategoryChoiceProbability("Groceries", 0.78),),
+            ),
+        ]
+    )
+
+    result = categorize_transactions(
+        [transaction],
+        client=client,
+        categories={"Food & Dining": {"Groceries": {}, "Restaurants & Dining Out": {}}},
+    )
+
+    assert result == [transaction]
+    allocations = transaction.category_allocations
+    assert allocations is not None
+    assert len(allocations) == 1
+    allocation = allocations[0]
+    assert allocation.category_id == "Groceries"
+    assert allocation.amount == "-42.19"
+    assert allocation.confidence == 0.78
+    assert allocation.source == "model"
+    assert "Raw transaction description: COSTCO WHSE POS PURCHASE COSTCO WHSE #123" in client.prompts[0]
+    assert "1. Title: Costco Wholesale" in client.prompts[0]
+    assert "1: Food & Dining" in client.prompts[0]
+    assert client.prompts[0].endswith("Label: ")
+
+
+def test_categorize_transactions_skips_low_confidence_response():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="UNKNOWN PAYEE",
+        description="ACH WEB PMT 123",
+        amount="-42.19",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="Food & Dining",
+                probabilities=(CategoryChoiceProbability("Food & Dining", 0.2),),
+            ),
+        ]
+    )
+
+    categorize_transactions(
+        [transaction],
+        client=client,
+        categories={"Food & Dining": {"Groceries": {}}},
+    )
+
+    assert transaction.category_allocations == []
+    assert len(client.prompts) == 1
+
+
+def test_categorize_transactions_skips_invalid_single_character_response():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="PUGET SOUND ENER",
+        description="ACH Debit PUGET SOUND ENER BILLPAY",
+        amount="-96.00",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="H",
+                probabilities=(CategoryChoiceProbability("H", 1.0),),
+            ),
+        ]
+    )
+
+    categorize_transactions(
+        [transaction],
+        client=client,
+        categories={"Housing & Utilities": {"Electricity": {}}, "Food & Dining": {"Groceries": {}}},
+    )
+
+    assert transaction.category_allocations == []
+    assert "1: Housing & Utilities" in client.prompts[0]
 
 
 def test_classify_receipt_items_by_product_taxonomy_walks_each_level():

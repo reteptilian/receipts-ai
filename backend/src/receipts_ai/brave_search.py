@@ -154,6 +154,47 @@ def enrich_receipt_items_with_brave_search(
     return transaction
 
 
+def enrich_transactions_with_brave_search(
+    transactions: list[Transaction] | tuple[Transaction, ...],
+    *,
+    client: BraveSearchClient | None = None,
+    request_delay_seconds: float | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[Transaction] | tuple[Transaction, ...]:
+    active_client = client if client is not None else create_brave_search_client()
+    active_request_delay_seconds = (
+        _brave_search_request_delay_seconds()
+        if request_delay_seconds is None
+        else request_delay_seconds
+    )
+    if active_request_delay_seconds < 0:
+        raise ValueError("request_delay_seconds must not be negative")
+
+    sent_live_request = False
+    for index, transaction in enumerate(transactions):
+        query = _transaction_query(transaction)
+        if not query:
+            continue
+        query_is_cached = (
+            active_client.is_cached(query)
+            if isinstance(active_client, CachedBraveSearchClient)
+            else False
+        )
+        if sent_live_request and not query_is_cached and active_request_delay_seconds > 0:
+            logger.info(
+                "Sleeping %.2f seconds before the next Brave Search query",
+                active_request_delay_seconds,
+            )
+            sleep(active_request_delay_seconds)
+        logger.info("Enriching transaction %s with Brave Search: %s", index + 1, query)
+        result = active_client.search(query)
+        if not query_is_cached:
+            sent_live_request = True
+        transaction.brave_search_result = json.dumps(_search_result_summaries(result), sort_keys=True)
+        logger.info("Stored Brave Search response on transaction %s", index + 1)
+    return transactions
+
+
 def _search_result_summaries(result: Any) -> list[dict[str, str]]:
     if not isinstance(result, dict):
         return []
@@ -190,6 +231,13 @@ def _receipt_item_query(payee: str, item: ReceiptItem) -> str:
     description = item.raw_description or item.description
     price = item.unit_price if item.unit_price is not None else item.amount
     return " ".join((payee.strip(), description.strip(), _format_item_amount(price)))
+
+
+def _transaction_query(transaction: Transaction) -> str:
+    parts = [transaction.payee]
+    if transaction.description and transaction.description != transaction.payee:
+        parts.append(transaction.description)
+    return " ".join(part.strip() for part in parts if part.strip())
 
 
 def _format_item_amount(amount: str) -> str:

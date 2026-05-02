@@ -13,6 +13,17 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TextIO
 
+from receipts_ai.brave_search import (
+    CachedBraveSearchClient,
+    create_brave_search_client,
+    enrich_transactions_with_brave_search,
+)
+from receipts_ai.cache import JsonCallCache
+from receipts_ai.categorization import (
+    CachedCategoryModelClient,
+    categorize_transactions,
+    create_ollama_category_client,
+)
 from receipts_ai.ingest_receipts import (
     DEFAULT_FIRESTORE_COLLECTION,
     upsert_transaction_to_firestore,
@@ -68,6 +79,26 @@ def main() -> None:
         help="Write output to a file instead of stdout.",
     )
     parser.add_argument(
+        "--brave-search",
+        action="store_true",
+        help="Populate each transaction braveSearchResult with Brave Search summaries.",
+    )
+    parser.add_argument(
+        "--brave-search-delay-seconds",
+        type=float,
+        help="Sleep this many seconds between Brave Search requests.",
+    )
+    parser.add_argument(
+        "--categorize-transactions",
+        action="store_true",
+        help="Use Ollama to populate each transaction categoryAllocations.",
+    )
+    parser.add_argument(
+        "--cache-file",
+        type=Path,
+        help="Cache Brave Search and Ollama responses in this JSON file.",
+    )
+    parser.add_argument(
         "--upsert-firestore",
         action="store_true",
         help=(
@@ -90,9 +121,35 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
+    cache = JsonCallCache(args.cache_file) if args.cache_file is not None else None
+    category_client = (
+        CachedCategoryModelClient(cache=cache, client_factory=create_ollama_category_client)
+        if cache is not None
+        else None
+    )
+
     transactions: list[Transaction] = []
     for statement_path in args.statements:
         statement_transactions = transactions_from_ofx_file(statement_path)
+        if args.brave_search or args.categorize_transactions:
+            if cache is not None:
+                enrich_transactions_with_brave_search(
+                    statement_transactions,
+                    client=CachedBraveSearchClient(
+                        cache=cache, client_factory=create_brave_search_client
+                    ),
+                    request_delay_seconds=args.brave_search_delay_seconds,
+                )
+            else:
+                enrich_transactions_with_brave_search(
+                    statement_transactions,
+                    request_delay_seconds=args.brave_search_delay_seconds,
+                )
+        if args.categorize_transactions:
+            if category_client is not None:
+                categorize_transactions(statement_transactions, client=category_client)
+            else:
+                categorize_transactions(statement_transactions)
         if args.upsert_firestore:
             for transaction in statement_transactions:
                 upsert_transaction_to_firestore(

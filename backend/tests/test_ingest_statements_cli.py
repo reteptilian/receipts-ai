@@ -18,7 +18,14 @@ from receipts_ai.ingest_statements import (
     write_transactions_csv,
     write_transactions_json,
 )
-from receipts_ai.models.transaction import Kind, Source, Status, Transaction
+from receipts_ai.models.transaction import (
+    CategoryAllocation,
+    Kind,
+    Source,
+    Source1,
+    Status,
+    Transaction,
+)
 
 
 def test_parses_sgml_ofx_bank_transactions():
@@ -282,3 +289,78 @@ def test_main_can_upsert_firestore(
     main()
 
     assert calls == [("Coffee Shop", "test-transactions")]
+
+
+def test_main_can_enrich_and_categorize_transactions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    statement_path = tmp_path / "checking.ofx"
+    statement_path.write_text(
+        """
+        <OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>USD
+        <BANKACCTFROM><ACCTID>checking</ACCTID></BANKACCTFROM>
+        <BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260427
+        <TRNAMT>-7.00<FITID>checking-1<NAME>Coffee Shop<MEMO>CARD PURCHASE COF SHOP</STMTTRN></BANKTRANLIST>
+        </STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>
+        """,
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+
+    def fake_enrich_transactions_with_brave_search(
+        transactions: list[Transaction],
+        *,
+        request_delay_seconds: float | None = None,
+    ) -> list[Transaction]:
+        calls.append(f"brave:{request_delay_seconds}")
+        transactions[0].brave_search_result = json.dumps(
+            [{"title": "Coffee Shop", "description": "Cafe and espresso bar."}]
+        )
+        return transactions
+
+    def fake_categorize_transactions(transactions: list[Transaction]) -> list[Transaction]:
+        calls.append("categorize")
+        assert transactions[0].brave_search_result is not None
+        transactions[0].category_allocations = [
+            CategoryAllocation(
+                category_id="Restaurants & Dining Out",
+                amount="-7.00",
+                confidence=0.8,
+                source=Source1.model,
+            )
+        ]
+        return transactions
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ingest_statements.py",
+            "--categorize-transactions",
+            "--brave-search-delay-seconds",
+            "1.1",
+            str(statement_path),
+        ],
+    )
+    monkeypatch.setattr(
+        ingest_statements,
+        "enrich_transactions_with_brave_search",
+        fake_enrich_transactions_with_brave_search,
+    )
+    monkeypatch.setattr(ingest_statements, "categorize_transactions", fake_categorize_transactions)
+
+    main()
+
+    assert calls == ["brave:1.1", "categorize"]
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    allocations = json.loads(rows[0]["category_allocations"])
+    assert allocations == [
+        {
+            "categoryId": "Restaurants & Dining Out",
+            "amount": "-7.00",
+            "confidence": 0.8,
+            "source": "model",
+        }
+    ]

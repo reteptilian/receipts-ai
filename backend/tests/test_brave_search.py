@@ -17,6 +17,7 @@ from receipts_ai.brave_search import (
     UrlLibBraveSearchClient,
     create_brave_search_client,
     enrich_receipt_items_with_brave_search,
+    enrich_transactions_with_brave_search,
 )
 from receipts_ai.cache import JsonCallCache
 from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
@@ -354,3 +355,28 @@ def test_enrich_receipt_items_with_brave_search_skips_delay_for_cached_queries(
 
     assert sleeps == [1.1]
     assert brave_client.queries == ["Coffee Shop COF $7.00", "Coffee Shop TEA $4.00"]
+
+
+def test_enrich_transactions_with_brave_search_uses_description_without_amount():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="COSTCO WHSE",
+        description="POS PURCHASE COSTCO WHSE #123",
+        amount="-42.19",
+        currency="USD",
+    )
+    client = FakeBraveClient()
+
+    result = enrich_transactions_with_brave_search([transaction], client=client)
+
+    assert result == [transaction]
+    assert client.queries == ["COSTCO WHSE POS PURCHASE COSTCO WHSE #123"]
+    assert transaction.brave_search_result is not None
+    assert json.loads(transaction.brave_search_result) == [
+        {
+            "description": "Crisp crackers with sea salt.",
+            "title": "Premium Saltines",
+        }
+    ]
