@@ -154,11 +154,20 @@ def main() -> None:
     )
     parser.add_argument(
         "--categorize",
+        "--categorize-items",
         action="store_true",
         dest="categorize_items",
         help=(
             "Use Ollama to populate each receipt item categoryId and product taxonomy "
             "from Brave Search results."
+        ),
+    )
+    parser.add_argument(
+        "--flatten-budget-categories",
+        action="store_true",
+        help=(
+            "With --categorize, ask Ollama to choose once from flattened "
+            "'Top > Subcategory' budget category paths."
         ),
     )
     parser.add_argument(
@@ -233,14 +242,24 @@ def main() -> None:
                 clean_receipt_item_descriptions(transaction)
         if args.categorize_items:
             if category_client is not None:
-                categorize_receipt_items(transaction, client=category_client)
+                if args.flatten_budget_categories:
+                    categorize_receipt_items(
+                        transaction,
+                        client=category_client,
+                        use_flattened_categories=True,
+                    )
+                else:
+                    categorize_receipt_items(transaction, client=category_client)
                 _classify_receipt_items_by_product_taxonomy(
                     transaction,
                     method=args.product_taxonomy_method,
                     client=category_client,
                 )
             else:
-                categorize_receipt_items(transaction)
+                if args.flatten_budget_categories:
+                    categorize_receipt_items(transaction, use_flattened_categories=True)
+                else:
+                    categorize_receipt_items(transaction)
                 _classify_receipt_items_by_product_taxonomy(
                     transaction,
                     method=args.product_taxonomy_method,

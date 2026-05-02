@@ -282,6 +282,40 @@ def test_categorize_receipt_items_uses_clean_description_and_leaf_category_only(
     assert "RAW CONFUSING CODE" not in "\n".join(client.prompts)
 
 
+def test_categorize_receipt_items_can_choose_from_flattened_categories():
+    item = ReceiptItem(
+        description="Nabisco Premium Saltine Crackers",
+        amount="4.49",
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="FredMeyer",
+        amount="-4.49",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    client = FakeCategoryClient(["Food & Dining > Groceries"])
+
+    result = categorize_receipt_items(
+        transaction,
+        client=client,
+        categories={
+            "Housing & Utilities": {"Mortgage & Rent": {}},
+            "Food & Dining": {"Groceries": {}, "Restaurants & Dining Out": {}},
+        },
+        use_flattened_categories=True,
+    )
+
+    assert result is transaction
+    assert item.category_id == "Groceries"
+    assert len(client.prompts) == 1
+    assert "Choose the best budget category path." in client.prompts[0]
+    assert "- Housing & Utilities > Mortgage & Rent" in client.prompts[0]
+    assert "- Food & Dining > Groceries" in client.prompts[0]
+
+
 def test_categorize_transactions_sets_single_model_allocation_from_search_results():
     transaction = Transaction(
         id="bank_statement_1",
@@ -332,6 +366,46 @@ def test_categorize_transactions_sets_single_model_allocation_from_search_result
     assert "1. Title: Costco Wholesale" in client.prompts[0]
     assert "1: Food & Dining" in client.prompts[0]
     assert client.prompts[0].endswith("Label: ")
+
+
+def test_categorize_transactions_can_choose_from_flattened_categories():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="COSTCO WHSE",
+        description="POS PURCHASE COSTCO WHSE #123",
+        amount="-42.19",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="1",
+                probabilities=(CategoryChoiceProbability("1", 0.82),),
+            ),
+        ]
+    )
+
+    categorize_transactions(
+        [transaction],
+        client=client,
+        categories={
+            "Food & Dining": {"Groceries": {}, "Restaurants & Dining Out": {}},
+            "Housing & Utilities": {"Mortgage & Rent": {}},
+        },
+        use_flattened_categories=True,
+    )
+
+    allocations = transaction.category_allocations
+    assert allocations is not None
+    assert len(allocations) == 1
+    assert allocations[0].category_id == "Groceries"
+    assert allocations[0].confidence == 0.82
+    assert len(client.prompts) == 1
+    assert "Choose the best budget category path." in client.prompts[0]
+    assert "1: Food & Dining > Groceries" in client.prompts[0]
+    assert "2: Food & Dining > Restaurants & Dining Out" in client.prompts[0]
 
 
 def test_categorize_transactions_skips_low_confidence_response():

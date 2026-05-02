@@ -818,6 +818,89 @@ def test_main_can_categorize_items_after_brave_search(
     assert receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"
 
 
+def test_main_can_use_flattened_budget_categories(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"receipt")
+    receipt = Receipt(items=[ReceiptItem(description="Saltines", amount="4.49")])
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="FredMeyer",
+        amount="-4.49",
+        currency="USD",
+        receipt=receipt,
+    )
+
+    def fake_analyze_receipt_file(path: Path) -> dict[str, Path]:
+        return {"result": path}
+
+    def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:
+        return transaction
+
+    def fake_enrich_receipt_items_with_brave_search(
+        transaction_to_enrich: Transaction, *, request_delay_seconds: float | None = None
+    ) -> Transaction:
+        _ = request_delay_seconds
+        return transaction_to_enrich
+
+    def fake_clean_receipt_item_descriptions(transaction_to_clean: Transaction) -> Transaction:
+        return transaction_to_clean
+
+    def fake_categorize_receipt_items(
+        transaction_to_categorize: Transaction, *, use_flattened_categories: bool
+    ) -> Transaction:
+        assert use_flattened_categories is True
+        assert transaction_to_categorize.receipt is not None
+        transaction_to_categorize.receipt.items[0].category_id = "Groceries"
+        return transaction_to_categorize
+
+    def fake_classify_receipt_items_by_product_taxonomy(
+        transaction_to_classify: Transaction,
+    ) -> Transaction:
+        return transaction_to_classify
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai",
+            "--categorize-items",
+            "--flatten-budget-categories",
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        ingest_receipts,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+    monkeypatch.setattr(
+        ingest_receipts,
+        "enrich_receipt_items_with_brave_search",
+        fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(
+        ingest_receipts,
+        "clean_receipt_item_descriptions",
+        fake_clean_receipt_item_descriptions,
+    )
+    monkeypatch.setattr(ingest_receipts, "categorize_receipt_items", fake_categorize_receipt_items)
+    monkeypatch.setattr(
+        ingest_receipts,
+        "classify_receipt_items_by_product_taxonomy",
+        fake_classify_receipt_items_by_product_taxonomy,
+    )
+
+    main()
+
+    assert receipt.items[0].category_id == "Groceries"
+
+
 def test_main_can_use_vector_product_taxonomy_method(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

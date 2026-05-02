@@ -39,10 +39,7 @@ TAXONOMY_EMBEDDING_QUERY_PREFIX = (
 )
 TAXONOMY_ALIAS_CACHE_VERSION = "taxonomy_alias_v1"
 TAXONOMY_CHOICE_ALIASES = tuple(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "abcdefghijklmnopqrstuvwxyz"
-    "0123456789"
-    "!#$%&?@^_~+=/|<>()[]{}"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&?@^_~+=/|<>()[]{}"
 )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +109,19 @@ class TaxonomyEmbeddingSearchResult:
     @property
     def path_text(self) -> str:
         return _format_taxonomy_path(self.path)
+
+
+@dataclass(frozen=True)
+class _BudgetCategoryPath:
+    path: tuple[str, ...]
+
+    @property
+    def path_text(self) -> str:
+        return " > ".join(self.path)
+
+    @property
+    def category_id(self) -> str:
+        return self.path[-1]
 
 
 class UrlLibOllamaClient:
@@ -502,12 +512,33 @@ def categorize_receipt_items(
     *,
     client: CategoryModelClient | None = None,
     categories: dict[str, object] | None = None,
+    use_flattened_categories: bool = False,
 ) -> Transaction:
     if transaction.receipt is None:
         raise ValueError("transaction does not contain a receipt")
 
     active_client = client if client is not None else create_ollama_category_client()
     active_categories = categories if categories is not None else load_budget_categories()
+    if use_flattened_categories:
+        flattened_categories = _flatten_budget_categories(active_categories)
+        flattened_choices = tuple(category.path_text for category in flattened_categories)
+        category_by_path = {category.path_text: category for category in flattened_categories}
+        for item in transaction.receipt.items:
+            logger.info("Categorizing receipt item %s with flattened categories", item.description)
+            chosen_path = _choose_category(
+                client=active_client,
+                prompt=_flattened_category_prompt(item, flattened_choices),
+                choices=flattened_choices,
+            )
+            item.category_id = category_by_path[chosen_path].category_id
+            logger.info(
+                "Categorized receipt item %s as %s via %s",
+                item.description,
+                item.category_id,
+                chosen_path,
+            )
+        return transaction
+
     top_level_categories = tuple(active_categories.keys())
 
     for item in transaction.receipt.items:
@@ -537,12 +568,48 @@ def categorize_transactions(
     client: CategoryModelClient | None = None,
     categories: dict[str, object] | None = None,
     minimum_confidence: float = TRANSACTION_MIN_CATEGORY_CONFIDENCE,
+    use_flattened_categories: bool = False,
 ) -> list[Transaction] | tuple[Transaction, ...]:
     if minimum_confidence < 0 or minimum_confidence > 1:
         raise ValueError("minimum_confidence must be between 0 and 1")
 
     active_client = client if client is not None else create_ollama_category_client()
     active_categories = categories if categories is not None else load_budget_categories()
+    if use_flattened_categories:
+        flattened_categories = _flatten_budget_categories(active_categories)
+        flattened_choices = tuple(category.path_text for category in flattened_categories)
+        category_by_path = {category.path_text: category for category in flattened_categories}
+        for transaction in transactions:
+            logger.info("Categorizing transaction %s with flattened categories", transaction.id)
+            category_choice = _choose_category_with_confidence(
+                client=active_client,
+                prompt=_transaction_flattened_category_prompt(transaction, flattened_choices),
+                choices=flattened_choices,
+            )
+            if category_choice is None or category_choice.probability < minimum_confidence:
+                logger.info(
+                    "Skipping transaction %s because flattened category confidence was low",
+                    transaction.id,
+                )
+                continue
+
+            transaction.category_allocations = [
+                CategoryAllocation(
+                    category_id=category_by_path[category_choice.choice].category_id,
+                    amount=transaction.amount,
+                    confidence=category_choice.probability,
+                    source=Source1.model,
+                )
+            ]
+            logger.info(
+                "Categorized transaction %s as %s via %s with confidence %.3f",
+                transaction.id,
+                transaction.category_allocations[0].category_id,
+                category_choice.choice,
+                category_choice.probability,
+            )
+        return transactions
+
     top_level_categories = tuple(active_categories.keys())
 
     for transaction in transactions:
@@ -553,7 +620,9 @@ def categorize_transactions(
             choices=top_level_categories,
         )
         if top_level_choice is None or top_level_choice.probability < minimum_confidence:
-            logger.info("Skipping transaction %s because top-level confidence was low", transaction.id)
+            logger.info(
+                "Skipping transaction %s because top-level confidence was low", transaction.id
+            )
             continue
 
         leaf_categories = tuple(_leaf_categories(active_categories[top_level_choice.choice]))
@@ -764,9 +833,7 @@ def search_product_taxonomy_embeddings(
         )
         for entry in taxonomy_embeddings.entries
     )
-    return tuple(
-        sorted(results, key=lambda result: result.score, reverse=True)[:candidate_count]
-    )
+    return tuple(sorted(results, key=lambda result: result.score, reverse=True)[:candidate_count])
 
 
 def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple[str, ...]) -> str:
@@ -1195,9 +1262,15 @@ def _leaf_category_prompt(
     )
 
 
-def _transaction_top_level_prompt(
-    transaction: Transaction, categories: tuple[str, ...]
-) -> str:
+def _flattened_category_prompt(item: ReceiptItem, categories: tuple[str, ...]) -> str:
+    return _category_prompt(
+        "Choose the best budget category path.",
+        categories=categories,
+        item_description=item.description,
+    )
+
+
+def _transaction_top_level_prompt(transaction: Transaction, categories: tuple[str, ...]) -> str:
     return _transaction_category_prompt(
         "Choose the best top level budget category.",
         categories=categories,
@@ -1210,6 +1283,16 @@ def _transaction_leaf_category_prompt(
 ) -> str:
     return _transaction_category_prompt(
         f"Top level category: {top_level_category}\nChoose the best specific budget category.",
+        categories=categories,
+        transaction=transaction,
+    )
+
+
+def _transaction_flattened_category_prompt(
+    transaction: Transaction, categories: tuple[str, ...]
+) -> str:
+    return _transaction_category_prompt(
+        "Choose the best budget category path.",
         categories=categories,
         transaction=transaction,
     )
@@ -1236,9 +1319,7 @@ def _product_taxonomy_vector_ranking_prompt(
     item: ReceiptItem,
     candidates: tuple[TaxonomyEmbeddingSearchResult, ...],
 ) -> str:
-    candidate_lines = "\n".join(
-        f"- {candidate.path_text}" for candidate in candidates
-    )
+    candidate_lines = "\n".join(f"- {candidate.path_text}" for candidate in candidates)
     return (
         "Choose the correct Google Product Category path for this receipt item.\n"
         "Return only one exact path from Candidates.\n\n"
@@ -1289,10 +1370,10 @@ def _transaction_category_prompt(
     options = "\n".join(f"- {category}" for category in categories)
     return (
         f"{instruction}\n"
-        "Return only one exact category name from Options.\n\n"
-        f"Options:\n{options}\n\n"
+        # "Return only one exact category name from Options.\n\n"
+        # f"Options:\n{options}\n\n"
         f"Raw transaction description: {_transaction_description_text(transaction)}\n\n"
-        f"Search results:\n{_transaction_search_results_text(transaction)}"
+        # f"Search results:\n{_transaction_search_results_text(transaction)}"
     )
 
 
@@ -1401,6 +1482,26 @@ def _leaf_categories(node: object) -> list[str]:
     return leaves
 
 
+def _flatten_budget_categories(categories: dict[str, object]) -> tuple[_BudgetCategoryPath, ...]:
+    flattened: list[_BudgetCategoryPath] = []
+    for category, child in categories.items():
+        _append_budget_category_paths(flattened, (category,), child)
+    if not flattened:
+        raise RuntimeError("budget_categories.json must contain at least one leaf category")
+    return tuple(flattened)
+
+
+def _append_budget_category_paths(
+    flattened: list[_BudgetCategoryPath], path: tuple[str, ...], node: object
+) -> None:
+    if isinstance(node, dict) and node:
+        for category, child in cast(dict[str, object], node).items():
+            _append_budget_category_paths(flattened, (*path, category), child)
+        return
+
+    flattened.append(_BudgetCategoryPath(path=path))
+
+
 def _set_item_taxonomy(item: ReceiptItem, selected_path: list[str]) -> None:
     for level in range(1, MAX_TAXONOMY_LEVELS + 1):
         value = selected_path[level - 1] if level <= len(selected_path) else None
@@ -1474,9 +1575,7 @@ def _default_product_taxonomy_embeddings_path() -> Path:
     )
 
 
-def _taxonomy_embedding_entry_from_json(
-    entry: object, *, dimension: int
-) -> TaxonomyEmbeddingEntry:
+def _taxonomy_embedding_entry_from_json(entry: object, *, dimension: int) -> TaxonomyEmbeddingEntry:
     if not isinstance(entry, dict):
         raise RuntimeError("taxonomy embedding entry must be a JSON object")
     entry_object = cast(dict[str, object], entry)
@@ -1485,9 +1584,7 @@ def _taxonomy_embedding_entry_from_json(
     if not isinstance(parts, list):
         raise RuntimeError("taxonomy embedding entry has invalid parts")
     parts_list = cast(list[object], parts)
-    if not parts_list or not all(
-        isinstance(part, str) and part for part in parts_list
-    ):
+    if not parts_list or not all(isinstance(part, str) and part for part in parts_list):
         raise RuntimeError("taxonomy embedding entry has invalid parts")
     vector = _embedding_vector_from_json(embedding)
     if len(vector) != dimension:
@@ -1526,7 +1623,9 @@ def _single_embedding_vector(embeddings: object) -> tuple[float, ...]:
 def _dot_product(left: tuple[float, ...], right: tuple[float, ...]) -> float:
     if len(left) != len(right):
         raise RuntimeError(f"vector dimension mismatch: {len(left)} != {len(right)}")
-    return sum(left_value * right_value for left_value, right_value in zip(left, right, strict=True))
+    return sum(
+        left_value * right_value for left_value, right_value in zip(left, right, strict=True)
+    )
 
 
 def _normalize_choice(response: str, choices: tuple[str, ...]) -> str | None:

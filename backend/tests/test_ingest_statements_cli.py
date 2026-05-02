@@ -444,3 +444,66 @@ def test_main_can_enrich_and_categorize_transactions(
             "source": "model",
         }
     ]
+
+
+def test_main_can_use_flattened_budget_categories_for_transactions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    statement_path = tmp_path / "checking.ofx"
+    statement_path.write_text(
+        """
+        <OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>USD
+        <BANKACCTFROM><ACCTID>checking</ACCTID></BANKACCTFROM>
+        <BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260427
+        <TRNAMT>-7.00<FITID>checking-1<NAME>Coffee Shop<MEMO>CARD PURCHASE COF SHOP</STMTTRN></BANKTRANLIST>
+        </STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>
+        """,
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+
+    def fake_enrich_transactions_with_brave_search(
+        transactions: list[Transaction],
+        *,
+        request_delay_seconds: float | None = None,
+    ) -> list[Transaction]:
+        _ = request_delay_seconds
+        calls.append("brave")
+        return transactions
+
+    def fake_categorize_transactions(
+        transactions: list[Transaction], *, use_flattened_categories: bool
+    ) -> list[Transaction]:
+        assert use_flattened_categories is True
+        calls.append("categorize")
+        transactions[0].category_allocations = [
+            CategoryAllocation(
+                category_id="Fast Food & Coffee",
+                amount="-7.00",
+                confidence=0.8,
+                source=Source1.model,
+            )
+        ]
+        return transactions
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ingest_statements.py",
+            "--categorize-transactions",
+            "--flatten-budget-categories",
+            str(statement_path),
+        ],
+    )
+    monkeypatch.setattr(
+        ingest_statements,
+        "enrich_transactions_with_brave_search",
+        fake_enrich_transactions_with_brave_search,
+    )
+    monkeypatch.setattr(ingest_statements, "categorize_transactions", fake_categorize_transactions)
+
+    main()
+
+    assert calls == ["brave", "categorize"]
