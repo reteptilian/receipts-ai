@@ -40,6 +40,10 @@
       "type": "string",
       "description": "Original or user-facing transaction description."
     },
+    "braveSearchResult": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "JSON-encoded Brave Search result summaries containing only title and description fields."
+    },
     "amount": {
       "$ref": "#/$defs/decimalString",
       "description": "Signed transaction amount from the account perspective."

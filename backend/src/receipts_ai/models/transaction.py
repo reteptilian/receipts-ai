@@ -286,6 +286,14 @@ class Transaction(BaseModel):
     description: Annotated[
         str | None, Field(description="Original or user-facing transaction description.")
     ] = None
+    brave_search_result: Annotated[
+        str | None,
+        Field(
+            alias="braveSearchResult",
+            description="JSON-encoded Brave Search result summaries containing only title and description fields.",
+            min_length=1,
+        ),
+    ] = None
     amount: Annotated[
         str,
         Field(

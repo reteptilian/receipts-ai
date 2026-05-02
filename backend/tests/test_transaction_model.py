@@ -12,6 +12,7 @@ def test_transaction_accepts_json_aliases():
             "source": "bank_statement",
             "transactionDate": "2026-04-27",
             "payee": "Costco",
+            "braveSearchResult": "Costco Wholesale - search result",
             "amount": "-42.19",
             "currency": "USD",
             "linkedTransactionIds": ["receipt_1"],
@@ -19,6 +20,7 @@ def test_transaction_accepts_json_aliases():
     )
 
     assert transaction.transaction_date.isoformat() == "2026-04-27"
+    assert transaction.brave_search_result == "Costco Wholesale - search result"
     assert transaction.linked_transaction_ids is not None
     assert transaction.linked_transaction_ids[0] == "receipt_1"
 
