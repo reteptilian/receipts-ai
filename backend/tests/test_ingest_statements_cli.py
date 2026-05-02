@@ -13,6 +13,7 @@ from receipts_ai import ingest_statements
 from receipts_ai.ingest_statements import (
     CSV_FIELDNAMES,
     main,
+    transactions_from_fidelity_csv,
     transactions_from_ofx,
     write_transaction_json,
     write_transactions_csv,
@@ -110,6 +111,45 @@ def test_parses_xml_ofx_credit_card_transactions():
     assert transaction.posted_date == date(2026, 4, 29)
     assert transaction.amount == "1250.00"
     assert transaction.kind == Kind.income
+
+
+def test_parses_fidelity_csv_transactions_ignoring_padding_and_boilerplate():
+    transactions = transactions_from_fidelity_csv(
+        """
+
+
+Run Date,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Cash Balance ($),Settlement Date
+05/01/2026,"DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)", ,"No Description",Cash,,0.000,,,,-3562.71,73991.72,
+04/30/2026,"REINVESTMENT FIDELITY GOVERNMENT MONEY MARKET (SPAXX) (Cash)",SPAXX,"FIDELITY GOVERNMENT MONEY MARKET",Cash,1,236.53,,,,-236.53,77554.43,
+04/30/2026,"DIVIDEND RECEIVED FIDELITY GOVERNMENT MONEY MARKET (SPAXX) (Cash)",SPAXX,"FIDELITY GOVERNMENT MONEY MARKET",Cash,,0.000,,,,236.53,77554.43,
+
+
+"The data and information in this spreadsheet is provided to you solely for your use and is not for distribution. The spreadsheet is provided for"
+"informational purposes only, and is not intended to provide advice"
+
+Date downloaded 05/02/2026 11:08 am
+        """
+    )
+
+    assert len(transactions) == 3
+    transaction = transactions[0]
+    assert transaction.source == Source.bank_statement
+    assert transaction.external_id is not None
+    assert transaction.external_id.startswith("fidelity_csv_")
+    assert transaction.account_id is None
+    assert transaction.transaction_date == date(2026, 5, 1)
+    assert transaction.posted_date is None
+    assert transaction.payee == "DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)"
+    assert transaction.description == "DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)"
+    assert transaction.amount == "-3562.71"
+    assert transaction.currency == "USD"
+    assert transaction.kind == Kind.expense
+    assert transaction.status == Status.posted
+    assert transactions[1].description == (
+        "REINVESTMENT FIDELITY GOVERNMENT MONEY MARKET (SPAXX) (Cash) "
+        "FIDELITY GOVERNMENT MONEY MARKET"
+    )
+    assert transactions[2].kind == Kind.income
 
 
 def test_writes_transaction_csv_rows():
@@ -248,6 +288,43 @@ def test_main_processes_multiple_statement_files_as_combined_csv(
     rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
     assert [row["payee"] for row in rows] == ["Coffee Shop", "Payroll"]
     assert [row["amount"] for row in rows] == ["-7.00", "1250.00"]
+
+
+def test_main_can_process_fidelity_csv_statement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    statement_path = tmp_path / "fidelity.csv"
+    statement_path.write_text(
+        """
+
+Run Date,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Cash Balance ($),Settlement Date
+05/01/2026,"DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)", ,"No Description",Cash,,0.000,,,,-3562.71,73991.72,
+Date downloaded 05/02/2026 11:08 am
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ingest_statements.py",
+            "--statement-format",
+            "fidelity-csv",
+            str(statement_path),
+        ],
+    )
+
+    main()
+
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert [row["transaction_date"] for row in rows] == ["2026-05-01"]
+    assert [row["description"] for row in rows] == [
+        "DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)"
+    ]
+    assert [row["amount"] for row in rows] == ["-3562.71"]
 
 
 def test_main_can_upsert_firestore(

@@ -58,14 +58,20 @@ OFX_TRANSACTION_PATTERN = re.compile(r"<STMTTRN>\s*(.*?)\s*</STMTTRN>", re.IGNOR
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Ingest one or more OFX bank or credit card statement files."
+        description="Ingest one or more statement files."
     )
     parser.add_argument(
         "statements",
         metavar="statement",
         nargs="+",
         type=Path,
-        help="Path to an OFX/QFX statement file. Provide multiple paths to process them together.",
+        help="Path to a statement file. Provide multiple paths to process them together.",
+    )
+    parser.add_argument(
+        "--statement-format",
+        choices=("ofx", "fidelity-csv"),
+        default="ofx",
+        help="Input statement format. Defaults to OFX/QFX.",
     )
     parser.add_argument(
         "--format",
@@ -91,6 +97,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--categorize",
+        "--categorize-transactions",
         action="store_true",
         dest="categorize_transactions",
         help="Use Ollama to populate each transaction categoryAllocations.",
@@ -132,7 +139,9 @@ def main() -> None:
 
     transactions: list[Transaction] = []
     for statement_path in args.statements:
-        statement_transactions = transactions_from_ofx_file(statement_path)
+        statement_transactions = transactions_from_file(
+            statement_path, statement_format=args.statement_format
+        )
         if args.brave_search or args.categorize_transactions:
             if cache is not None:
                 enrich_transactions_with_brave_search(
@@ -166,6 +175,14 @@ def transactions_from_ofx_file(statement_path: Path) -> list[Transaction]:
     return transactions_from_ofx(statement_path.read_text(encoding="utf-8-sig"), source=statement_path)
 
 
+def transactions_from_file(statement_path: Path, *, statement_format: str) -> list[Transaction]:
+    if statement_format == "ofx":
+        return transactions_from_ofx_file(statement_path)
+    if statement_format == "fidelity-csv":
+        return transactions_from_fidelity_csv_file(statement_path)
+    raise ValueError(f"unsupported statement format: {statement_format}")
+
+
 def transactions_from_ofx(ofx: str, *, source: Path | str | None = None) -> list[Transaction]:
     transactions: list[Transaction] = []
     for statement_index, statement_block in enumerate(_statement_blocks(ofx), start=1):
@@ -186,6 +203,37 @@ def transactions_from_ofx(ofx: str, *, source: Path | str | None = None) -> list
                     currency=currency,
                 )
             )
+    return transactions
+
+
+def transactions_from_fidelity_csv_file(statement_path: Path) -> list[Transaction]:
+    return transactions_from_fidelity_csv(
+        statement_path.read_text(encoding="utf-8-sig"), source=statement_path
+    )
+
+
+def transactions_from_fidelity_csv(
+    content: str, *, source: Path | str | None = None
+) -> list[Transaction]:
+    rows = list(csv.reader(content.splitlines()))
+    header_index = _fidelity_header_index(rows)
+    fieldnames = rows[header_index]
+    transactions: list[Transaction] = []
+    for row_index, row_values in enumerate(rows[header_index + 1 :], start=header_index + 2):
+        if not any(value.strip() for value in row_values):
+            continue
+        if len(row_values) != len(fieldnames):
+            LOGGER.debug("Skipping non-data Fidelity CSV row %d in %s", row_index, source)
+            continue
+
+        row = dict(zip(fieldnames, row_values, strict=True))
+        if not _looks_like_fidelity_transaction_row(row):
+            LOGGER.debug("Skipping non-transaction Fidelity CSV row %d in %s", row_index, source)
+            continue
+
+        transactions.append(_transaction_from_fidelity_row(row, row_index=row_index))
+
+    LOGGER.debug("Parsed %d Fidelity CSV transaction row(s) from %s", len(transactions), source)
     return transactions
 
 
@@ -322,6 +370,31 @@ def _transaction_from_block(
     )
 
 
+def _transaction_from_fidelity_row(row: dict[str, str], *, row_index: int) -> Transaction:
+    transaction_date = _fidelity_date(_required_csv_value(row, "Run Date", row_index=row_index))
+    action = _required_csv_value(row, "Action", row_index=row_index)
+    amount = _amount(_required_csv_value(row, "Amount ($)", row_index=row_index))
+    description = _fidelity_description(action=action, description=row.get("Description"))
+    external_id = _fidelity_external_id(row)
+
+    return Transaction(
+        id=_transaction_id(
+            account_id=None,
+            fitid=external_id,
+            transaction_block="|".join(row.get(fieldname, "") for fieldname in row),
+        ),
+        source=Source.bank_statement,
+        external_id=external_id,
+        transaction_date=transaction_date,
+        payee=action,
+        description=description,
+        amount=amount,
+        currency="USD",
+        kind=_kind(transaction_type="", amount=amount),
+        status=Status.posted,
+    )
+
+
 def _tag_value(block: str, tag: str) -> str | None:
     xml_match = re.search(
         rf"<{tag}>\s*(.*?)\s*</{tag}>",
@@ -348,6 +421,13 @@ def _required_tag_value(block: str, tag: str) -> str:
     return value
 
 
+def _required_csv_value(row: dict[str, str], fieldname: str, *, row_index: int) -> str:
+    value = _clean_value(row.get(fieldname, ""))
+    if value is None:
+        raise ValueError(f"Fidelity CSV row {row_index} is missing required {fieldname!r} field")
+    return value
+
+
 def _clean_value(value: str) -> str | None:
     cleaned = value.strip()
     return cleaned or None
@@ -368,7 +448,7 @@ def _amount(value: str) -> str:
     try:
         decimal = Decimal(value.replace(",", "").lstrip("+"))
     except InvalidOperation as error:
-        raise ValueError(f"invalid OFX transaction amount: {value}") from error
+        raise ValueError(f"invalid statement transaction amount: {value}") from error
     return format(decimal, "f")
 
 
@@ -380,6 +460,14 @@ def _ofx_date(value: str) -> date:
     return date(year, month, day)
 
 
+def _fidelity_date(value: str) -> date:
+    match = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", value.strip())
+    if not match:
+        raise ValueError(f"invalid Fidelity CSV date: {value}")
+    month, day, year = (int(part) for part in match.groups())
+    return date(year, month, day)
+
+
 def _optional_ofx_date(value: str | None) -> date | None:
     return _ofx_date(value) if value is not None else None
 
@@ -388,6 +476,13 @@ def _description(*, name: str | None, memo: str | None) -> str | None:
     if memo and memo != name:
         return memo
     return name
+
+
+def _fidelity_description(*, action: str, description: str | None) -> str:
+    cleaned_description = _clean_value(description or "")
+    if cleaned_description is None or cleaned_description == "No Description":
+        return action
+    return f"{action} {cleaned_description}"
 
 
 def _kind(*, transaction_type: str, amount: str) -> Kind:
@@ -415,6 +510,38 @@ def _transaction_id(
         stable_source = transaction_block
     digest = hashlib.sha256(stable_source.encode("utf-8")).hexdigest()[:24]
     return f"bank_statement_{digest}"
+
+
+def _fidelity_header_index(rows: list[list[str]]) -> int:
+    for index, row in enumerate(rows):
+        if row and row[0].strip() == "Run Date":
+            return index
+    raise ValueError("Fidelity CSV is missing the Run Date header row")
+
+
+def _looks_like_fidelity_transaction_row(row: dict[str, str]) -> bool:
+    return (
+        _clean_value(row.get("Run Date", "")) is not None
+        and _clean_value(row.get("Action", "")) is not None
+        and _clean_value(row.get("Amount ($)", "")) is not None
+    )
+
+
+def _fidelity_external_id(row: dict[str, str]) -> str:
+    digest = hashlib.sha256(
+        "|".join(
+            (
+                row.get("Run Date", "").strip(),
+                row.get("Action", "").strip(),
+                row.get("Symbol", "").strip(),
+                row.get("Description", "").strip(),
+                row.get("Amount ($)", "").strip(),
+                row.get("Cash Balance ($)", "").strip(),
+                row.get("Settlement Date", "").strip(),
+            )
+        ).encode("utf-8")
+    ).hexdigest()[:24]
+    return f"fidelity_csv_{digest}"
 
 
 def _first_non_empty(*values: str | None) -> str | None:
