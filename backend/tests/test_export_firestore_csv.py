@@ -14,8 +14,8 @@ from receipts_ai.export_firestore_csv import (
     export_firestore_receipt_items_csv,
     stream_transactions_from_firestore,
 )
+from receipts_ai.ingest_receipts import transaction_firestore_document
 from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
-from receipts_ai.receipts_ai import transaction_firestore_document
 
 
 class FakeDocumentSnapshot:

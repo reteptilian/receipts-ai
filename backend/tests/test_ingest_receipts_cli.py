@@ -10,15 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from receipts_ai import receipts_ai
-from receipts_ai.models.transaction import (
-    ExtractionMetadata,
-    Receipt,
-    ReceiptItem,
-    Source,
-    Transaction,
-)
-from receipts_ai.receipts_ai import (
+from receipts_ai import ingest_receipts
+from receipts_ai.ingest_receipts import (
     CSV_FIELDNAMES,
     main,
     transaction_firestore_document,
@@ -28,6 +21,13 @@ from receipts_ai.receipts_ai import (
     write_transaction_json,
     write_transaction_receipt_items_csv,
     write_transactions_json,
+)
+from receipts_ai.models.transaction import (
+    ExtractionMetadata,
+    Receipt,
+    ReceiptItem,
+    Source,
+    Transaction,
 )
 
 
@@ -302,7 +302,7 @@ def test_upsert_transaction_to_firestore_merges_transaction_document(
         def collection(self, collection_path: str) -> FakeCollection:
             return FakeCollection(collection_path)
 
-    with caplog.at_level(logging.INFO, logger=receipts_ai.__name__):
+    with caplog.at_level(logging.INFO, logger=ingest_receipts.__name__):
         upsert_transaction_to_firestore(
             transaction, client=FakeFirestoreClient(), collection="test-transactions"
         )
@@ -374,12 +374,12 @@ def test_main_can_enrich_items_with_brave_search(
         ],
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "analyze_receipt_file",
         fake_analyze_receipt_file,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "transaction_from_document_intelligence_result",
         fake_transaction_from_document_intelligence_result,
     )
@@ -402,12 +402,12 @@ def test_main_can_enrich_items_with_brave_search(
         return transaction_to_clean
 
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "clean_receipt_item_descriptions",
         fake_clean_receipt_item_descriptions,
     )
@@ -458,9 +458,9 @@ def test_main_can_use_openai_pipeline(
             str(receipt_path),
         ],
     )
-    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fail_analyze_receipt_file)
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fail_analyze_receipt_file)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "transaction_from_openai_receipt",
         fake_transaction_from_openai_receipt,
     )
@@ -513,9 +513,9 @@ def test_main_processes_multiple_receipts_as_combined_csv(
         "argv",
         ["receipts-ai", str(receipt_1_path), str(receipt_2_path)],
     )
-    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "transaction_from_document_intelligence_result",
         fake_transaction_from_document_intelligence_result,
     )
@@ -590,20 +590,20 @@ def test_main_wraps_brave_search_client_when_cache_file_is_provided(
             str(receipt_path),
         ],
     )
-    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "transaction_from_document_intelligence_result",
         fake_transaction_from_document_intelligence_result,
     )
-    monkeypatch.setattr(receipts_ai, "create_brave_search_client", lambda: FakeBraveClient())
+    monkeypatch.setattr(ingest_receipts, "create_brave_search_client", lambda: FakeBraveClient())
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "clean_receipt_item_descriptions",
         fake_clean_receipt_item_descriptions,
     )
@@ -684,27 +684,27 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
         "argv",
         ["receipts-ai", "--categorize-items", "--cache-file", str(cache_path), str(receipt_path)],
     )
-    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "transaction_from_document_intelligence_result",
         fake_transaction_from_document_intelligence_result,
     )
-    monkeypatch.setattr(receipts_ai, "create_brave_search_client", lambda: FakeBraveClient())
-    monkeypatch.setattr(receipts_ai, "create_ollama_category_client", lambda: FakeCategoryClient())
+    monkeypatch.setattr(ingest_receipts, "create_brave_search_client", lambda: FakeBraveClient())
+    monkeypatch.setattr(ingest_receipts, "create_ollama_category_client", lambda: FakeCategoryClient())
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "clean_receipt_item_descriptions",
         fake_clean_receipt_item_descriptions,
     )
-    monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
+    monkeypatch.setattr(ingest_receipts, "categorize_receipt_items", fake_categorize_receipt_items)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "classify_receipt_items_by_product_taxonomy",
         fake_classify_receipt_items_by_product_taxonomy,
     )
@@ -788,25 +788,25 @@ def test_main_can_categorize_items_after_brave_search(
             str(receipt_path),
         ],
     )
-    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "transaction_from_document_intelligence_result",
         fake_transaction_from_document_intelligence_result,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "clean_receipt_item_descriptions",
         fake_clean_receipt_item_descriptions,
     )
-    monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
+    monkeypatch.setattr(ingest_receipts, "categorize_receipt_items", fake_categorize_receipt_items)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "classify_receipt_items_by_product_taxonomy",
         fake_classify_receipt_items_by_product_taxonomy,
     )
@@ -883,30 +883,30 @@ def test_main_can_use_vector_product_taxonomy_method(
             str(receipt_path),
         ],
     )
-    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "transaction_from_document_intelligence_result",
         fake_transaction_from_document_intelligence_result,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "clean_receipt_item_descriptions",
         fake_clean_receipt_item_descriptions,
     )
-    monkeypatch.setattr(receipts_ai, "categorize_receipt_items", fake_categorize_receipt_items)
+    monkeypatch.setattr(ingest_receipts, "categorize_receipt_items", fake_categorize_receipt_items)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "classify_receipt_items_by_product_taxonomy",
         fail_greedy_taxonomy,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "classify_receipt_items_by_product_taxonomy_vector_search",
         fake_classify_receipt_items_by_product_taxonomy_vector_search,
     )
@@ -975,24 +975,24 @@ def test_main_can_upsert_processed_transaction_to_firestore(
             str(receipt_path),
         ],
     )
-    monkeypatch.setattr(receipts_ai, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "transaction_from_document_intelligence_result",
         fake_transaction_from_document_intelligence_result,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "enrich_receipt_items_with_brave_search",
         fake_enrich_receipt_items_with_brave_search,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "clean_receipt_item_descriptions",
         fake_clean_receipt_item_descriptions,
     )
     monkeypatch.setattr(
-        receipts_ai,
+        ingest_receipts,
         "upsert_transaction_to_firestore",
         fake_upsert_transaction_to_firestore,
     )

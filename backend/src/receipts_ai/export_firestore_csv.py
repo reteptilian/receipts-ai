@@ -7,12 +7,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Protocol, TextIO, cast
 
-from receipts_ai.models.transaction import Transaction
-from receipts_ai.receipts_ai import (
+from receipts_ai.ingest_receipts import (
     DEFAULT_FIRESTORE_COLLECTION,
     create_firestore_client,
     write_transactions_receipt_items_csv,
 )
+from receipts_ai.models.transaction import Transaction
 
 LOGGER = logging.getLogger(__name__)
 

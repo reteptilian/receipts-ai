@@ -62,7 +62,7 @@ dev = [
 
 [project.scripts]
 # Add script entry points here:
-receipts-ai = "receipts_ai:main"
+receipts-ai = "receipts_ai.ingest_receipts:main"
 receipts-ai-export-firestore-csv = "receipts_ai.export_firestore_csv:main"
 
 
