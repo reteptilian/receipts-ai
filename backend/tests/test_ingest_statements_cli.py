@@ -121,6 +121,7 @@ def test_writes_transaction_csv_rows():
         transaction_date=date(2026, 4, 27),
         payee="Coffee Shop",
         description="CARD PURCHASE",
+        brave_search_result='[{"title":"Coffee Shop","description":"Cafe"}]',
         amount="-7.00",
         currency="USD",
         kind=Kind.expense,
@@ -143,6 +144,7 @@ def test_writes_transaction_csv_rows():
             "posted_date": "",
             "payee": "Coffee Shop",
             "description": "CARD PURCHASE",
+            "brave_search_result": '[{"title":"Coffee Shop","description":"Cafe"}]',
             "amount": "-7.00",
             "currency": "USD",
             "kind": "expense",
@@ -175,6 +177,7 @@ def test_transaction_json_output_uses_aliases():
     assert payload["externalId"] == "fitid-1"
     assert payload["accountId"] == "acct-1"
     assert payload["transactionDate"] == "2026-04-27"
+    assert "braveSearchResult" not in payload
     assert "receipt" not in payload
 
 
