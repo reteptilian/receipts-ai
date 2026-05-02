@@ -90,8 +90,9 @@ def main() -> None:
         help="Sleep this many seconds between Brave Search requests.",
     )
     parser.add_argument(
-        "--categorize-transactions",
+        "--categorize",
         action="store_true",
+        dest="categorize_transactions",
         help="Use Ollama to populate each transaction categoryAllocations.",
     )
     parser.add_argument(

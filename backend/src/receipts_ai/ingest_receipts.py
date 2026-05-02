@@ -153,8 +153,9 @@ def main() -> None:
         help="Sleep this many seconds between Brave Search requests.",
     )
     parser.add_argument(
-        "--categorize-items",
+        "--categorize",
         action="store_true",
+        dest="categorize_items",
         help=(
             "Use Ollama to populate each receipt item categoryId and product taxonomy "
             "from Brave Search results."
@@ -165,7 +166,7 @@ def main() -> None:
         choices=("greedy", "vector"),
         default="greedy",
         help=(
-            "Product taxonomy classification method used with --categorize-items. "
+            "Product taxonomy classification method used with --categorize. "
             "'greedy' walks the taxonomy tree with Ollama; 'vector' retrieves nearest "
             "taxonomy embedding paths and asks Ollama to rank them. Defaults to greedy."
         ),
