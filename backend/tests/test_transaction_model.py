@@ -40,6 +40,20 @@ def test_transaction_accepts_python_field_names():
     assert transaction.transaction_date.isoformat() == "2026-04-27"
 
 
+def test_transaction_payee_is_optional():
+    transaction = Transaction.model_validate(
+        {
+            "id": "txn_1",
+            "source": "bank_statement",
+            "transaction_date": "2026-04-27",
+            "amount": "-42.19",
+            "currency": "USD",
+        }
+    )
+
+    assert transaction.payee is None
+
+
 def test_receipt_item_accepts_raw_description_alias():
     item = ReceiptItem.model_validate(
         {

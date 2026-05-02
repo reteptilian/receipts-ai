@@ -131,7 +131,7 @@ def enrich_receipt_items_with_brave_search(
 
     sent_live_request = False
     for index, item in enumerate(transaction.receipt.items):
-        query = _receipt_item_query(transaction.payee, item)
+        query = _receipt_item_query(transaction.payee or "", item)
         if not query:
             continue
         query_is_cached = (
@@ -237,7 +237,7 @@ def _transaction_query(transaction: Transaction) -> str:
     parts = [transaction.payee]
     if transaction.description and transaction.description != transaction.payee:
         parts.append(transaction.description)
-    return " ".join(part.strip() for part in parts if part.strip())
+    return " ".join(part.strip() for part in parts if part and part.strip())
 
 
 def _format_item_amount(amount: str) -> str:

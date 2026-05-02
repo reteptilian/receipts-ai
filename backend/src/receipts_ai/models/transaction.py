@@ -282,7 +282,9 @@ class Transaction(BaseModel):
             description="Date the transaction posted to the account, when different from the transaction date.",
         ),
     ] = None
-    payee: Annotated[str, Field(description="Merchant, counterparty or payer name.", min_length=1)]
+    payee: Annotated[
+        str | None, Field(description="Merchant, counterparty or payer name.", min_length=1)
+    ] = None
     description: Annotated[
         str | None, Field(description="Original or user-facing transaction description.")
     ] = None

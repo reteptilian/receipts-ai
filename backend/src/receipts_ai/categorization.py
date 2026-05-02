@@ -1311,7 +1311,7 @@ def _transaction_description_text(transaction: Transaction) -> str:
     parts = [transaction.payee]
     if transaction.description and transaction.description != transaction.payee:
         parts.append(transaction.description)
-    return " ".join(part.strip() for part in parts if part.strip())
+    return " ".join(part.strip() for part in parts if part and part.strip())
 
 
 def _search_results_text(item: ReceiptItem) -> str:

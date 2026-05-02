@@ -67,7 +67,7 @@ def test_parses_sgml_ofx_bank_transactions():
     assert transaction.external_id == "2026042701"
     assert transaction.account_id == "123456789:987654321:CHECKING"
     assert transaction.transaction_date == date(2026, 4, 27)
-    assert transaction.payee == "COSTCO WHSE"
+    assert transaction.payee is None
     assert transaction.description == "POS PURCHASE COSTCO WHSE #123"
     assert transaction.amount == "-42.19"
     assert transaction.currency == "USD"
@@ -139,7 +139,7 @@ Date downloaded 05/02/2026 11:08 am
     assert transaction.account_id is None
     assert transaction.transaction_date == date(2026, 5, 1)
     assert transaction.posted_date is None
-    assert transaction.payee == "DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)"
+    assert transaction.payee is None
     assert transaction.description == "DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)"
     assert transaction.amount == "-3562.71"
     assert transaction.currency == "USD"
@@ -286,7 +286,7 @@ def test_main_processes_multiple_statement_files_as_combined_csv(
     main()
 
     rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
-    assert [row["payee"] for row in rows] == ["Coffee Shop", "Payroll"]
+    assert [row["payee"] for row in rows] == ["", ""]
     assert [row["amount"] for row in rows] == ["-7.00", "1250.00"]
 
 
@@ -342,7 +342,7 @@ def test_main_can_upsert_firestore(
         """,
         encoding="utf-8",
     )
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str | None, str]] = []
 
     def fake_upsert_transaction_to_firestore(
         transaction: Transaction, *, collection: str
@@ -368,7 +368,7 @@ def test_main_can_upsert_firestore(
 
     main()
 
-    assert calls == [("Coffee Shop", "test-transactions")]
+    assert calls == [(None, "test-transactions")]
 
 
 def test_main_can_enrich_and_categorize_transactions(

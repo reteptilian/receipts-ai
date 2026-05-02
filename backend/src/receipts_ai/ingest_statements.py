@@ -350,10 +350,6 @@ def _transaction_from_block(
     fitid = _tag_value(transaction_block, "FITID")
     name = _tag_value(transaction_block, "NAME")
     memo = _tag_value(transaction_block, "MEMO")
-    payee = _first_non_empty(name, _tag_value(transaction_block, "PAYEEID"), memo, transaction_type)
-    if payee is None:
-        payee = "Unknown Payee"
-
     return Transaction(
         id=_transaction_id(account_id=account_id, fitid=fitid, transaction_block=transaction_block),
         source=Source.bank_statement,
@@ -361,7 +357,6 @@ def _transaction_from_block(
         account_id=account_id,
         transaction_date=transaction_date,
         posted_date=posted_date if posted_date != transaction_date else None,
-        payee=payee,
         description=_description(name=name, memo=memo),
         amount=amount,
         currency=currency,
@@ -386,7 +381,6 @@ def _transaction_from_fidelity_row(row: dict[str, str], *, row_index: int) -> Tr
         source=Source.bank_statement,
         external_id=external_id,
         transaction_date=transaction_date,
-        payee=action,
         description=description,
         amount=amount,
         currency="USD",
@@ -542,14 +536,6 @@ def _fidelity_external_id(row: dict[str, str]) -> str:
         ).encode("utf-8")
     ).hexdigest()[:24]
     return f"fidelity_csv_{digest}"
-
-
-def _first_non_empty(*values: str | None) -> str | None:
-    for value in values:
-        if value:
-            return value
-    return None
-
 
 if __name__ == "__main__":
     main()

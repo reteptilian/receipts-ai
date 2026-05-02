@@ -5,7 +5,7 @@
   "description": "A canonical expense-tracking transaction, optionally enriched with receipt line items and category allocations.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "source", "transactionDate", "payee", "amount", "currency"],
+  "required": ["id", "source", "transactionDate", "amount", "currency"],
   "properties": {
     "id": {
       "$ref": "#/$defs/nonEmptyString",
