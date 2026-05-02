@@ -408,6 +408,103 @@ def test_categorize_transactions_can_choose_from_flattened_categories():
     assert "2: Food & Dining > Restaurants & Dining Out" in client.prompts[0]
 
 
+def test_categorize_transactions_strips_bank_transfer_noise_from_prompt():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        description="Descriptive Withdrawal P2P Transfer  Maia April lessons",
+        amount="-200.00",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="1",
+                probabilities=(CategoryChoiceProbability("1", 0.86),),
+            ),
+        ]
+    )
+
+    categorize_transactions(
+        [transaction],
+        client=client,
+        categories={
+            "Education": {"Classes & Lessons": {}},
+            "Transfers": {"Bank Transfers": {}},
+        },
+        use_flattened_categories=True,
+    )
+
+    assert "Raw transaction description:   Maia April lessons" in client.prompts[0]
+    assert "Descriptive Withdrawal P2P Transfer" not in client.prompts[0]
+
+
+def test_categorize_transactions_strips_ach_debit_from_prompt():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        description="ACH Debit Electric Company",
+        amount="-92.14",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="1",
+                probabilities=(CategoryChoiceProbability("1", 0.86),),
+            ),
+        ]
+    )
+
+    categorize_transactions(
+        [transaction],
+        client=client,
+        categories={
+            "Housing & Utilities": {"Electricity": {}},
+            "Transfers": {"Bank Transfers": {}},
+        },
+        use_flattened_categories=True,
+    )
+
+    assert "Raw transaction description:  Electric Company" in client.prompts[0]
+    assert "ACH Debit" not in client.prompts[0]
+
+
+def test_categorize_transactions_uses_single_character_aliases_for_budget_categories():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        description="Kacey Dogsitting",
+        amount="-125.00",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="f",
+                probabilities=(CategoryChoiceProbability("f", 0.91),),
+            ),
+        ]
+    )
+
+    categorize_transactions(
+        [transaction],
+        client=client,
+        categories=load_budget_categories(),
+        use_flattened_categories=True,
+    )
+
+    allocations = transaction.category_allocations
+    assert allocations is not None
+    assert len(allocations) == 1
+    assert allocations[0].category_id == "Childcare & Daycare"
+    assert "f: Pets & Family > Childcare & Daycare" in client.prompts[0]
+    assert "41: Pets & Family > Childcare & Daycare" not in client.prompts[0]
+
+
 def test_categorize_transactions_skips_low_confidence_response():
     transaction = Transaction(
         id="bank_statement_1",

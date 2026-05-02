@@ -30,7 +30,9 @@ MAX_TAXONOMY_LEVELS = 9
 TAXONOMY_MIN_CHOICE_PROBABILITY = 0.35
 TAXONOMY_MIN_SEARCH_PROBABILITY = 0.15
 TRANSACTION_MIN_CATEGORY_CONFIDENCE = 0.35
-TRANSACTION_CATEGORY_CHOICE_ALIASES = tuple("1234567890!#$%&?@^_~+=/|<>[]{}")
+TRANSACTION_CATEGORY_CHOICE_ALIASES = tuple(
+    "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0!#$%&?@^_~+=/|<>[]{}"
+)
 PRODUCT_TAXONOMY_FILENAME = "taxonomy.en-US.txt"
 PRODUCT_TAXONOMY_EMBEDDINGS_FILENAME = "taxonomy_embeddings.json"
 DEFAULT_TAXONOMY_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -1367,7 +1369,7 @@ def _category_prompt(
 def _transaction_category_prompt(
     instruction: str, *, categories: tuple[str, ...], transaction: Transaction
 ) -> str:
-    options = "\n".join(f"- {category}" for category in categories)
+    _ = categories
     return (
         f"{instruction}\n"
         # "Return only one exact category name from Options.\n\n"
@@ -1392,7 +1394,15 @@ def _transaction_description_text(transaction: Transaction) -> str:
     parts = [transaction.payee]
     if transaction.description and transaction.description != transaction.payee:
         parts.append(transaction.description)
-    return " ".join(part.strip() for part in parts if part and part.strip())
+    description = " ".join(part.strip() for part in parts if part and part.strip())
+    return _strip_transaction_prompt_noise(description)
+
+
+def _strip_transaction_prompt_noise(description: str) -> str:
+    prompt_noise_phrases = ("Descriptive Withdrawal P2P Transfer", "ACH Debit")
+    for phrase in prompt_noise_phrases:
+        description = description.replace(phrase, "")
+    return description
 
 
 def _search_results_text(item: ReceiptItem) -> str:
