@@ -286,7 +286,8 @@ class Transaction(BaseModel):
         str | None, Field(description="Merchant, counterparty or payer name.", min_length=1)
     ] = None
     description: Annotated[
-        str | None, Field(description="Original or user-facing transaction description.")
+        str | None,
+        Field(description="Statement-provided transaction description, when separate from the payee."),
     ] = None
     brave_search_result: Annotated[
         str | None,

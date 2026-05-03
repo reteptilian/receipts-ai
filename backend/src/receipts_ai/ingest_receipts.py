@@ -41,6 +41,7 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
     "transaction_date",
     "payee",
+    "transaction_description",
     "transaction_amount",
     "transaction_currency",
     "receipt_id",
@@ -73,6 +74,12 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "item_taxonomy_8",
     "item_taxonomy_9",
     "item_confidence",
+)
+TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES: tuple[str, ...] = tuple(
+    fieldname for fieldname in CSV_FIELDNAMES if fieldname != "item_brave_search_result"
+) + (
+    "category_allocation.category_id",
+    "category_allocation.amount",
 )
 
 DEFAULT_FIRESTORE_COLLECTION = "transactions"
@@ -461,20 +468,13 @@ def _firestore_project_id() -> str:
 
 
 def write_transaction_receipt_items_csv(transaction: Transaction, file: TextIO) -> None:
-    if transaction.receipt is None:
-        raise ValueError("transaction does not contain a receipt")
-
     write_transactions_receipt_items_csv([transaction], file)
 
 
 def write_transactions_receipt_items_csv(
     transactions: list[Transaction] | tuple[Transaction, ...], file: TextIO
 ) -> None:
-    for transaction in transactions:
-        if transaction.receipt is None:
-            raise ValueError(f"transaction {transaction.id} does not contain a receipt")
-
-    writer = csv.DictWriter(file, fieldnames=CSV_FIELDNAMES)
+    writer = csv.DictWriter(file, fieldnames=TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES)
     writer.writeheader()
     for transaction in transactions:
         writer.writerows(_transaction_receipt_item_rows(transaction))
@@ -514,17 +514,36 @@ def write_receipt_json(receipt: Receipt, file: TextIO) -> None:
 def _transaction_receipt_item_rows(
     transaction: Transaction,
 ) -> list[dict[str, object | None]]:
-    if transaction.receipt is None:
-        raise ValueError("transaction does not contain a receipt")
+    transaction_fields: dict[str, object | None] = {
+        "transaction_id": transaction.id,
+        "transaction_date": transaction.transaction_date.isoformat(),
+        "payee": transaction.payee,
+        "transaction_description": transaction.description,
+        "transaction_amount": transaction.amount,
+        "transaction_currency": transaction.currency,
+    }
 
-    return _receipt_item_rows(
-        transaction.receipt,
-        transaction_id=transaction.id,
-        transaction_date=transaction.transaction_date.isoformat(),
-        payee=transaction.payee,
-        transaction_amount=transaction.amount,
-        transaction_currency=transaction.currency,
-    )
+    if transaction.receipt is not None:
+        return _receipt_item_rows(
+            transaction.receipt,
+            transaction_id=transaction.id,
+            transaction_date=transaction.transaction_date.isoformat(),
+            payee=transaction.payee,
+            transaction_description=transaction.description,
+            transaction_amount=transaction.amount,
+            transaction_currency=transaction.currency,
+            include_brave_search_result=False,
+        )
+
+    category_allocations = transaction.category_allocations or []
+    rows: list[dict[str, object | None]] = []
+    for allocation in category_allocations or [None]:
+        row = dict(transaction_fields)
+        if allocation is not None:
+            row["category_allocation.category_id"] = allocation.category_id
+            row["category_allocation.amount"] = allocation.amount
+        rows.append(row)
+    return rows
 
 
 def _receipt_item_rows(
@@ -533,15 +552,19 @@ def _receipt_item_rows(
     transaction_id: str | None = None,
     transaction_date: str | None = None,
     payee: str | None = None,
+    transaction_description: str | None = None,
     transaction_amount: str | None = None,
     transaction_currency: str | None = None,
+    include_brave_search_result: bool = True,
 ) -> list[dict[str, object | None]]:
     extraction = receipt.extraction
-    return [
-        {
+    rows: list[dict[str, object | None]] = []
+    for index, item in enumerate(receipt.items, start=1):
+        row: dict[str, object | None] = {
             "transaction_id": transaction_id,
             "transaction_date": transaction_date,
             "payee": payee,
+            "transaction_description": transaction_description,
             "transaction_amount": transaction_amount,
             "transaction_currency": transaction_currency,
             "receipt_id": receipt.id,
@@ -555,7 +578,6 @@ def _receipt_item_rows(
             "item_id": item.id,
             "item_description": item.description,
             "item_raw_description": item.raw_description,
-            "item_brave_search_result": item.brave_search_result,
             "item_quantity": item.quantity,
             "item_unit_price": item.unit_price,
             "item_amount": item.amount,
@@ -575,8 +597,10 @@ def _receipt_item_rows(
             "item_taxonomy_9": item.taxonomy9,
             "item_confidence": item.confidence,
         }
-        for index, item in enumerate(receipt.items, start=1)
-    ]
+        if include_brave_search_result:
+            row["item_brave_search_result"] = item.brave_search_result
+        rows.append(row)
+    return rows
 
 
 if __name__ == "__main__":

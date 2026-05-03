@@ -184,7 +184,9 @@ def transactions_from_file(statement_path: Path, *, statement_format: str) -> li
 
 def transactions_from_ofx(ofx: str, *, source: Path | str | None = None) -> list[Transaction]:
     transactions: list[Transaction] = []
-    for statement_index, statement_block in enumerate(_statement_blocks(ofx), start=1):
+    for statement_index, (statement_block, is_credit_card) in enumerate(
+        _statement_blocks(ofx), start=1
+    ):
         currency = (_tag_value(statement_block, "CURDEF") or "USD").upper()
         account_id = _account_id(statement_block)
         transaction_blocks = OFX_TRANSACTION_PATTERN.findall(statement_block)
@@ -200,6 +202,7 @@ def transactions_from_ofx(ofx: str, *, source: Path | str | None = None) -> list
                     transaction_block,
                     account_id=account_id,
                     currency=currency,
+                    is_credit_card=is_credit_card,
                 )
             )
     return transactions
@@ -327,13 +330,16 @@ def _transaction_rows(transactions: Iterable[Transaction]) -> list[dict[str, obj
     return rows
 
 
-def _statement_blocks(ofx: str) -> list[str]:
-    blocks: list[str] = []
+def _statement_blocks(ofx: str) -> list[tuple[str, bool]]:
+    blocks: list[tuple[str, bool]] = []
     for tag in OFX_AGGREGATE_TAGS:
         blocks.extend(
-            re.findall(rf"<{tag}>\s*(.*?)\s*</{tag}>", ofx, flags=re.IGNORECASE | re.DOTALL)
+            (block, tag.upper() == "CCSTMTRS")
+            for block in re.findall(
+                rf"<{tag}>\s*(.*?)\s*</{tag}>", ofx, flags=re.IGNORECASE | re.DOTALL
+            )
         )
-    return blocks or [ofx]
+    return blocks or [(ofx, False)]
 
 
 def _transaction_from_block(
@@ -341,6 +347,7 @@ def _transaction_from_block(
     *,
     account_id: str | None,
     currency: str,
+    is_credit_card: bool,
 ) -> Transaction:
     transaction_type = (_tag_value(transaction_block, "TRNTYPE") or "").upper()
     amount = _amount(_required_tag_value(transaction_block, "TRNAMT"))
@@ -349,6 +356,7 @@ def _transaction_from_block(
     fitid = _tag_value(transaction_block, "FITID")
     name = _tag_value(transaction_block, "NAME")
     memo = _tag_value(transaction_block, "MEMO")
+    description = _description(name=name, memo=memo)
     return Transaction(
         id=_transaction_id(account_id=account_id, fitid=fitid, transaction_block=transaction_block),
         source=Source.bank_statement,
@@ -356,7 +364,10 @@ def _transaction_from_block(
         account_id=account_id,
         transaction_date=transaction_date,
         posted_date=posted_date if posted_date != transaction_date else None,
-        description=_description(name=name, memo=memo),
+        payee=name if is_credit_card else None,
+        description=_credit_card_description(name=name, memo=memo)
+        if is_credit_card
+        else description,
         amount=amount,
         currency=currency,
         kind=_kind(transaction_type=transaction_type, amount=amount),
@@ -469,6 +480,12 @@ def _description(*, name: str | None, memo: str | None) -> str | None:
     if memo and memo != name:
         return memo
     return name
+
+
+def _credit_card_description(*, name: str | None, memo: str | None) -> str | None:
+    if memo and memo != name:
+        return memo
+    return None
 
 
 def _fidelity_description(*, action: str, description: str | None) -> str:

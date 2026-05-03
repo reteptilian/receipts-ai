@@ -38,7 +38,7 @@
     },
     "description": {
       "type": "string",
-      "description": "Original or user-facing transaction description."
+      "description": "Statement-provided transaction description, when separate from the payee."
     },
     "braveSearchResult": {
       "$ref": "#/$defs/nonEmptyString",

@@ -109,6 +109,8 @@ def test_parses_xml_ofx_credit_card_transactions():
     assert transaction.account_id == "4111111111111111"
     assert transaction.currency == "USD"
     assert transaction.posted_date == date(2026, 4, 29)
+    assert transaction.payee == "Payroll"
+    assert transaction.description is None
     assert transaction.amount == "1250.00"
     assert transaction.kind == Kind.income
 
@@ -286,7 +288,8 @@ def test_main_processes_multiple_statement_files_as_combined_csv(
     main()
 
     rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
-    assert [row["payee"] for row in rows] == ["", ""]
+    assert [row["payee"] for row in rows] == ["", "Payroll"]
+    assert [row["description"] for row in rows] == ["Coffee Shop", ""]
     assert [row["amount"] for row in rows] == ["-7.00", "1250.00"]
 
 
