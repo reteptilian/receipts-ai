@@ -418,7 +418,7 @@ def test_main_can_enrich_and_categorize_transactions(
         "argv",
         [
             "ingest_statements.py",
-            "--categorize-transactions",
+            "--categorize",
             "--brave-search-delay-seconds",
             "1.1",
             str(statement_path),
@@ -489,7 +489,7 @@ def test_main_categorizes_transactions_with_flattened_budget_categories(
         "argv",
         [
             "ingest_statements.py",
-            "--categorize-transactions",
+            "--categorize",
             str(statement_path),
         ],
     )

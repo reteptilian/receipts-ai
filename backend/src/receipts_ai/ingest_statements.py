@@ -97,7 +97,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--categorize",
-        "--categorize-transactions",
         action="store_true",
         dest="categorize_transactions",
         help="Use Ollama to populate each transaction categoryAllocations.",
