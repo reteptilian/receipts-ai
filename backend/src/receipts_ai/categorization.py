@@ -39,7 +39,7 @@ DEFAULT_TAXONOMY_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
 TAXONOMY_EMBEDDING_QUERY_PREFIX = (
     "Represent this sentence for searching relevant product taxonomy categories: "
 )
-TAXONOMY_ALIAS_CACHE_VERSION = "taxonomy_alias_v1"
+TAXONOMY_ALIAS_CACHE_VERSION = "taxonomy_alias_v2"
 TAXONOMY_CHOICE_ALIASES = tuple(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&?@^_~+=/|<>()[]{}"
 )
@@ -75,6 +75,13 @@ class CategoryChoiceProbability:
 
 @dataclass(frozen=True)
 class CategoryCompletion:
+    response: str
+    probabilities: tuple[CategoryChoiceProbability, ...]
+
+
+@dataclass(frozen=True)
+class _TransactionCategoryChoice:
+    choice: CategoryChoiceProbability | None
     response: str
     probabilities: tuple[CategoryChoiceProbability, ...]
 
@@ -554,14 +561,20 @@ def categorize_transactions(
 
     for transaction in transactions:
         logger.info("Categorizing transaction %s", transaction.id)
-        category_choice = _choose_category_with_confidence(
+        category_result = _choose_category_with_confidence(
             client=active_client,
             prompt=_transaction_category_prompt(transaction, flattened_choices),
             choices=flattened_choices,
         )
+        category_choice = category_result.choice
         if category_choice is None or category_choice.probability < minimum_confidence:
             logger.info(
-                "Skipping transaction %s because category confidence was low", transaction.id
+                "Skipping transaction %s because category confidence was low: "
+                "description=%r ollama_response=%r ollama_choices=%s",
+                transaction.id,
+                transaction.description,
+                category_result.response,
+                _format_category_choice_probabilities(category_result.probabilities),
             )
             continue
 
@@ -773,7 +786,7 @@ def _choose_category(*, client: CategoryModelClient, prompt: str, choices: tuple
 
 def _choose_category_with_confidence(
     *, client: CategoryModelClient, prompt: str, choices: tuple[str, ...]
-) -> CategoryChoiceProbability | None:
+) -> _TransactionCategoryChoice:
     choice_aliases = _transaction_category_choice_aliases(choices)
     alias_to_choice = {alias: choice for choice, alias in choice_aliases.items()}
     alias_choices = tuple(alias_to_choice)
@@ -797,16 +810,32 @@ def _choose_category_with_confidence(
             "Skipping transaction category response %r because it did not match any category label",
             completion.response,
         )
-        return None
+        return _TransactionCategoryChoice(
+            choice=None,
+            response=completion.response,
+            probabilities=probabilities,
+        )
 
     for result in probabilities:
         if result.choice == choice:
-            return result
+            return _TransactionCategoryChoice(
+                choice=result,
+                response=completion.response,
+                probabilities=probabilities,
+            )
 
     if probabilities:
-        return CategoryChoiceProbability(choice=choice, probability=0.0)
+        return _TransactionCategoryChoice(
+            choice=CategoryChoiceProbability(choice=choice, probability=0.0),
+            response=completion.response,
+            probabilities=probabilities,
+        )
 
-    return CategoryChoiceProbability(choice=choice, probability=1.0)
+    return _TransactionCategoryChoice(
+        choice=CategoryChoiceProbability(choice=choice, probability=1.0),
+        response=completion.response,
+        probabilities=probabilities,
+    )
 
 
 def _complete_choice(client: CategoryModelClient, prompt: str, *, choices: tuple[str, ...]) -> str:
@@ -1532,7 +1561,9 @@ def _choice_probabilities_from_ollama_response(
     probabilities: dict[str, float] = {}
 
     for token_text, log_probability in raw_probabilities:
-        choice = _normalize_choice(token_text, choices)
+        choice = _exact_choice_token(token_text, choices)
+        if choice is None:
+            choice = _normalize_choice(token_text, choices)
         if choice is None:
             choice = _choice_with_token_prefix(token_text, choices)
         if choice is None:
@@ -1624,6 +1655,17 @@ def _choice_with_token_prefix(token_text: str, choices: tuple[str, ...]) -> str 
     ]
     if len(matching_choices) == 1:
         return matching_choices[0]
+    return None
+
+
+def _exact_choice_token(token_text: str, choices: tuple[str, ...]) -> str | None:
+    cleaned_token = token_text.strip()
+    if cleaned_token in choices:
+        return cleaned_token
+
+    cleaned_token = cleaned_token.strip("-*:\"'`.,;")
+    if cleaned_token in choices:
+        return cleaned_token
     return None
 
 

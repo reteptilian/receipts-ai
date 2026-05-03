@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import shlex
 import urllib.error
@@ -496,7 +497,7 @@ def test_categorize_transactions_uses_single_character_aliases_for_budget_catego
     assert "41: Pets & Family > Childcare & Daycare" not in client.prompts[0]
 
 
-def test_categorize_transactions_skips_low_confidence_response():
+def test_categorize_transactions_skips_low_confidence_response(caplog: pytest.LogCaptureFixture):
     transaction = Transaction(
         id="bank_statement_1",
         source=Source.bank_statement,
@@ -509,11 +510,13 @@ def test_categorize_transactions_skips_low_confidence_response():
     client = FakeProbabilityCategoryClient(
         [
             CategoryCompletion(
-                response="Food & Dining",
-                probabilities=(CategoryChoiceProbability("Food & Dining", 0.2),),
+                response="1",
+                probabilities=(CategoryChoiceProbability("1", 0.2),),
             ),
         ]
     )
+
+    caplog.set_level(logging.INFO, logger="receipts_ai.categorization")
 
     categorize_transactions(
         [transaction],
@@ -523,6 +526,11 @@ def test_categorize_transactions_skips_low_confidence_response():
 
     assert transaction.category_allocations == []
     assert len(client.prompts) == 1
+    assert (
+        "Skipping transaction bank_statement_1 because category confidence was low: "
+        "description='ACH WEB PMT 123' ollama_response='1' "
+        "ollama_choices=Food & Dining > Groceries (0.200)"
+    ) in caplog.text
 
 
 def test_categorize_transactions_skips_invalid_single_character_response():
@@ -1114,6 +1122,34 @@ def test_url_lib_ollama_client_uses_first_token_logprobs_for_choice_probabilitie
     assert [result.choice for result in completion.probabilities] == ["Food Items", "Beverages"]
     assert math.isclose(completion.probabilities[0].probability, math.exp(-0.2))
     assert math.isclose(completion.probabilities[1].probability, math.exp(-1.5))
+
+
+def test_url_lib_ollama_client_keeps_alias_choice_case_distinct(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        _ = request
+        _ = timeout
+        return FakeResponse(
+            {
+                "response": "k",
+                "logprobs": {
+                    "top_logprobs": [
+                        {"token": "k", "logprob": -0.1},
+                        {"token": "K", "logprob": -2.0},
+                    ]
+                },
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = UrlLibOllamaClient(url="http://example.test:11434", model="llama3.2")
+
+    completion = client.complete_with_probabilities("Choose one", choices=("K", "k"))
+
+    assert [result.choice for result in completion.probabilities] == ["k", "K"]
+    assert math.isclose(completion.probabilities[0].probability, math.exp(-0.1))
+    assert math.isclose(completion.probabilities[1].probability, math.exp(-2.0))
 
 
 def test_cached_category_model_client_reuses_json_file(tmp_path: Path):
