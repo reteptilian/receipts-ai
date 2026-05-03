@@ -122,7 +122,7 @@ class _BudgetCategoryPath:
         return " > ".join(self.path)
 
     @property
-    def category_id(self) -> str:
+    def leaf_category_id(self) -> str:
         return self.path[-1]
 
 
@@ -532,7 +532,7 @@ def categorize_receipt_items(
                 prompt=_flattened_category_prompt(item, flattened_choices),
                 choices=flattened_choices,
             )
-            item.category_id = category_by_path[chosen_path].category_id
+            item.category_id = category_by_path[chosen_path].leaf_category_id
             logger.info(
                 "Categorized receipt item %s as %s via %s",
                 item.description,
@@ -570,92 +570,42 @@ def categorize_transactions(
     client: CategoryModelClient | None = None,
     categories: dict[str, object] | None = None,
     minimum_confidence: float = TRANSACTION_MIN_CATEGORY_CONFIDENCE,
-    use_flattened_categories: bool = False,
 ) -> list[Transaction] | tuple[Transaction, ...]:
     if minimum_confidence < 0 or minimum_confidence > 1:
         raise ValueError("minimum_confidence must be between 0 and 1")
 
     active_client = client if client is not None else create_ollama_category_client()
     active_categories = categories if categories is not None else load_budget_categories()
-    if use_flattened_categories:
-        flattened_categories = _flatten_budget_categories(active_categories)
-        flattened_choices = tuple(category.path_text for category in flattened_categories)
-        category_by_path = {category.path_text: category for category in flattened_categories}
-        for transaction in transactions:
-            logger.info("Categorizing transaction %s with flattened categories", transaction.id)
-            category_choice = _choose_category_with_confidence(
-                client=active_client,
-                prompt=_transaction_flattened_category_prompt(transaction, flattened_choices),
-                choices=flattened_choices,
-            )
-            if category_choice is None or category_choice.probability < minimum_confidence:
-                logger.info(
-                    "Skipping transaction %s because flattened category confidence was low",
-                    transaction.id,
-                )
-                continue
-
-            transaction.category_allocations = [
-                CategoryAllocation(
-                    category_id=category_by_path[category_choice.choice].category_id,
-                    amount=transaction.amount,
-                    confidence=category_choice.probability,
-                    source=Source1.model,
-                )
-            ]
-            logger.info(
-                "Categorized transaction %s as %s via %s with confidence %.3f",
-                transaction.id,
-                transaction.category_allocations[0].category_id,
-                category_choice.choice,
-                category_choice.probability,
-            )
-        return transactions
-
-    top_level_categories = tuple(active_categories.keys())
+    flattened_choices = tuple(
+        category.path_text for category in _flatten_budget_categories(active_categories)
+    )
 
     for transaction in transactions:
         logger.info("Categorizing transaction %s", transaction.id)
-        top_level_choice = _choose_category_with_confidence(
+        category_choice = _choose_category_with_confidence(
             client=active_client,
-            prompt=_transaction_top_level_prompt(transaction, top_level_categories),
-            choices=top_level_categories,
+            prompt=_transaction_category_prompt(transaction, flattened_choices),
+            choices=flattened_choices,
         )
-        if top_level_choice is None or top_level_choice.probability < minimum_confidence:
+        if category_choice is None or category_choice.probability < minimum_confidence:
             logger.info(
-                "Skipping transaction %s because top-level confidence was low", transaction.id
+                "Skipping transaction %s because category confidence was low", transaction.id
             )
             continue
 
-        leaf_categories = tuple(_leaf_categories(active_categories[top_level_choice.choice]))
-        if not leaf_categories:
-            raise RuntimeError(f"budget category has no leaf categories: {top_level_choice.choice}")
-
-        leaf_choice = _choose_category_with_confidence(
-            client=active_client,
-            prompt=_transaction_leaf_category_prompt(
-                transaction, top_level_choice.choice, leaf_categories
-            ),
-            choices=leaf_categories,
-        )
-        if leaf_choice is None or leaf_choice.probability < minimum_confidence:
-            logger.info("Skipping transaction %s because leaf confidence was low", transaction.id)
-            continue
-
-        confidence = min(top_level_choice.probability, leaf_choice.probability)
         transaction.category_allocations = [
             CategoryAllocation(
-                category_id=leaf_choice.choice,
+                category_id=category_choice.choice,
                 amount=transaction.amount,
-                confidence=confidence,
+                confidence=category_choice.probability,
                 source=Source1.model,
             )
         ]
         logger.info(
             "Categorized transaction %s as %s with confidence %.3f",
             transaction.id,
-            leaf_choice.choice,
-            confidence,
+            category_choice.choice,
+            category_choice.probability,
         )
 
     return transactions
@@ -1272,28 +1222,8 @@ def _flattened_category_prompt(item: ReceiptItem, categories: tuple[str, ...]) -
     )
 
 
-def _transaction_top_level_prompt(transaction: Transaction, categories: tuple[str, ...]) -> str:
-    return _transaction_category_prompt(
-        "Choose the best top level budget category.",
-        categories=categories,
-        transaction=transaction,
-    )
-
-
-def _transaction_leaf_category_prompt(
-    transaction: Transaction, top_level_category: str, categories: tuple[str, ...]
-) -> str:
-    return _transaction_category_prompt(
-        f"Top level category: {top_level_category}\nChoose the best specific budget category.",
-        categories=categories,
-        transaction=transaction,
-    )
-
-
-def _transaction_flattened_category_prompt(
-    transaction: Transaction, categories: tuple[str, ...]
-) -> str:
-    return _transaction_category_prompt(
+def _transaction_category_prompt(transaction: Transaction, categories: tuple[str, ...]) -> str:
+    return _transaction_budget_category_prompt(
         "Choose the best budget category path.",
         categories=categories,
         transaction=transaction,
@@ -1366,7 +1296,7 @@ def _category_prompt(
     )
 
 
-def _transaction_category_prompt(
+def _transaction_budget_category_prompt(
     instruction: str, *, categories: tuple[str, ...], transaction: Transaction
 ) -> str:
     _ = categories

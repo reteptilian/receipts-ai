@@ -405,7 +405,7 @@ def test_main_can_enrich_and_categorize_transactions(
         assert transactions[0].brave_search_result is not None
         transactions[0].category_allocations = [
             CategoryAllocation(
-                category_id="Restaurants & Dining Out",
+                category_id="Food & Dining > Restaurants & Dining Out",
                 amount="-7.00",
                 confidence=0.8,
                 source=Source1.model,
@@ -438,7 +438,7 @@ def test_main_can_enrich_and_categorize_transactions(
     allocations = json.loads(rows[0]["category_allocations"])
     assert allocations == [
         {
-            "categoryId": "Restaurants & Dining Out",
+            "categoryId": "Food & Dining > Restaurants & Dining Out",
             "amount": "-7.00",
             "confidence": 0.8,
             "source": "model",
@@ -446,7 +446,7 @@ def test_main_can_enrich_and_categorize_transactions(
     ]
 
 
-def test_main_can_use_flattened_budget_categories_for_transactions(
+def test_main_categorizes_transactions_with_flattened_budget_categories(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -472,14 +472,11 @@ def test_main_can_use_flattened_budget_categories_for_transactions(
         calls.append("brave")
         return transactions
 
-    def fake_categorize_transactions(
-        transactions: list[Transaction], *, use_flattened_categories: bool
-    ) -> list[Transaction]:
-        assert use_flattened_categories is True
+    def fake_categorize_transactions(transactions: list[Transaction]) -> list[Transaction]:
         calls.append("categorize")
         transactions[0].category_allocations = [
             CategoryAllocation(
-                category_id="Fast Food & Coffee",
+                category_id="Food & Dining > Fast Food & Coffee",
                 amount="-7.00",
                 confidence=0.8,
                 source=Source1.model,
@@ -493,7 +490,6 @@ def test_main_can_use_flattened_budget_categories_for_transactions(
         [
             "ingest_statements.py",
             "--categorize-transactions",
-            "--flatten-budget-categories",
             str(statement_path),
         ],
     )

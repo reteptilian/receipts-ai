@@ -103,14 +103,6 @@ def main() -> None:
         help="Use Ollama to populate each transaction categoryAllocations.",
     )
     parser.add_argument(
-        "--flatten-budget-categories",
-        action="store_true",
-        help=(
-            "With --categorize, ask Ollama to choose once from flattened "
-            "'Top > Subcategory' budget category paths."
-        ),
-    )
-    parser.add_argument(
         "--cache-file",
         type=Path,
         help="Cache Brave Search and Ollama responses in this JSON file.",
@@ -166,22 +158,9 @@ def main() -> None:
                 )
         if args.categorize_transactions:
             if category_client is not None:
-                if args.flatten_budget_categories:
-                    categorize_transactions(
-                        statement_transactions,
-                        client=category_client,
-                        use_flattened_categories=True,
-                    )
-                else:
-                    categorize_transactions(statement_transactions, client=category_client)
+                categorize_transactions(statement_transactions, client=category_client)
             else:
-                if args.flatten_budget_categories:
-                    categorize_transactions(
-                        statement_transactions,
-                        use_flattened_categories=True,
-                    )
-                else:
-                    categorize_transactions(statement_transactions)
+                categorize_transactions(statement_transactions)
         if args.upsert_firestore:
             for transaction in statement_transactions:
                 upsert_transaction_to_firestore(
