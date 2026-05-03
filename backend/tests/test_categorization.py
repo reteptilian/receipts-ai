@@ -241,7 +241,7 @@ def test_clean_receipt_item_descriptions_uses_raw_text_and_top_five_search_resul
     assert "Result 6" not in client.prompts[0]
 
 
-def test_categorize_receipt_items_uses_clean_description_and_leaf_category_only():
+def test_categorize_receipt_items_uses_clean_description_and_flattened_category():
     item = ReceiptItem(
         description="Nabisco Premium Saltine Crackers",
         raw_description="RAW CONFUSING CODE",
@@ -264,19 +264,16 @@ def test_categorize_receipt_items_uses_clean_description_and_leaf_category_only(
         currency="USD",
         receipt=Receipt(items=[item]),
     )
-    client = FakeCategoryClient(["Food & Dining", "Groceries"])
+    client = FakeCategoryClient(["Food & Dining > Groceries"])
 
     result = categorize_receipt_items(transaction, client=client)
 
     assert result is transaction
-    assert item.category_id == "Groceries"
-    assert len(client.prompts) == 2
+    assert item.category_id == "Food & Dining > Groceries"
+    assert len(client.prompts) == 1
     assert "Food & Dining" in client.prompts[0]
-    assert "Groceries" not in client.prompts[0]
-    assert "Groceries" in client.prompts[1]
-    assert "Food & Dining" not in client.prompts[1].split("Options:", maxsplit=1)[1]
+    assert "Groceries" in client.prompts[0]
     assert "Receipt item description: Nabisco Premium Saltine Crackers" in client.prompts[0]
-    assert "Receipt item description: Nabisco Premium Saltine Crackers" in client.prompts[1]
     assert "Premium Saltines" not in "\n".join(client.prompts)
     assert "Crisp crackers sold in grocery stores." not in "\n".join(client.prompts)
     assert "RAW CONFUSING CODE" not in "\n".join(client.prompts)
@@ -305,11 +302,10 @@ def test_categorize_receipt_items_can_choose_from_flattened_categories():
             "Housing & Utilities": {"Mortgage & Rent": {}},
             "Food & Dining": {"Groceries": {}, "Restaurants & Dining Out": {}},
         },
-        use_flattened_categories=True,
     )
 
     assert result is transaction
-    assert item.category_id == "Groceries"
+    assert item.category_id == "Food & Dining > Groceries"
     assert len(client.prompts) == 1
     assert "Choose the best budget category path." in client.prompts[0]
     assert "- Housing & Utilities > Mortgage & Rent" in client.prompts[0]

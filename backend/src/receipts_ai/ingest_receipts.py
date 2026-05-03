@@ -163,14 +163,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--flatten-budget-categories",
-        action="store_true",
-        help=(
-            "With --categorize, ask Ollama to choose once from flattened "
-            "'Top > Subcategory' budget category paths."
-        ),
-    )
-    parser.add_argument(
         "--product-taxonomy-method",
         choices=("greedy", "vector"),
         default="greedy",
@@ -242,24 +234,14 @@ def main() -> None:
                 clean_receipt_item_descriptions(transaction)
         if args.categorize_items:
             if category_client is not None:
-                if args.flatten_budget_categories:
-                    categorize_receipt_items(
-                        transaction,
-                        client=category_client,
-                        use_flattened_categories=True,
-                    )
-                else:
-                    categorize_receipt_items(transaction, client=category_client)
+                categorize_receipt_items(transaction, client=category_client)
                 _classify_receipt_items_by_product_taxonomy(
                     transaction,
                     method=args.product_taxonomy_method,
                     client=category_client,
                 )
             else:
-                if args.flatten_budget_categories:
-                    categorize_receipt_items(transaction, use_flattened_categories=True)
-                else:
-                    categorize_receipt_items(transaction)
+                categorize_receipt_items(transaction)
                 _classify_receipt_items_by_product_taxonomy(
                     transaction,
                     method=args.product_taxonomy_method,

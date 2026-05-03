@@ -121,10 +121,6 @@ class _BudgetCategoryPath:
     def path_text(self) -> str:
         return " > ".join(self.path)
 
-    @property
-    def leaf_category_id(self) -> str:
-        return self.path[-1]
-
 
 class UrlLibOllamaClient:
     def __init__(
@@ -514,50 +510,26 @@ def categorize_receipt_items(
     *,
     client: CategoryModelClient | None = None,
     categories: dict[str, object] | None = None,
-    use_flattened_categories: bool = False,
 ) -> Transaction:
     if transaction.receipt is None:
         raise ValueError("transaction does not contain a receipt")
 
     active_client = client if client is not None else create_ollama_category_client()
     active_categories = categories if categories is not None else load_budget_categories()
-    if use_flattened_categories:
-        flattened_categories = _flatten_budget_categories(active_categories)
-        flattened_choices = tuple(category.path_text for category in flattened_categories)
-        category_by_path = {category.path_text: category for category in flattened_categories}
-        for item in transaction.receipt.items:
-            logger.info("Categorizing receipt item %s with flattened categories", item.description)
-            chosen_path = _choose_category(
-                client=active_client,
-                prompt=_flattened_category_prompt(item, flattened_choices),
-                choices=flattened_choices,
-            )
-            item.category_id = category_by_path[chosen_path].leaf_category_id
-            logger.info(
-                "Categorized receipt item %s as %s via %s",
-                item.description,
-                item.category_id,
-                chosen_path,
-            )
-        return transaction
-
-    top_level_categories = tuple(active_categories.keys())
+    flattened_choices = tuple(
+        category.path_text for category in _flatten_budget_categories(active_categories)
+    )
 
     for item in transaction.receipt.items:
         logger.info("Categorizing receipt item %s", item.description)
-        top_level_category = _choose_category(
-            client=active_client,
-            prompt=_top_level_prompt(item, top_level_categories),
-            choices=top_level_categories,
-        )
-        leaf_categories = tuple(_leaf_categories(active_categories[top_level_category]))
-        if not leaf_categories:
-            raise RuntimeError(f"budget category has no leaf categories: {top_level_category}")
-
         item.category_id = _choose_category(
             client=active_client,
-            prompt=_leaf_category_prompt(item, top_level_category, leaf_categories),
-            choices=leaf_categories,
+            prompt=_category_prompt(
+                "Choose the best budget category path.",
+                categories=flattened_choices,
+                item_description=item.description,
+            ),
+            choices=flattened_choices,
         )
         logger.info("Categorized receipt item %s as %s", item.description, item.category_id)
 
@@ -1196,32 +1168,6 @@ def _format_category_choice_probabilities(
     )
 
 
-def _top_level_prompt(item: ReceiptItem, categories: tuple[str, ...]) -> str:
-    return _category_prompt(
-        "Choose the best top level budget category.",
-        categories=categories,
-        item_description=item.description,
-    )
-
-
-def _leaf_category_prompt(
-    item: ReceiptItem, top_level_category: str, categories: tuple[str, ...]
-) -> str:
-    return _category_prompt(
-        f"Top level category: {top_level_category}\nChoose the best specific budget category.",
-        categories=categories,
-        item_description=item.description,
-    )
-
-
-def _flattened_category_prompt(item: ReceiptItem, categories: tuple[str, ...]) -> str:
-    return _category_prompt(
-        "Choose the best budget category path.",
-        categories=categories,
-        item_description=item.description,
-    )
-
-
 def _transaction_category_prompt(transaction: Transaction, categories: tuple[str, ...]) -> str:
     return _transaction_budget_category_prompt(
         "Choose the best budget category path.",
@@ -1404,22 +1350,6 @@ def _clean_description_response(response: str) -> str:
 
     cleaned = lines[0].strip(" \t-*:\"'`")
     return re.sub(r"\s+", " ", cleaned).strip()
-
-
-def _leaf_categories(node: object) -> list[str]:
-    if not isinstance(node, dict):
-        return []
-    node_object = cast(dict[str, object], node)
-    if not node_object:
-        return []
-
-    leaves: list[str] = []
-    for category, child in node_object.items():
-        if isinstance(child, dict) and child:
-            leaves.extend(_leaf_categories(cast(dict[str, object], child)))
-        else:
-            leaves.append(category)
-    return leaves
 
 
 def _flatten_budget_categories(categories: dict[str, object]) -> tuple[_BudgetCategoryPath, ...]:

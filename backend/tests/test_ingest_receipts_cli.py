@@ -47,7 +47,7 @@ def test_writes_one_csv_row_per_receipt_item():
                 discount_amount="-1.00",
                 discount_description="/1779212",
                 net_amount="6.00",
-                category_id="Fast Food & Coffee",
+                category_id="Food & Dining > Fast Food & Coffee",
                 taxonomy1="Food, Beverages & Tobacco",
                 taxonomy2="Beverages",
             ),
@@ -88,7 +88,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "item_discount_description": "/1779212",
             "item_net_amount": "6.00",
             "item_line_type": "item",
-            "item_category_id": "Fast Food & Coffee",
+            "item_category_id": "Food & Dining > Fast Food & Coffee",
             "item_taxonomy_1": "Food, Beverages & Tobacco",
             "item_taxonomy_2": "Beverages",
             "item_taxonomy_3": "",
@@ -327,13 +327,19 @@ def test_upsert_transaction_to_firestore_merges_transaction_document(
 def test_json_output_includes_receipt_item_category():
     receipt = Receipt(
         total="4.49",
-        items=[ReceiptItem(description="Saltines", amount="4.49", category_id="Groceries")],
+        items=[
+            ReceiptItem(
+                description="Saltines",
+                amount="4.49",
+                category_id="Food & Dining > Groceries",
+            )
+        ],
     )
     output = StringIO()
 
     write_receipt_json(receipt, output)
 
-    assert '"categoryId": "Groceries"' in output.getvalue()
+    assert '"categoryId": "Food & Dining > Groceries"' in output.getvalue()
 
 
 def test_main_can_enrich_items_with_brave_search(
@@ -660,7 +666,9 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
     ) -> Transaction:
         assert client.__class__.__name__ == "CachedCategoryModelClient"
         assert transaction_to_categorize.receipt is not None
-        transaction_to_categorize.receipt.items[0].category_id = "Fast Food & Coffee"
+        transaction_to_categorize.receipt.items[0].category_id = (
+            "Food & Dining > Fast Food & Coffee"
+        )
         return transaction_to_categorize
 
     def fake_clean_receipt_item_descriptions(
@@ -712,7 +720,7 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
     main()
 
     assert transaction.receipt is not None
-    assert transaction.receipt.items[0].category_id == "Fast Food & Coffee"
+    assert transaction.receipt.items[0].category_id == "Food & Dining > Fast Food & Coffee"
     assert transaction.receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"
 
 
@@ -756,7 +764,7 @@ def test_main_can_categorize_items_after_brave_search(
         assert transaction_to_categorize.receipt is not None
         assert transaction_to_categorize.receipt.items[0].brave_search_result == "search payload"
         assert transaction_to_categorize.receipt.items[0].description == "Nabisco Saltine Crackers"
-        transaction_to_categorize.receipt.items[0].category_id = "Groceries"
+        transaction_to_categorize.receipt.items[0].category_id = "Food & Dining > Groceries"
         return transaction_to_categorize
 
     def fake_clean_receipt_item_descriptions(
@@ -814,11 +822,11 @@ def test_main_can_categorize_items_after_brave_search(
     main()
 
     assert calls == ["brave", "clean", "categorize", "taxonomy"]
-    assert receipt.items[0].category_id == "Groceries"
+    assert receipt.items[0].category_id == "Food & Dining > Groceries"
     assert receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"
 
 
-def test_main_can_use_flattened_budget_categories(
+def test_main_categorizes_items_with_flattened_budget_categories(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -850,12 +858,9 @@ def test_main_can_use_flattened_budget_categories(
     def fake_clean_receipt_item_descriptions(transaction_to_clean: Transaction) -> Transaction:
         return transaction_to_clean
 
-    def fake_categorize_receipt_items(
-        transaction_to_categorize: Transaction, *, use_flattened_categories: bool
-    ) -> Transaction:
-        assert use_flattened_categories is True
+    def fake_categorize_receipt_items(transaction_to_categorize: Transaction) -> Transaction:
         assert transaction_to_categorize.receipt is not None
-        transaction_to_categorize.receipt.items[0].category_id = "Groceries"
+        transaction_to_categorize.receipt.items[0].category_id = "Food & Dining > Groceries"
         return transaction_to_categorize
 
     def fake_classify_receipt_items_by_product_taxonomy(
@@ -869,7 +874,6 @@ def test_main_can_use_flattened_budget_categories(
         [
             "receipts-ai",
             "--categorize-items",
-            "--flatten-budget-categories",
             str(receipt_path),
         ],
     )
@@ -898,7 +902,7 @@ def test_main_can_use_flattened_budget_categories(
 
     main()
 
-    assert receipt.items[0].category_id == "Groceries"
+    assert receipt.items[0].category_id == "Food & Dining > Groceries"
 
 
 def test_main_can_use_vector_product_taxonomy_method(
@@ -939,7 +943,9 @@ def test_main_can_use_vector_product_taxonomy_method(
     def fake_categorize_receipt_items(transaction_to_categorize: Transaction) -> Transaction:
         calls.append("categorize")
         assert transaction_to_categorize.receipt is not None
-        transaction_to_categorize.receipt.items[0].category_id = "Electronics"
+        transaction_to_categorize.receipt.items[0].category_id = (
+            "Shopping & Retail > Electronics"
+        )
         return transaction_to_categorize
 
     def fake_classify_receipt_items_by_product_taxonomy_vector_search(
@@ -997,7 +1003,7 @@ def test_main_can_use_vector_product_taxonomy_method(
     main()
 
     assert calls == ["brave", "clean", "categorize", "vector-taxonomy"]
-    assert receipt.items[0].category_id == "Electronics"
+    assert receipt.items[0].category_id == "Shopping & Retail > Electronics"
     assert receipt.items[0].taxonomy1 == "Electronics"
     assert receipt.items[0].taxonomy2 == "Audio"
     assert receipt.items[0].taxonomy3 == "Headphones"
