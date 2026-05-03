@@ -84,8 +84,17 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
         receipt=Receipt(
             total="10.00",
             items=[
-                ReceiptItem(description="Coffee", amount="7.00"),
-                ReceiptItem(description="Bagel", amount="3.00"),
+                ReceiptItem(
+                    description="Coffee",
+                    amount="7.00",
+                    net_amount="6.50",
+                    category_id="Food & Dining > Coffee Shops",
+                ),
+                ReceiptItem(
+                    description="Bagel",
+                    amount="3.00",
+                    category_id="Food & Dining > Bakeries",
+                ),
             ],
         ),
     )
@@ -96,7 +105,15 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
         payee="Grocery",
         amount="-4.49",
         currency="USD",
-        receipt=Receipt(items=[ReceiptItem(description="Saltines", amount="4.49")]),
+        receipt=Receipt(
+            items=[
+                ReceiptItem(
+                    description="Saltines",
+                    amount="4.49",
+                    category_id="Groceries",
+                )
+            ]
+        ),
     )
     client = FakeFirestoreClient(
         [
@@ -114,6 +131,7 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
 
     rows = list(csv.DictReader(StringIO(output_path.read_text(encoding="utf-8"))))
     assert "item_brave_search_result" not in rows[0]
+    assert "item_category_id" not in rows[0]
     assert "transaction_description" in rows[0]
     assert "category_allocation.category_id" in rows[0]
     assert "category_allocation.amount" in rows[0]
@@ -122,8 +140,12 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
     assert [row["item_description"] for row in rows] == ["Coffee", "Bagel", "Saltines"]
     assert [row["transaction_description"] for row in rows] == ["", "", ""]
     assert [row["transaction_amount"] for row in rows] == ["-10.00", "-10.00", "-4.49"]
-    assert [row["category_allocation.category_id"] for row in rows] == ["", "", ""]
-    assert [row["category_allocation.amount"] for row in rows] == ["", "", ""]
+    assert [row["category_allocation.category_id"] for row in rows] == [
+        "Food & Dining > Coffee Shops",
+        "Food & Dining > Bakeries",
+        "Groceries",
+    ]
+    assert [row["category_allocation.amount"] for row in rows] == ["6.50", "3.00", "4.49"]
 
 
 def test_export_firestore_csv_unpivots_transactions_without_receipt_items(

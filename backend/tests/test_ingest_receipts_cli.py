@@ -154,7 +154,13 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
         receipt=Receipt(
             subtotal="10.00",
             total="11.00",
-            items=[ReceiptItem(description="Coffee", amount="7.00")],
+            items=[
+                ReceiptItem(
+                    description="Coffee",
+                    amount="7.00",
+                    category_id="Food & Dining > Fast Food & Coffee",
+                )
+            ],
         ),
     )
     output = StringIO()
@@ -169,6 +175,11 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     assert rows[0]["transaction_amount"] == "-11.00"
     assert rows[0]["transaction_currency"] == "USD"
     assert rows[0]["item_description"] == "Coffee"
+    assert "item_category_id" not in rows[0]
+    assert rows[0]["category_allocation.category_id"] == (
+        "Food & Dining > Fast Food & Coffee"
+    )
+    assert rows[0]["category_allocation.amount"] == "7.00"
 
 
 def test_json_output_preserves_nested_receipt_struct():

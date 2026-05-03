@@ -76,7 +76,9 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "item_confidence",
 )
 TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES: tuple[str, ...] = tuple(
-    fieldname for fieldname in CSV_FIELDNAMES if fieldname != "item_brave_search_result"
+    fieldname
+    for fieldname in CSV_FIELDNAMES
+    if fieldname not in {"item_brave_search_result", "item_category_id"}
 ) + (
     "category_allocation.category_id",
     "category_allocation.amount",
@@ -533,6 +535,8 @@ def _transaction_receipt_item_rows(
             transaction_amount=transaction.amount,
             transaction_currency=transaction.currency,
             include_brave_search_result=False,
+            include_item_category_id=False,
+            include_category_allocation=True,
         )
 
     category_allocations = transaction.category_allocations or []
@@ -556,6 +560,8 @@ def _receipt_item_rows(
     transaction_amount: str | None = None,
     transaction_currency: str | None = None,
     include_brave_search_result: bool = True,
+    include_item_category_id: bool = True,
+    include_category_allocation: bool = False,
 ) -> list[dict[str, object | None]]:
     extraction = receipt.extraction
     rows: list[dict[str, object | None]] = []
@@ -585,7 +591,6 @@ def _receipt_item_rows(
             "item_discount_description": item.discount_description,
             "item_net_amount": item.net_amount,
             "item_line_type": item.line_type.value if item.line_type is not None else None,
-            "item_category_id": item.category_id,
             "item_taxonomy_1": item.taxonomy1,
             "item_taxonomy_2": item.taxonomy2,
             "item_taxonomy_3": item.taxonomy3,
@@ -599,6 +604,11 @@ def _receipt_item_rows(
         }
         if include_brave_search_result:
             row["item_brave_search_result"] = item.brave_search_result
+        if include_item_category_id:
+            row["item_category_id"] = item.category_id
+        if include_category_allocation:
+            row["category_allocation.category_id"] = item.category_id
+            row["category_allocation.amount"] = item.net_amount
         rows.append(row)
     return rows
 
