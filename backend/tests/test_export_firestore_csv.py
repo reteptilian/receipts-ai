@@ -133,12 +133,14 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
     assert "item_brave_search_result" not in rows[0]
     assert "item_category_id" not in rows[0]
     assert "transaction_description" in rows[0]
+    assert "combined_description" in rows[0]
     assert "category_allocation.category_id" in rows[0]
     assert "category_allocation.amount" in rows[0]
     assert [row["transaction_id"] for row in rows] == ["receipt_1", "receipt_1", "receipt_2"]
     assert [row["item_index"] for row in rows] == ["1", "2", "1"]
     assert [row["item_description"] for row in rows] == ["Coffee", "Bagel", "Saltines"]
     assert [row["transaction_description"] for row in rows] == ["", "", ""]
+    assert [row["combined_description"] for row in rows] == ["Coffee", "Bagel", "Saltines"]
     assert [row["transaction_amount"] for row in rows] == ["-10.00", "-10.00", "-4.49"]
     assert [row["category_allocation.category_id"] for row in rows] == [
         "Food & Dining > Coffee Shops",
@@ -182,6 +184,10 @@ def test_export_firestore_csv_unpivots_transactions_without_receipt_items(
         "POS PURCHASE GROCERY #123",
         "POS PURCHASE GROCERY #123",
     ]
+    assert [row["combined_description"] for row in rows] == [
+        "POS PURCHASE GROCERY #123",
+        "POS PURCHASE GROCERY #123",
+    ]
     assert [row["category_allocation.category_id"] for row in rows] == [
         "Groceries",
         "Household",
@@ -218,6 +224,7 @@ def test_export_firestore_csv_writes_transaction_row_without_category_allocation
     assert len(rows) == 1
     assert rows[0]["transaction_id"] == "statement_1"
     assert rows[0]["transaction_amount"] == "-7.00"
+    assert rows[0]["combined_description"] == ""
     assert rows[0]["category_allocation.category_id"] == ""
     assert rows[0]["category_allocation.amount"] == ""
     assert rows[0]["item_description"] == ""

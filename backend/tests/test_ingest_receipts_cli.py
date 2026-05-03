@@ -68,6 +68,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "transaction_date": "",
             "payee": "",
             "transaction_description": "",
+            "combined_description": "Coffee",
             "transaction_amount": "",
             "transaction_currency": "",
             "receipt_id": "",
@@ -106,6 +107,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "transaction_date": "",
             "payee": "",
             "transaction_description": "",
+            "combined_description": "Bagel",
             "transaction_amount": "",
             "transaction_currency": "",
             "receipt_id": "",
@@ -172,6 +174,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     assert rows[0]["transaction_date"] == "2026-04-27"
     assert rows[0]["payee"] == "Coffee Shop"
     assert rows[0]["transaction_description"] == ""
+    assert rows[0]["combined_description"] == "Coffee"
     assert rows[0]["transaction_amount"] == "-11.00"
     assert rows[0]["transaction_currency"] == "USD"
     assert rows[0]["item_description"] == "Coffee"

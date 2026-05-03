@@ -42,6 +42,7 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_date",
     "payee",
     "transaction_description",
+    "combined_description",
     "transaction_amount",
     "transaction_currency",
     "receipt_id",
@@ -521,6 +522,7 @@ def _transaction_receipt_item_rows(
         "transaction_date": transaction.transaction_date.isoformat(),
         "payee": transaction.payee,
         "transaction_description": transaction.description,
+        "combined_description": transaction.description,
         "transaction_amount": transaction.amount,
         "transaction_currency": transaction.currency,
     }
@@ -571,6 +573,7 @@ def _receipt_item_rows(
             "transaction_date": transaction_date,
             "payee": payee,
             "transaction_description": transaction_description,
+            "combined_description": item.description,
             "transaction_amount": transaction_amount,
             "transaction_currency": transaction_currency,
             "receipt_id": receipt.id,
