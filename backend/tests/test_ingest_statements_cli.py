@@ -203,6 +203,75 @@ def test_parses_sgml_qfx_credit_card_transactions(tmp_path: Path):
     assert payment.kind == Kind.income
 
 
+def test_extracts_mcc_from_credit_card_memo():
+    transactions = transactions_from_ofx(
+        """
+        <OFX>
+          <CREDITCARDMSGSRSV1>
+            <CCSTMTTRNRS>
+              <CCSTMTRS>
+                <CURDEF>USD
+                <CCACCTFROM>
+                  <ACCTID>5555444433331111
+                </CCACCTFROM>
+                <BANKTRANLIST>
+                  <STMTTRN>
+                    <TRNTYPE>DEBIT
+                    <DTPOSTED>20260406120000.000
+                    <TRNAMT>-649.35
+                    <FITID>647d8b3c-cbe0-1dc0-dcc1-8edd029e2a29
+                    <NAME>TM *SEATTLE MARINERS-S 800-653-8
+                    <MEMO>24692166095105027421606; 07922; ; 0829PETERESBENSEN; ; ;
+                  </STMTTRN>
+                </BANKTRANLIST>
+              </CCSTMTRS>
+            </CCSTMTTRNRS>
+          </CREDITCARDMSGSRSV1>
+        </OFX>
+        """
+    )
+
+    transaction = transactions[0]
+    assert transaction.mcc == "7922"
+    assert (
+        transaction.mcc_description
+        == "Theatrical Producers (Except Motion Pictures), Ticket Agencies"
+    )
+
+
+def test_does_not_extract_mcc_from_bank_account_memo():
+    transactions = transactions_from_ofx(
+        """
+        <OFX>
+          <BANKMSGSRSV1>
+            <STMTTRNRS>
+              <STMTRS>
+                <CURDEF>USD
+                <BANKACCTFROM>
+                  <ACCTID>987654321
+                </BANKACCTFROM>
+                <BANKTRANLIST>
+                  <STMTTRN>
+                    <TRNTYPE>DEBIT
+                    <DTPOSTED>20260406120000.000
+                    <TRNAMT>-649.35
+                    <FITID>checking-1
+                    <NAME>Memo Pattern
+                    <MEMO>24692166095105027421606; 07922; ; ;
+                  </STMTTRN>
+                </BANKTRANLIST>
+              </STMTRS>
+            </STMTTRNRS>
+          </BANKMSGSRSV1>
+        </OFX>
+        """
+    )
+
+    transaction = transactions[0]
+    assert transaction.mcc is None
+    assert transaction.mcc_description is None
+
+
 def test_parses_fidelity_csv_transactions_ignoring_padding_and_boilerplate():
     transactions = transactions_from_fidelity_csv(
         """
@@ -274,6 +343,8 @@ def test_writes_transaction_csv_rows():
             "posted_date": "",
             "payee": "Coffee Shop",
             "description": "CARD PURCHASE",
+            "mcc": "",
+            "mcc_description": "",
             "brave_search_result": '[{"title":"Coffee Shop","description":"Cafe"}]',
             "amount": "-7.00",
             "currency": "USD",

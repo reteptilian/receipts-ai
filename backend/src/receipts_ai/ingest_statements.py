@@ -10,6 +10,8 @@ import sys
 from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from functools import cache
+from importlib import resources
 from pathlib import Path
 from typing import TextIO
 
@@ -39,6 +41,8 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "posted_date",
     "payee",
     "description",
+    "mcc",
+    "mcc_description",
     "brave_search_result",
     "amount",
     "currency",
@@ -55,6 +59,7 @@ LOGGER = logging.getLogger(__name__)
 OFX_AGGREGATE_TAGS = ("STMTRS", "CCSTMTRS")
 OFX_TRANSACTION_PATTERN = re.compile(r"<STMTTRN>\s*(.*?)\s*</STMTTRN>", re.IGNORECASE | re.DOTALL)
 OFX_COMPATIBLE_FORMATS = frozenset(("ofx", "qfx"))
+OFX_MEMO_MCC_PATTERN = re.compile(r";\s*0?(\d{4})\s*;")
 
 
 def main() -> None:
@@ -320,6 +325,8 @@ def _transaction_rows(transactions: Iterable[Transaction]) -> list[dict[str, obj
                 else None,
                 "payee": transaction.payee,
                 "description": transaction.description,
+                "mcc": transaction.mcc,
+                "mcc_description": transaction.mcc_description,
                 "brave_search_result": transaction.brave_search_result,
                 "amount": transaction.amount,
                 "currency": transaction.currency,
@@ -361,6 +368,7 @@ def _transaction_from_block(
     fitid = _tag_value(transaction_block, "FITID")
     name = _tag_value(transaction_block, "NAME")
     memo = _tag_value(transaction_block, "MEMO")
+    mcc = _credit_card_mcc(memo) if is_credit_card else None
     description = _description(name=name, memo=memo)
     return Transaction(
         id=_transaction_id(account_id=account_id, fitid=fitid, transaction_block=transaction_block),
@@ -373,6 +381,8 @@ def _transaction_from_block(
         description=_credit_card_description(name=name, memo=memo)
         if is_credit_card
         else description,
+        mcc=mcc,
+        mcc_description=_mcc_description(mcc),
         amount=amount,
         currency=currency,
         kind=_kind(transaction_type=transaction_type, amount=amount),
@@ -491,6 +501,31 @@ def _credit_card_description(*, name: str | None, memo: str | None) -> str | Non
     if memo and memo != name:
         return memo
     return None
+
+
+def _credit_card_mcc(memo: str | None) -> str | None:
+    if memo is None:
+        return None
+    match = OFX_MEMO_MCC_PATTERN.search(memo)
+    return match.group(1) if match else None
+
+
+def _mcc_description(mcc: str | None) -> str | None:
+    if mcc is None:
+        return None
+    return _mcc_descriptions().get(mcc)
+
+
+@cache
+def _mcc_descriptions() -> dict[str, str]:
+    mcc_codes = json.loads(
+        resources.files("receipts_ai.models").joinpath("mcc_codes.json").read_text()
+    )
+    return {
+        code["mcc"]: code["combined_description"]
+        for code in mcc_codes
+        if code.get("combined_description")
+    }
 
 
 def _fidelity_description(*, action: str, description: str | None) -> str:
