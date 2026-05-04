@@ -26,7 +26,7 @@ from receipts_ai.categorization import (
     create_ollama_category_client,
 )
 from receipts_ai.document_intelligence import analyze_receipt_file
-from receipts_ai.models.transaction import Receipt, Transaction
+from receipts_ai.models.transaction import Receipt, Source, Transaction
 from receipts_ai.openai_receipt_extraction import (
     DEFAULT_OPENAI_MODEL,
     OPENAI_MODEL_ENV_VAR,
@@ -517,12 +517,13 @@ def write_receipt_json(receipt: Receipt, file: TextIO) -> None:
 def _transaction_receipt_item_rows(
     transaction: Transaction,
 ) -> list[dict[str, object | None]]:
+    combined_description = _transaction_combined_description(transaction)
     transaction_fields: dict[str, object | None] = {
         "transaction_id": transaction.id,
         "transaction_date": transaction.transaction_date.isoformat(),
         "payee": transaction.payee,
         "transaction_description": transaction.description,
-        "combined_description": transaction.description,
+        "combined_description": combined_description,
         "transaction_amount": transaction.amount,
         "transaction_currency": transaction.currency,
     }
@@ -550,6 +551,17 @@ def _transaction_receipt_item_rows(
             row["category_allocation.amount"] = allocation.amount
         rows.append(row)
     return rows
+
+
+def _transaction_combined_description(transaction: Transaction) -> str | None:
+    if (
+        transaction.source == Source.bank_statement
+        and transaction.payee is not None
+        and transaction.account_id is not None
+        and ":" not in transaction.account_id
+    ):
+        return transaction.payee
+    return transaction.description
 
 
 def _receipt_item_rows(

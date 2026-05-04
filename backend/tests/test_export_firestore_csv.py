@@ -197,6 +197,36 @@ def test_export_firestore_csv_unpivots_transactions_without_receipt_items(
     assert [row["item_taxonomy_1"] for row in rows] == ["", ""]
 
 
+def test_export_firestore_csv_uses_payee_for_credit_card_combined_description(
+    tmp_path: Path,
+):
+    transaction = Transaction(
+        id="statement_1",
+        source=Source.bank_statement,
+        account_id="5555444433331111",
+        transaction_date=date(2026, 4, 27),
+        payee="COSTCO WHSE #123",
+        description="POS PURCHASE COSTCO WHSE #123",
+        amount="-42.19",
+        currency="USD",
+    )
+    client = FakeFirestoreClient(
+        [FakeDocumentSnapshot("statement_1", transaction_firestore_document(transaction))]
+    )
+    output_path = tmp_path / "firestore-export.csv"
+
+    export_firestore_receipt_items_csv(
+        output_path=output_path,
+        client=client,
+        collection="test-transactions",
+    )
+
+    rows = list(csv.DictReader(StringIO(output_path.read_text(encoding="utf-8"))))
+    assert len(rows) == 1
+    assert rows[0]["transaction_description"] == "POS PURCHASE COSTCO WHSE #123"
+    assert rows[0]["combined_description"] == "COSTCO WHSE #123"
+
+
 def test_export_firestore_csv_writes_transaction_row_without_category_allocations(
     tmp_path: Path,
 ):
