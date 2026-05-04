@@ -33,6 +33,7 @@ TRANSACTION_MIN_CATEGORY_CONFIDENCE = 0.35
 TRANSACTION_CATEGORY_CHOICE_ALIASES = tuple(
     "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0!#$%&?@^_~+=/|<>[]{}"
 )
+MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES = len(TRANSACTION_CATEGORY_CHOICE_ALIASES)
 PRODUCT_TAXONOMY_FILENAME = "taxonomy.en-US.txt"
 PRODUCT_TAXONOMY_EMBEDDINGS_FILENAME = "taxonomy_embeddings.json"
 DEFAULT_TAXONOMY_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -43,6 +44,7 @@ TAXONOMY_ALIAS_CACHE_VERSION = "taxonomy_alias_v2"
 TAXONOMY_CHOICE_ALIASES = tuple(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&?@^_~+=/|<>()[]{}"
 )
+MAX_TAXONOMY_ALIAS_CHOICES = len(TAXONOMY_CHOICE_ALIASES)
 
 logger = logging.getLogger(__name__)
 
@@ -1089,18 +1091,22 @@ def _rank_taxonomy_embedding_candidates(
 
 
 def _taxonomy_choice_aliases(choices: tuple[str, ...]) -> dict[str, str]:
-    if len(choices) <= len(TAXONOMY_CHOICE_ALIASES):
-        aliases = TAXONOMY_CHOICE_ALIASES[: len(choices)]
-    else:
-        aliases = tuple(str(index) for index in range(1, len(choices) + 1))
+    if len(choices) > MAX_TAXONOMY_ALIAS_CHOICES:
+        raise RuntimeError(
+            "too many taxonomy choices for single-token alias prompt: "
+            f"got {len(choices)}, maximum is {MAX_TAXONOMY_ALIAS_CHOICES}"
+        )
+    aliases = TAXONOMY_CHOICE_ALIASES[: len(choices)]
     return dict(zip(choices, aliases, strict=True))
 
 
 def _transaction_category_choice_aliases(choices: tuple[str, ...]) -> dict[str, str]:
-    if len(choices) <= len(TRANSACTION_CATEGORY_CHOICE_ALIASES):
-        aliases = TRANSACTION_CATEGORY_CHOICE_ALIASES[: len(choices)]
-    else:
-        aliases = tuple(str(index) for index in range(1, len(choices) + 1))
+    if len(choices) > MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES:
+        raise RuntimeError(
+            "too many budget category choices for single-token alias prompt: "
+            f"got {len(choices)}, maximum is {MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES}"
+        )
+    aliases = TRANSACTION_CATEGORY_CHOICE_ALIASES[: len(choices)]
     return dict(zip(choices, aliases, strict=True))
 
 

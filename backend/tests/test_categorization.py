@@ -16,6 +16,8 @@ import pytest
 from receipts_ai.cache import JsonCallCache
 from receipts_ai.categorization import (
     DEFAULT_OLLAMA_URL,
+    MAX_TAXONOMY_ALIAS_CHOICES,
+    MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES,
     CachedCategoryModelClient,
     CategoryChoiceProbability,
     CategoryCompletion,
@@ -497,6 +499,35 @@ def test_categorize_transactions_uses_single_character_aliases_for_budget_catego
     assert "41: Pets & Family > Childcare & Daycare" not in client.prompts[0]
 
 
+def test_categorize_transactions_rejects_too_many_single_token_alias_choices():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        description="Kacey Dogsitting",
+        amount="-125.00",
+        currency="USD",
+    )
+    categories: dict[str, object] = {
+        "Budget": {
+            f"Category {index}": {} for index in range(1, MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES + 2)
+        }
+    }
+    client = FakeProbabilityCategoryClient([])
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "too many budget category choices for single-token alias prompt: "
+            f"got {MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES + 1}, "
+            f"maximum is {MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES}"
+        ),
+    ):
+        categorize_transactions([transaction], client=client, categories=categories)
+
+    assert client.prompts == []
+
+
 def test_categorize_transactions_skips_low_confidence_response(caplog: pytest.LogCaptureFixture):
     transaction = Transaction(
         id="bank_statement_1",
@@ -771,6 +802,37 @@ def test_classify_receipt_items_by_product_taxonomy_maps_single_token_aliases():
     assert "I: Frozen Desserts & Novelties" in client.prompts[0]
     assert "J: Fruits & Vegetables" in client.prompts[0]
     assert client.prompts[0].endswith("Label: ")
+
+
+def test_classify_receipt_items_by_product_taxonomy_rejects_too_many_single_token_alias_choices():
+    item = ReceiptItem(
+        description="Organic Gala Apples 3 lbs",
+        amount="5.99",
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Grocery",
+        amount="-5.99",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    taxonomy: dict[str, object] = {
+        f"Category {index}": {} for index in range(1, MAX_TAXONOMY_ALIAS_CHOICES + 2)
+    }
+    client = FakeProbabilityCategoryClient([])
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "too many taxonomy choices for single-token alias prompt: "
+            f"got {MAX_TAXONOMY_ALIAS_CHOICES + 1}, maximum is {MAX_TAXONOMY_ALIAS_CHOICES}"
+        ),
+    ):
+        classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
+
+    assert client.prompts == []
 
 
 def test_classify_receipt_items_by_product_taxonomy_searches_multiple_probable_paths():

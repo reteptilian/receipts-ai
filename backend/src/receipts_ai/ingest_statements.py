@@ -54,6 +54,7 @@ CSV_FIELDNAMES: tuple[str, ...] = (
 LOGGER = logging.getLogger(__name__)
 OFX_AGGREGATE_TAGS = ("STMTRS", "CCSTMTRS")
 OFX_TRANSACTION_PATTERN = re.compile(r"<STMTTRN>\s*(.*?)\s*</STMTTRN>", re.IGNORECASE | re.DOTALL)
+OFX_COMPATIBLE_FORMATS = frozenset(("ofx", "qfx"))
 
 
 def main() -> None:
@@ -69,9 +70,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--statement-format",
-        choices=("ofx", "fidelity-csv"),
+        choices=("ofx", "qfx", "fidelity-csv"),
         default="ofx",
-        help="Input statement format. Defaults to OFX/QFX.",
+        help="Input statement format. QFX is parsed as OFX. Defaults to OFX.",
     )
     parser.add_argument(
         "--format",
@@ -174,8 +175,12 @@ def transactions_from_ofx_file(statement_path: Path) -> list[Transaction]:
     return transactions_from_ofx(statement_path.read_text(encoding="utf-8-sig"), source=statement_path)
 
 
+def transactions_from_qfx_file(statement_path: Path) -> list[Transaction]:
+    return transactions_from_ofx_file(statement_path)
+
+
 def transactions_from_file(statement_path: Path, *, statement_format: str) -> list[Transaction]:
-    if statement_format == "ofx":
+    if statement_format in OFX_COMPATIBLE_FORMATS:
         return transactions_from_ofx_file(statement_path)
     if statement_format == "fidelity-csv":
         return transactions_from_fidelity_csv_file(statement_path)

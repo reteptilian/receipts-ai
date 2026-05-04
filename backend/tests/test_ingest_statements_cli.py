@@ -14,6 +14,7 @@ from receipts_ai.ingest_statements import (
     CSV_FIELDNAMES,
     main,
     transactions_from_fidelity_csv,
+    transactions_from_file,
     transactions_from_ofx,
     write_transaction_json,
     write_transactions_csv,
@@ -113,6 +114,93 @@ def test_parses_xml_ofx_credit_card_transactions():
     assert transaction.description is None
     assert transaction.amount == "1250.00"
     assert transaction.kind == Kind.income
+
+
+def test_parses_sgml_qfx_credit_card_transactions(tmp_path: Path):
+    statement_path = tmp_path / "credit-card.qfx"
+    statement_path.write_text(
+        """
+        OFXHEADER:100
+        DATA:OFXSGML
+        VERSION:102
+        SECURITY:NONE
+        ENCODING:USASCII
+        CHARSET:1252
+        COMPRESSION:NONE
+        OLDFILEUID:NONE
+        NEWFILEUID:statement-1
+
+        <OFX>
+          <SIGNONMSGSRSV1>
+            <SONRS>
+              <STATUS>
+                <CODE>0
+                <SEVERITY>INFO
+              </STATUS>
+              <DTSERVER>20260501120000[-8:PST]
+              <LANGUAGE>ENG
+              <INTU.BID>12345
+            </SONRS>
+          </SIGNONMSGSRSV1>
+          <CREDITCARDMSGSRSV1>
+            <CCSTMTTRNRS>
+              <TRNUID>1
+              <STATUS>
+                <CODE>0
+                <SEVERITY>INFO
+              </STATUS>
+              <CCSTMTRS>
+                <CURDEF>USD
+                <CCACCTFROM>
+                  <ACCTID>5555444433331111
+                </CCACCTFROM>
+                <BANKTRANLIST>
+                  <DTSTART>20260401000000
+                  <DTEND>20260430000000
+                  <STMTTRN>
+                    <TRNTYPE>DEBIT
+                    <DTPOSTED>20260427120000[-8:PST]
+                    <TRNAMT>-42.19
+                    <FITID>2026042701
+                    <NAME>COSTCO WHSE #123
+                    <MEMO>POS PURCHASE COSTCO WHSE #123
+                  </STMTTRN>
+                  <STMTTRN>
+                    <TRNTYPE>CREDIT
+                    <DTPOSTED>20260428000000[-8:PST]
+                    <TRNAMT>42.19
+                    <FITID>2026042801
+                    <NAME>ONLINE PAYMENT
+                  </STMTTRN>
+                </BANKTRANLIST>
+              </CCSTMTRS>
+            </CCSTMTTRNRS>
+          </CREDITCARDMSGSRSV1>
+        </OFX>
+        """,
+        encoding="utf-8",
+    )
+
+    transactions = transactions_from_file(statement_path, statement_format="qfx")
+
+    assert len(transactions) == 2
+    charge = transactions[0]
+    assert charge.source == Source.bank_statement
+    assert charge.external_id == "2026042701"
+    assert charge.account_id == "5555444433331111"
+    assert charge.transaction_date == date(2026, 4, 27)
+    assert charge.payee == "COSTCO WHSE #123"
+    assert charge.description == "POS PURCHASE COSTCO WHSE #123"
+    assert charge.amount == "-42.19"
+    assert charge.currency == "USD"
+    assert charge.kind == Kind.expense
+    assert charge.status == Status.posted
+
+    payment = transactions[1]
+    assert payment.payee == "ONLINE PAYMENT"
+    assert payment.description is None
+    assert payment.amount == "42.19"
+    assert payment.kind == Kind.income
 
 
 def test_parses_fidelity_csv_transactions_ignoring_padding_and_boilerplate():
@@ -328,6 +416,45 @@ Date downloaded 05/02/2026 11:08 am
         "DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)"
     ]
     assert [row["amount"] for row in rows] == ["-3562.71"]
+
+
+def test_main_can_process_qfx_statement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    statement_path = tmp_path / "credit-card.qfx"
+    statement_path.write_text(
+        """
+        OFXHEADER:100
+        DATA:OFXSGML
+        <OFX><CREDITCARDMSGSRSV1><CCSTMTTRNRS><CCSTMTRS><CURDEF>USD
+        <CCACCTFROM><ACCTID>credit</ACCTID></CCACCTFROM>
+        <BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260427
+        <TRNAMT>-7.00<FITID>credit-1<NAME>Coffee Shop<MEMO>CARD PURCHASE</STMTTRN></BANKTRANLIST>
+        </CCSTMTRS></CCSTMTTRNRS></CREDITCARDMSGSRSV1></OFX>
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ingest_statements.py",
+            "--statement-format",
+            "qfx",
+            str(statement_path),
+        ],
+    )
+
+    main()
+
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert rows[0]["account_id"] == "credit"
+    assert rows[0]["payee"] == "Coffee Shop"
+    assert rows[0]["description"] == "CARD PURCHASE"
+    assert rows[0]["amount"] == "-7.00"
 
 
 def test_main_can_upsert_firestore(
