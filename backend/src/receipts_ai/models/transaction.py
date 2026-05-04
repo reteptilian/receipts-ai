@@ -287,7 +287,24 @@ class Transaction(BaseModel):
     ] = None
     description: Annotated[
         str | None,
-        Field(description="Statement-provided transaction description, when separate from the payee."),
+        Field(
+            description="Statement-provided transaction description, when separate from the payee."
+        ),
+    ] = None
+    mcc: Annotated[
+        str | None,
+        Field(
+            description="Merchant Category Code extracted from a credit card statement, when available.",
+            pattern="^[0-9]{4}$",
+        ),
+    ] = None
+    mcc_description: Annotated[
+        str | None,
+        Field(
+            alias="mccDescription",
+            description="Textual description of the Merchant Category Code category, when available.",
+            min_length=1,
+        ),
     ] = None
     brave_search_result: Annotated[
         str | None,

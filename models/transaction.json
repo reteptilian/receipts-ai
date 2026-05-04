@@ -40,6 +40,15 @@
       "type": "string",
       "description": "Statement-provided transaction description, when separate from the payee."
     },
+    "mcc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}$",
+      "description": "Merchant Category Code extracted from a credit card statement, when available."
+    },
+    "mccDescription": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Textual description of the Merchant Category Code category, when available."
+    },
     "braveSearchResult": {
       "$ref": "#/$defs/nonEmptyString",
       "description": "JSON-encoded Brave Search result summaries containing only title and description fields."

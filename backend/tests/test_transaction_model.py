@@ -12,6 +12,8 @@ def test_transaction_accepts_json_aliases():
             "source": "bank_statement",
             "transactionDate": "2026-04-27",
             "payee": "Costco",
+            "mcc": "5411",
+            "mccDescription": "Grocery Stores, Supermarkets",
             "braveSearchResult": "Costco Wholesale - search result",
             "amount": "-42.19",
             "currency": "USD",
@@ -20,6 +22,8 @@ def test_transaction_accepts_json_aliases():
     )
 
     assert transaction.transaction_date.isoformat() == "2026-04-27"
+    assert transaction.mcc == "5411"
+    assert transaction.mcc_description == "Grocery Stores, Supermarkets"
     assert transaction.brave_search_result == "Costco Wholesale - search result"
     assert transaction.linked_transaction_ids is not None
     assert transaction.linked_transaction_ids[0] == "receipt_1"
@@ -97,5 +101,19 @@ def test_transaction_rejects_invalid_currency():
                 "payee": "Manual Adjustment",
                 "amount": "12.00",
                 "currency": "usd",
+            }
+        )
+
+
+def test_transaction_rejects_invalid_mcc():
+    with pytest.raises(ValidationError):
+        Transaction.model_validate(
+            {
+                "id": "txn_1",
+                "source": "bank_statement",
+                "transaction_date": "2026-04-27",
+                "amount": "-42.19",
+                "currency": "USD",
+                "mcc": "541",
             }
         )
