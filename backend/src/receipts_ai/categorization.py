@@ -1281,11 +1281,13 @@ def _transaction_budget_category_prompt(
     instruction: str, *, categories: tuple[str, ...], transaction: Transaction
 ) -> str:
     _ = categories
+    merchant_category_text = _transaction_merchant_category_text(transaction)
     return (
         f"{instruction}\n"
         # "Return only one exact category name from Options.\n\n"
         # f"Options:\n{options}\n\n"
         f"Raw transaction description: {_transaction_description_text(transaction)}\n\n"
+        f"{merchant_category_text}"
         # f"Search results:\n{_transaction_search_results_text(transaction)}"
     )
 
@@ -1307,6 +1309,15 @@ def _transaction_description_text(transaction: Transaction) -> str:
         parts.append(transaction.description)
     description = " ".join(part.strip() for part in parts if part and part.strip())
     return _strip_transaction_prompt_noise(description)
+
+
+def _transaction_merchant_category_text(transaction: Transaction) -> str:
+    if transaction.mcc_description is None:
+        return ""
+    mcc_description = transaction.mcc_description.strip()
+    if not mcc_description:
+        return ""
+    return f"Merchant category: {mcc_description}\n\n"
 
 
 def _strip_transaction_prompt_noise(description: str) -> str:

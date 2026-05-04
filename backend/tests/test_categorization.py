@@ -361,9 +361,40 @@ def test_categorize_transactions_sets_single_model_allocation_from_flattened_cat
         "Raw transaction description: COSTCO WHSE POS PURCHASE COSTCO WHSE #123"
         in client.prompts[0]
     )
+    assert "Merchant category:" not in client.prompts[0]
     # assert "1. Title: Costco Wholesale" in client.prompts[0]
     assert "1: Food & Dining > Groceries" in client.prompts[0]
     assert client.prompts[0].endswith("Label: ")
+
+
+def test_categorize_transactions_includes_mcc_description_in_budget_prompt():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="COSTCO WHSE",
+        description="POS PURCHASE COSTCO WHSE #123",
+        mcc="5411",
+        mcc_description="Grocery Stores, Supermarkets",
+        amount="-42.19",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="1",
+                probabilities=(CategoryChoiceProbability("1", 0.82),),
+            ),
+        ]
+    )
+
+    categorize_transactions(
+        [transaction],
+        client=client,
+        categories={"Food & Dining": {"Groceries": {}}},
+    )
+
+    assert "Merchant category: Grocery Stores, Supermarkets" in client.prompts[0]
 
 
 def test_categorize_transactions_can_choose_from_flattened_categories():
@@ -948,6 +979,34 @@ def test_classify_receipt_items_by_product_taxonomy_vector_search_ranks_nearest_
     assert "Electronics > Audio > Speakers" in client.prompts[0]
     assert "Food, Beverages & Tobacco > Food Items > Bakery > Crackers" not in client.prompts[0]
     assert "Receipt item description: Apple AirPods Pro 3" in client.prompts[0]
+
+
+def test_product_taxonomy_prompts_do_not_include_transaction_mcc_description():
+    item = ReceiptItem(
+        description="Apple AirPods Pro 3",
+        amount="249.00",
+    )
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Apple",
+        mcc="5732",
+        mcc_description="Electronics Stores",
+        amount="-249.00",
+        currency="USD",
+        receipt=Receipt(items=[item]),
+    )
+    taxonomy: dict[str, object] = {
+        "Electronics": {"Audio": {"Headphones": {}}},
+        "Food, Beverages & Tobacco": {},
+    }
+    client = FakeCategoryClient(["Electronics", "Audio", "Headphones"])
+
+    classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
+
+    assert "Merchant category" not in "\n".join(client.prompts)
+    assert "Electronics Stores" not in "\n".join(client.prompts)
 
 
 def test_categorize_receipt_items_rejects_non_leaf_category_response():
