@@ -169,7 +169,7 @@ reportUnreachable = false
 [tool.codespell]
 # Add here as needed:
 # ignore-words-list = "foo,bar"
-skip = "tests/fixtures"
+skip = "tests/fixtures,src/receipts_ai/models/mcc_codes.json,src/receipts_ai/models/taxonomy_embeddings.json"
 
 [tool.pytest.ini_options]
 python_files = ["*.py"]
