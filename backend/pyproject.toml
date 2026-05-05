@@ -64,6 +64,7 @@ dev = [
 # Add script entry points here:
 receipts-ai = "receipts_ai.ingest_receipts:main"
 receipts-ai-export-firestore-csv = "receipts_ai.export_firestore_csv:main"
+receipts-ai-ingest-amazon = "receipts_ai.ingest_amazon:main"
 receipts-ai-ingest-statements = "receipts_ai.ingest_statements:main"
 
 

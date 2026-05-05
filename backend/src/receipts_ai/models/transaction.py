@@ -18,6 +18,7 @@ class Source(StrEnum):
 
     bank_statement = "bank_statement"
     receipt = "receipt"
+    amazon_order = "amazon_order"
     manual = "manual"
 
 
