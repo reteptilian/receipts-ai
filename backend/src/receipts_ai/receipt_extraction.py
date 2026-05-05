@@ -9,6 +9,7 @@ from typing import Any, cast
 from receipts_ai.document_intelligence import to_jsonable
 from receipts_ai.models.transaction import (
     ExtractionMetadata,
+    LineType,
     Receipt,
     ReceiptItem,
     Source,
@@ -50,6 +51,15 @@ def transaction_from_document_intelligence_result(result: Any) -> Transaction:
         raise ValueError("document intelligence result does not contain a receipt total")
 
     items = _receipt_items(fields.get("Items"), payee=payee)
+    tax_amount = _currency_amount(fields.get("TotalTax"))
+    if tax_amount is not None and Decimal(tax_amount) != 0:
+        items.append(
+            ReceiptItem(
+                description="Sales tax",
+                amount=tax_amount,
+                line_type=LineType.tax,
+            )
+        )
     currency = _currency_code(total_field) or "USD"
 
     receipt = Receipt(

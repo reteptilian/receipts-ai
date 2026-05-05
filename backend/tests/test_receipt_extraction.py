@@ -103,6 +103,53 @@ def test_extracts_optional_item_quantity_and_unit_price():
     assert receipt.items[0].amount == "7.0"
 
 
+def test_extracts_total_tax_as_tax_line_item():
+    payload = {
+        "content": "Tea 7.00\nSales tax 0.63\nTotal 7.63",
+        "modelId": "prebuilt-receipt",
+        "documents": [
+            {
+                "confidence": 0.9,
+                "fields": {
+                    "MerchantName": {"valueString": "Tea Shop"},
+                    "TransactionDate": {"valueDate": "2026-04-27"},
+                    "Total": {
+                        "type": "currency",
+                        "valueCurrency": {"amount": 7.63, "currencyCode": "USD"},
+                    },
+                    "TotalTax": {
+                        "type": "currency",
+                        "valueCurrency": {"amount": 0.63, "currencyCode": "USD"},
+                    },
+                    "Items": {
+                        "type": "array",
+                        "valueArray": [
+                            {
+                                "confidence": 0.8,
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "Tea"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": 7.0},
+                                    },
+                                },
+                            }
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    receipt = receipt_from_document_intelligence_result(payload)
+
+    assert [(item.description, item.amount, item.line_type) for item in receipt.items] == [
+        ("Tea", "7.0", "item"),
+        ("Sales tax", "0.63", "tax"),
+    ]
+
+
 def test_merges_costco_coupon_discounts_into_preceding_item():
     payload = {
         "content": "COSTCO\nSPARKLING WATER 11.99\n/1779212 -3.00\nBANANAS 2.49",

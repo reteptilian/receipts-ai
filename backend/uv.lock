@@ -1715,7 +1715,7 @@ wheels = [
 
 [[package]]
 name = "receipts-ai"
-version = "0.0.1.dev70+d27ea1e"
+version = "0.0.1.dev74+18c3727"
 source = { editable = "." }
 dependencies = [
     { name = "azure-ai-documentintelligence" },

@@ -390,7 +390,7 @@ def test_main_can_enrich_items_with_brave_search(
         sys,
         "argv",
         [
-            "receipts-ai",
+            "receipts-ai-ingest-receipts",
             "--brave-search",
             "--brave-search-delay-seconds",
             "1.1",
@@ -472,7 +472,7 @@ def test_main_can_use_openai_pipeline(
         sys,
         "argv",
         [
-            "receipts-ai",
+            "receipts-ai-ingest-receipts",
             "--pipeline",
             "openai",
             "--openai-model",
@@ -535,7 +535,7 @@ def test_main_processes_multiple_receipts_as_combined_csv(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["receipts-ai", str(receipt_1_path), str(receipt_2_path)],
+        ["receipts-ai-ingest-receipts", str(receipt_1_path), str(receipt_2_path)],
     )
     monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
     monkeypatch.setattr(
@@ -607,7 +607,7 @@ def test_main_wraps_brave_search_client_when_cache_file_is_provided(
         sys,
         "argv",
         [
-            "receipts-ai",
+            "receipts-ai-ingest-receipts",
             "--brave-search",
             "--cache-file",
             str(cache_path),
@@ -708,7 +708,13 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["receipts-ai", "--categorize-items", "--cache-file", str(cache_path), str(receipt_path)],
+        [
+            "receipts-ai-ingest-receipts",
+            "--categorize-items",
+            "--cache-file",
+            str(cache_path),
+            str(receipt_path),
+        ],
     )
     monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
     monkeypatch.setattr(
@@ -807,7 +813,7 @@ def test_main_can_categorize_items_after_brave_search(
         sys,
         "argv",
         [
-            "receipts-ai",
+            "receipts-ai-ingest-receipts",
             "--categorize-items",
             "--brave-search-delay-seconds",
             "0.25",
@@ -890,7 +896,7 @@ def test_main_categorizes_items_with_flattened_budget_categories(
         sys,
         "argv",
         [
-            "receipts-ai",
+            "receipts-ai-ingest-receipts",
             "--categorize-items",
             str(receipt_path),
         ],
@@ -983,7 +989,7 @@ def test_main_can_use_vector_product_taxonomy_method(
         sys,
         "argv",
         [
-            "receipts-ai",
+            "receipts-ai-ingest-receipts",
             "--categorize-items",
             "--product-taxonomy-method",
             "vector",
@@ -1074,7 +1080,7 @@ def test_main_can_upsert_processed_transaction_to_firestore(
         sys,
         "argv",
         [
-            "receipts-ai",
+            "receipts-ai-ingest-receipts",
             "--brave-search",
             "--upsert-firestore",
             "--firestore-collection",
