@@ -5,7 +5,7 @@ import sys
 from datetime import date
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
 import pytest
 
@@ -17,6 +17,7 @@ from receipts_ai.export_firestore_csv import (
 from receipts_ai.ingest_receipts import transaction_firestore_document
 from receipts_ai.models.transaction import (
     CategoryAllocation,
+    LineType,
     Receipt,
     Source,
     Transaction,
@@ -26,7 +27,32 @@ from receipts_ai.models.transaction import (
 )
 
 
-def ReceiptItem(**kwargs):  # noqa: N802
+class ReceiptItemKwargs(TypedDict, total=False):
+    id: str | None
+    description: str
+    raw_description: str | None
+    brave_search_result: str | None
+    quantity: float | None
+    unit_price: str | None
+    amount: str
+    discount_amount: str | None
+    discount_description: str | None
+    net_amount: str
+    line_type: LineType | None
+    category_id: str | None
+    taxonomy1: str | None
+    taxonomy2: str | None
+    taxonomy3: str | None
+    taxonomy4: str | None
+    taxonomy5: str | None
+    taxonomy6: str | None
+    taxonomy7: str | None
+    taxonomy8: str | None
+    taxonomy9: str | None
+    confidence: float | None
+
+
+def ReceiptItem(**kwargs: Unpack[ReceiptItemKwargs]) -> GeneratedReceiptItem:  # noqa: N802
     if "amount" in kwargs and "net_amount" not in kwargs:
         kwargs["net_amount"] = kwargs["amount"]
     return GeneratedReceiptItem(**kwargs)
