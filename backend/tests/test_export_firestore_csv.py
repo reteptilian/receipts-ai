@@ -147,7 +147,7 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
         "Food & Dining > Bakeries",
         "Groceries",
     ]
-    assert [row["category_allocation.amount"] for row in rows] == ["6.50", "3.00", "4.49"]
+    assert [row["category_allocation.amount"] for row in rows] == ["-6.50", "-3.00", "-4.49"]
 
 
 def test_export_firestore_csv_unpivots_transactions_without_receipt_items(

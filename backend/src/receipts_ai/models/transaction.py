@@ -233,7 +233,7 @@ class Receipt(BaseModel):
     total: Annotated[
         str | None,
         Field(
-            description="Signed receipt total. Usually matches transaction amount after normalization.",
+            description="Receipt total as shown by the merchant or source document. Usually positive for purchases; transaction amount carries the account-perspective sign.",
             pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
         ),
     ] = None

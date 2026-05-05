@@ -182,7 +182,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     assert rows[0]["category_allocation.category_id"] == (
         "Food & Dining > Fast Food & Coffee"
     )
-    assert rows[0]["category_allocation.amount"] == "7.00"
+    assert rows[0]["category_allocation.amount"] == "-7.00"
 
 
 def test_json_output_preserves_nested_receipt_struct():

@@ -148,7 +148,7 @@ def test_main_writes_receipt_item_csv(
     ]
     assert rows[0]["combined_description"].startswith("Gaiam Yoga Block")
     assert rows[-1]["item_line_type"] == "tax"
-    assert rows[-1]["category_allocation.amount"] == "3.32"
+    assert rows[-1]["category_allocation.amount"] == "-3.32"
 
 
 def test_main_categorizes_without_cleaning_amazon_descriptions(

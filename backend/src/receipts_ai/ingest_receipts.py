@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 from collections.abc import Callable
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
 
@@ -621,9 +622,33 @@ def _receipt_item_rows(
             row["item_category_id"] = item.category_id
         if include_category_allocation:
             row["category_allocation.category_id"] = item.category_id
-            row["category_allocation.amount"] = item.net_amount
+            row["category_allocation.amount"] = _category_allocation_amount(
+                item.net_amount,
+                transaction_amount=transaction_amount,
+            )
         rows.append(row)
     return rows
+
+
+def _category_allocation_amount(
+    item_amount: str | None,
+    *,
+    transaction_amount: str | None,
+) -> str | None:
+    if item_amount is None or transaction_amount is None:
+        return item_amount
+
+    try:
+        item_decimal = Decimal(item_amount)
+        transaction_decimal = Decimal(transaction_amount)
+    except InvalidOperation:
+        return item_amount
+
+    if transaction_decimal < 0:
+        return format(-item_decimal, "f")
+    if transaction_decimal > 0:
+        return format(item_decimal, "f")
+    return format(Decimal("0"), "f")
 
 
 if __name__ == "__main__":
