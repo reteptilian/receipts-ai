@@ -35,7 +35,14 @@ from receipts_ai.categorization import (
     load_product_taxonomy_embeddings,
     search_product_taxonomy_embeddings,
 )
-from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
+from receipts_ai.models.transaction import Receipt, Source, Transaction
+from receipts_ai.models.transaction import ReceiptItem as GeneratedReceiptItem
+
+
+def ReceiptItem(**kwargs):  # noqa: N802
+    if "amount" in kwargs and "net_amount" not in kwargs:
+        kwargs["net_amount"] = kwargs["amount"]
+    return GeneratedReceiptItem(**kwargs)
 
 
 class FakeCategoryClient:

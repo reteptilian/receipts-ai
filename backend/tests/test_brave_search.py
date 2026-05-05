@@ -20,7 +20,14 @@ from receipts_ai.brave_search import (
     enrich_transactions_with_brave_search,
 )
 from receipts_ai.cache import JsonCallCache
-from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
+from receipts_ai.models.transaction import Receipt, Source, Transaction
+from receipts_ai.models.transaction import ReceiptItem as GeneratedReceiptItem
+
+
+def ReceiptItem(**kwargs):  # noqa: N802
+    if "amount" in kwargs and "net_amount" not in kwargs:
+        kwargs["net_amount"] = kwargs["amount"]
+    return GeneratedReceiptItem(**kwargs)
 
 
 class FakeBraveClient:

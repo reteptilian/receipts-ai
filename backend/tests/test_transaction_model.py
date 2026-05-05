@@ -86,16 +86,14 @@ def test_receipt_item_accepts_raw_description_alias():
     assert item.net_amount == "2.99"
 
 
-def test_receipt_item_defaults_net_amount_to_amount():
-    item = ReceiptItem.model_validate(
-        {
-            "description": "Bagel",
-            "amount": "3.00",
-            "netAmount": None,
-        }
-    )
-
-    assert item.net_amount == "3.00"
+def test_receipt_item_requires_net_amount():
+    with pytest.raises(ValidationError):
+        ReceiptItem.model_validate(
+            {
+                "description": "Bagel",
+                "amount": "3.00",
+            }
+        )
 
 
 def test_transaction_rejects_invalid_currency():

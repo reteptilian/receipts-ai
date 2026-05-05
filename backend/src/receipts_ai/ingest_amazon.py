@@ -236,6 +236,7 @@ def _transaction_from_amazon_order_rows(
                 id=_amazon_item_id(order_id, "tax", len(items) + 1),
                 description="Sales tax",
                 amount=_decimal_string(tax_total),
+                net_amount=_decimal_string(tax_total),
                 line_type=LineType.tax,
             )
         )
@@ -247,6 +248,7 @@ def _transaction_from_amazon_order_rows(
                 id=_amazon_item_id(order_id, "shipping", len(items) + 1),
                 description="Shipping",
                 amount=_decimal_string(shipping_total),
+                net_amount=_decimal_string(shipping_total),
                 line_type=LineType.shipping,
             )
         )

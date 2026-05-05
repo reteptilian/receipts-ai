@@ -57,6 +57,7 @@ def transaction_from_document_intelligence_result(result: Any) -> Transaction:
             ReceiptItem(
                 description="Sales tax",
                 amount=tax_amount,
+                net_amount=tax_amount,
                 line_type=LineType.tax,
             )
         )
@@ -101,6 +102,7 @@ def _receipt_items(items_field: Any, *, payee: str) -> list[ReceiptItem]:
                 quantity=_float_value(_nested_field(item_object, "Quantity", "valueNumber")),
                 unit_price=_currency_amount(item_object.get("Price")),
                 amount=amount,
+                net_amount=amount,
                 confidence=_float_value(item.get("confidence")),
             )
         )

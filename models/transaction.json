@@ -190,7 +190,7 @@
     "receiptItem": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["description", "amount"],
+      "required": ["description", "amount", "netAmount"],
       "properties": {
         "id": {
           "$ref": "#/$defs/nonEmptyString"

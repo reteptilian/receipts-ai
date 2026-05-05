@@ -18,10 +18,18 @@ from receipts_ai.ingest_receipts import transaction_firestore_document
 from receipts_ai.models.transaction import (
     CategoryAllocation,
     Receipt,
-    ReceiptItem,
     Source,
     Transaction,
 )
+from receipts_ai.models.transaction import (
+    ReceiptItem as GeneratedReceiptItem,
+)
+
+
+def ReceiptItem(**kwargs):  # noqa: N802
+    if "amount" in kwargs and "net_amount" not in kwargs:
+        kwargs["net_amount"] = kwargs["amount"]
+    return GeneratedReceiptItem(**kwargs)
 
 
 class FakeDocumentSnapshot:

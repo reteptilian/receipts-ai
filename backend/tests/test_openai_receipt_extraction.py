@@ -89,7 +89,7 @@ def test_transaction_from_openai_receipt_validates_model_response(tmp_path: Path
                                   "receipt": {
                                     "total": "7.00",
                                     "items": [
-                                      {"description": "Coffee", "amount": "7.00"}
+                                      {"description": "Coffee", "amount": "7.00", "netAmount": "7.00"}
                                     ]
                                   }
                                 }
@@ -137,6 +137,7 @@ def test_transaction_from_openai_receipt_normalizes_null_strings(tmp_path: Path)
                         "description": "JP Rainbow",
                         "rawDescription": "1721554 JP RAINBOW",
                         "amount": "12.49",
+                        "netAmount": "12.49",
                         "discountAmount": "null"
                       }
                     ]

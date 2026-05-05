@@ -7,7 +7,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from typing_extensions import TypeAliasType
 
 
@@ -145,13 +145,13 @@ class ReceiptItem(BaseModel):
         ),
     ] = None
     net_amount: Annotated[
-        str | None,
+        str,
         Field(
             alias="netAmount",
             description="Final item amount after applying any item-level discount amount.",
             pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
         ),
-    ] = None
+    ]
     line_type: Annotated[LineType | None, Field(alias="lineType")] = LineType.item
     category_id: Annotated[str | None, Field(alias="categoryId", min_length=1)] = None
     taxonomy1: Annotated[
@@ -189,12 +189,6 @@ class ReceiptItem(BaseModel):
             le=1.0,
         ),
     ] = None
-
-    @model_validator(mode="after")
-    def fill_net_amount(self) -> ReceiptItem:
-        if self.net_amount is None:
-            self.net_amount = self.amount
-        return self
 
 
 class ExtractionMetadata(BaseModel):

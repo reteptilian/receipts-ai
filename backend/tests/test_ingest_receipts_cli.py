@@ -25,10 +25,18 @@ from receipts_ai.ingest_receipts import (
 from receipts_ai.models.transaction import (
     ExtractionMetadata,
     Receipt,
-    ReceiptItem,
     Source,
     Transaction,
 )
+from receipts_ai.models.transaction import (
+    ReceiptItem as GeneratedReceiptItem,
+)
+
+
+def ReceiptItem(**kwargs):  # noqa: N802
+    if "amount" in kwargs and "net_amount" not in kwargs:
+        kwargs["net_amount"] = kwargs["amount"]
+    return GeneratedReceiptItem(**kwargs)
 
 
 def test_writes_one_csv_row_per_receipt_item():
