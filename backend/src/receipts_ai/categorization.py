@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import re
 import shlex
 import urllib.error
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from receipts_ai.cache import JsonCallCache
+from receipts_ai.config import first_config_value
 from receipts_ai.models.transaction import CategoryAllocation, ReceiptItem, Source1, Transaction
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
@@ -1717,34 +1717,29 @@ def _normalize_text(value: str) -> str:
 
 
 def _ollama_url() -> str:
-    for env_var in OLLAMA_URL_ENV_VARS:
-        value = os.getenv(env_var)
-        if value:
-            return value
-    return DEFAULT_OLLAMA_URL
+    return first_config_value(OLLAMA_URL_ENV_VARS, DEFAULT_OLLAMA_URL) or DEFAULT_OLLAMA_URL
 
 
 def _ollama_model() -> str:
-    for env_var in OLLAMA_MODEL_ENV_VARS:
-        value = os.getenv(env_var)
-        if value:
-            return value
+    value = first_config_value(OLLAMA_MODEL_ENV_VARS)
+    if value:
+        return value
 
     env_var_list = ", ".join(OLLAMA_MODEL_ENV_VARS)
     raise RuntimeError(f"Set one of these environment variables: {env_var_list}")
 
 
 def _ollama_timeout_seconds() -> float:
-    for env_var in OLLAMA_TIMEOUT_ENV_VARS:
-        value = os.getenv(env_var)
+    for config_key in OLLAMA_TIMEOUT_ENV_VARS:
+        value = first_config_value((config_key,))
         if not value:
             continue
         try:
             timeout_seconds = float(value)
         except ValueError as exc:
-            raise RuntimeError(f"{env_var} must be a number of seconds") from exc
+            raise RuntimeError(f"{config_key} must be a number of seconds") from exc
         if timeout_seconds <= 0:
-            raise RuntimeError(f"{env_var} must be greater than 0")
+            raise RuntimeError(f"{config_key} must be greater than 0")
         return timeout_seconds
 
     return DEFAULT_OLLAMA_TIMEOUT_SECONDS

@@ -1046,7 +1046,9 @@ def test_create_ollama_category_client_uses_env(monkeypatch: pytest.MonkeyPatch)
 
 def test_create_ollama_category_client_defaults_url_and_requires_model(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("OLLAMA_URL", raising=False)
     monkeypatch.delenv("OLLAMA_MODEL", raising=False)
     monkeypatch.delenv("OLLAMA_MODEL_NAME", raising=False)

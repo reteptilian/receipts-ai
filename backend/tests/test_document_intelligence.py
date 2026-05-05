@@ -163,7 +163,9 @@ def test_create_document_intelligence_client_reads_alternate_key_env_var(
 
 def test_create_document_intelligence_client_requires_key_env_var(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", "https://example.test/")
     monkeypatch.delenv("AZURE_DOCUMENT_INTELLIGENCE_KEY", raising=False)
     monkeypatch.delenv("DOCUMENTINTELLIGENCE_API_KEY", raising=False)

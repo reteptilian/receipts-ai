@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Protocol, cast
 
 from receipts_ai.cache import JsonCallCache
+from receipts_ai.config import first_config_value
 
 DEFAULT_RECEIPT_MODEL_ID = "prebuilt-receipt"
 ENDPOINT_ENV_VARS = (
@@ -91,20 +91,18 @@ def create_document_intelligence_client() -> AnalyzeDocumentClient:
 
 
 def _document_intelligence_endpoint() -> str:
-    for env_var in ENDPOINT_ENV_VARS:
-        endpoint = os.getenv(env_var)
-        if endpoint:
-            return endpoint
+    endpoint = first_config_value(ENDPOINT_ENV_VARS)
+    if endpoint:
+        return endpoint
 
     env_var_list = ", ".join(ENDPOINT_ENV_VARS)
     raise RuntimeError(f"Set one of these environment variables: {env_var_list}")
 
 
 def _document_intelligence_key() -> str:
-    for env_var in KEY_ENV_VARS:
-        key = os.getenv(env_var)
-        if key:
-            return key
+    key = first_config_value(KEY_ENV_VARS)
+    if key:
+        return key
 
     env_var_list = ", ".join(KEY_ENV_VARS)
     raise RuntimeError(f"Set one of these environment variables: {env_var_list}")

@@ -4,7 +4,6 @@ import argparse
 import csv
 import json
 import logging
-import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -25,6 +24,7 @@ from receipts_ai.categorization import (
     clean_receipt_item_descriptions,
     create_ollama_category_client,
 )
+from receipts_ai.config import config_value, first_config_value
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.models.transaction import Receipt, Source, Transaction
 from receipts_ai.openai_receipt_extraction import (
@@ -131,7 +131,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--openai-model",
-        default=os.getenv(OPENAI_MODEL_ENV_VAR, DEFAULT_OPENAI_MODEL),
+        default=config_value(OPENAI_MODEL_ENV_VAR, DEFAULT_OPENAI_MODEL),
         help=(
             "OpenAI model for --pipeline openai. Can also be set with "
             f"{OPENAI_MODEL_ENV_VAR}. Defaults to {DEFAULT_OPENAI_MODEL}."
@@ -347,8 +347,8 @@ def _process_receipt(
 
 
 def create_firestore_client() -> FirestoreClient:
-    emulator_host = os.getenv(FIRESTORE_EMULATOR_HOST_ENV_VAR)
-    service_account_key_filepath = os.getenv(FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR)
+    emulator_host = config_value(FIRESTORE_EMULATOR_HOST_ENV_VAR)
+    service_account_key_filepath = config_value(FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR)
 
     if emulator_host:
         LOGGER.info(
@@ -463,11 +463,9 @@ def _firebase_app(
 
 
 def _firestore_project_id() -> str:
-    for env_var in FIRESTORE_PROJECT_ID_ENV_VARS:
-        value = os.getenv(env_var)
-        if value:
-            return value
-    return DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
+    return first_config_value(
+        FIRESTORE_PROJECT_ID_ENV_VARS, DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
+    ) or DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
 
 
 def write_transaction_receipt_items_csv(transaction: Transaction, file: TextIO) -> None:

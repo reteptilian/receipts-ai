@@ -190,7 +190,10 @@ def test_transaction_from_openai_receipt_logs_invalid_payload(
     assert '"payee": "Costco"' in caplog.text
 
 
-def test_responses_client_requires_openai_api_key(monkeypatch: pytest.MonkeyPatch):
+def test_responses_client_requires_openai_api_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv(OPENAI_API_KEY_ENV_VAR, raising=False)
 
     with pytest.raises(RuntimeError, match=OPENAI_API_KEY_ENV_VAR):

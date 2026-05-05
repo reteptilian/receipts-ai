@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import urllib.error
 import urllib.parse
@@ -12,6 +11,7 @@ from decimal import Decimal
 from typing import Any, Protocol, cast
 
 from receipts_ai.cache import JsonCallCache
+from receipts_ai.config import first_config_value
 from receipts_ai.models.transaction import ReceiptItem, Transaction
 
 DEFAULT_BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
@@ -250,35 +250,33 @@ def _format_item_amount(amount: str) -> str:
 
 
 def _brave_search_endpoint() -> str:
-    for env_var in ENDPOINT_ENV_VARS:
-        endpoint = os.getenv(env_var)
-        if endpoint:
-            return endpoint
-
-    return DEFAULT_BRAVE_SEARCH_ENDPOINT
+    return (
+        first_config_value(ENDPOINT_ENV_VARS, DEFAULT_BRAVE_SEARCH_ENDPOINT)
+        or DEFAULT_BRAVE_SEARCH_ENDPOINT
+    )
 
 
 def _brave_search_key() -> str:
-    for env_var in KEY_ENV_VARS:
-        key = os.getenv(env_var)
-        if key:
-            return key
+    key = first_config_value(KEY_ENV_VARS)
+    if key:
+        return key
 
     env_var_list = ", ".join(KEY_ENV_VARS)
     raise RuntimeError(f"Set one of these environment variables: {env_var_list}")
 
 
 def _brave_search_request_delay_seconds() -> float:
-    for env_var in REQUEST_DELAY_SECONDS_ENV_VARS:
-        value = os.getenv(env_var)
-        if value:
-            try:
-                delay = float(value)
-            except ValueError as exc:
-                raise RuntimeError(f"{env_var} must be a number of seconds") from exc
-            if delay < 0:
-                raise RuntimeError(f"{env_var} must not be negative")
-            return delay
+    for config_key in REQUEST_DELAY_SECONDS_ENV_VARS:
+        value = first_config_value((config_key,))
+        if not value:
+            continue
+        try:
+            delay = float(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{config_key} must be a number of seconds") from exc
+        if delay < 0:
+            raise RuntimeError(f"{config_key} must not be negative")
+        return delay
 
     return 0.0
 

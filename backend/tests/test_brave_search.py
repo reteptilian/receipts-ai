@@ -93,7 +93,34 @@ def test_create_brave_search_client_reads_alternate_key_env_var(
     assert client.key == "alternate-key"
 
 
-def test_create_brave_search_client_requires_key(monkeypatch: pytest.MonkeyPatch):
+def test_create_brave_search_client_reads_home_config_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.delenv("BRAVE_SEARCH_ENDPOINT", raising=False)
+    (tmp_path / ".receipts_ai.config").write_text(
+        "\n".join(
+            (
+                "BRAVE_SEARCH_API_KEY=config-key",
+                "BRAVE_SEARCH_ENDPOINT=https://example.test/config-search",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    client = create_brave_search_client()
+
+    assert isinstance(client, UrlLibBraveSearchClient)
+    assert client.key == "config-key"
+    assert client.endpoint == "https://example.test/config-search"
+
+
+def test_create_brave_search_client_requires_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     monkeypatch.delenv("BRAVE_API_KEY", raising=False)
 

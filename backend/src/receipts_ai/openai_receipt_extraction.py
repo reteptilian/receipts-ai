@@ -4,7 +4,6 @@ import base64
 import json
 import logging
 import mimetypes
-import os
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
@@ -14,6 +13,7 @@ from typing import Any, Protocol, cast
 from pydantic import ValidationError
 
 from receipts_ai.cache import JsonCallCache
+from receipts_ai.config import config_value
 from receipts_ai.models.transaction import ExtractionMetadata, Source, Transaction
 
 OPENAI_API_KEY_ENV_VAR = "OPENAI_API_KEY"
@@ -159,7 +159,10 @@ def transaction_from_openai_receipt(
     cache: JsonCallCache | None = None,
 ) -> Transaction:
     selected_model = (
-        model if model is not None else os.getenv(OPENAI_MODEL_ENV_VAR, DEFAULT_OPENAI_MODEL)
+        model
+        if model is not None
+        else config_value(OPENAI_MODEL_ENV_VAR, DEFAULT_OPENAI_MODEL)
+        or DEFAULT_OPENAI_MODEL
     )
     selected_client: OpenAIReceiptClient
     if client is not None:
@@ -355,7 +358,7 @@ def _response_output_text(response: Mapping[str, Any]) -> str:
 
 
 def _openai_api_key() -> str:
-    api_key = os.getenv(OPENAI_API_KEY_ENV_VAR)
+    api_key = config_value(OPENAI_API_KEY_ENV_VAR)
     if not api_key:
         raise RuntimeError(f"Set {OPENAI_API_KEY_ENV_VAR} to call OpenAI receipt extraction.")
     return api_key
