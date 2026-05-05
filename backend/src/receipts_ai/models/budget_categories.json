@@ -59,9 +59,21 @@
   },
   "Giving & Miscellaneous": {
     "Gifts": {},
-    "Charitable Donations": {},
-    "Internal Transfers": {},
+    "Charitable Donations": {}
+  },
+  "Income": {
+    "Wages": {},
+    "Interest": {},
+    "Dividends": {}
+  },
+  "Taxes": {
     "Income Taxes": {},
+    "Sales Taxes": {},
+    "Property Taxes": {},
+    "Other Taxes": {}
+  },
+  "Miscellaneous": {
+    "Internal Transfers": {},
     "Uncategorized": {}
   }
 }

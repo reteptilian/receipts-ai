@@ -27,6 +27,26 @@ def test_config_value_reads_home_config_file(
     assert config_value("OPENAI_MODEL") == "gpt-test"
 
 
+def test_config_value_strips_matching_quotes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OLLAMA_URL", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    (tmp_path / ".receipts_ai.config").write_text(
+        "\n".join(
+            (
+                'OLLAMA_URL="http://msi:11434"',
+                "OPENAI_MODEL='gpt-test'",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert config_value("OLLAMA_URL") == "http://msi:11434"
+    assert config_value("OPENAI_MODEL") == "gpt-test"
+
+
 def test_environment_value_takes_precedence_over_home_config_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):

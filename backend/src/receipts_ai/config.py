@@ -41,5 +41,12 @@ def _config_file_values(home: str) -> dict[str, str]:
             raise RuntimeError(
                 f"{config_path}:{line_number} must use KEY=VALUE config variable format"
             )
-        values[key.strip()] = value.strip()
+        values[key.strip()] = _normalize_config_value(value)
     return values
+
+
+def _normalize_config_value(value: str) -> str:
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
+        return stripped[1:-1]
+    return stripped
