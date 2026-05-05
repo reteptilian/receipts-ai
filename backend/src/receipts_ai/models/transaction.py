@@ -336,6 +336,14 @@ class Transaction(BaseModel):
     receipt: Annotated[
         Receipt | None, Field(description="Itemized receipt data associated with this transaction.")
     ] = None
+    receipt_image_extraction_results: Annotated[
+        str | None,
+        Field(
+            alias="receiptImageExtractionResults",
+            description="JSON-encoded map of raw receipt image extraction service responses keyed by service name, such as azure-doc-intelligence or gemini.",
+            min_length=1,
+        ),
+    ] = None
     linked_transaction_ids: Annotated[
         list[NonEmptyString] | None,
         Field(

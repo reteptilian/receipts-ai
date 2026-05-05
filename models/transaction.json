@@ -13,7 +13,7 @@
     },
     "source": {
       "type": "string",
-      "enum": ["bank_statement", "receipt", "manual"],
+      "enum": ["bank_statement", "receipt", "amazon_order", "manual"],
       "description": "How this transaction entered the system."
     },
     "externalId": {
@@ -81,6 +81,10 @@
     "receipt": {
       "$ref": "#/$defs/receipt",
       "description": "Itemized receipt data associated with this transaction."
+    },
+    "receiptImageExtractionResults": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "JSON-encoded map of raw receipt image extraction service responses keyed by service name, such as azure-doc-intelligence or gemini."
     },
     "linkedTransactionIds": {
       "type": "array",
@@ -169,7 +173,7 @@
         },
         "total": {
           "$ref": "#/$defs/decimalString",
-          "description": "Signed receipt total. Usually matches transaction amount after normalization."
+          "description": "Receipt total as shown by the merchant or source document. Usually positive for purchases; transaction amount carries the account-perspective sign."
         },
         "items": {
           "type": "array",

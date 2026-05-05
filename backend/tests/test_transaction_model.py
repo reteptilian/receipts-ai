@@ -15,6 +15,7 @@ def test_transaction_accepts_json_aliases():
             "mcc": "5411",
             "mccDescription": "Grocery Stores, Supermarkets",
             "braveSearchResult": "Costco Wholesale - search result",
+            "receiptImageExtractionResults": '{"azure-doc-intelligence":{"status":"ok"},"gemini":{"status":"ok"}}',
             "amount": "-42.19",
             "currency": "USD",
             "linkedTransactionIds": ["receipt_1"],
@@ -25,6 +26,10 @@ def test_transaction_accepts_json_aliases():
     assert transaction.mcc == "5411"
     assert transaction.mcc_description == "Grocery Stores, Supermarkets"
     assert transaction.brave_search_result == "Costco Wholesale - search result"
+    assert (
+        transaction.receipt_image_extraction_results
+        == '{"azure-doc-intelligence":{"status":"ok"},"gemini":{"status":"ok"}}'
+    )
     assert transaction.linked_transaction_ids is not None
     assert transaction.linked_transaction_ids[0] == "receipt_1"
 
@@ -36,12 +41,14 @@ def test_transaction_accepts_python_field_names():
             "source": "manual",
             "transaction_date": "2026-04-27",
             "payee": "Manual Adjustment",
+            "receipt_image_extraction_results": '{"gemini":{"status":"ok"}}',
             "amount": "12.00",
             "currency": "USD",
         }
     )
 
     assert transaction.transaction_date.isoformat() == "2026-04-27"
+    assert transaction.receipt_image_extraction_results == '{"gemini":{"status":"ok"}}'
 
 
 def test_transaction_payee_is_optional():
