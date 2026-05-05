@@ -330,6 +330,14 @@ class Transaction(BaseModel):
     receipt: Annotated[
         Receipt | None, Field(description="Itemized receipt data associated with this transaction.")
     ] = None
+    receipt_data_extraction_service: Annotated[
+        str | None,
+        Field(
+            alias="receiptDataExtractionService",
+            description="Receipt data extraction service used for this transaction, such as azure-doc-intelligence or gemini-3-flash-lite.",
+            min_length=1,
+        ),
+    ] = None
     receipt_image_extraction_results: Annotated[
         str | None,
         Field(

@@ -82,6 +82,10 @@
       "$ref": "#/$defs/receipt",
       "description": "Itemized receipt data associated with this transaction."
     },
+    "receiptDataExtractionService": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Receipt data extraction service used for this transaction, such as azure-doc-intelligence or gemini-3-flash-lite."
+    },
     "receiptImageExtractionResults": {
       "$ref": "#/$defs/nonEmptyString",
       "description": "JSON-encoded map of raw receipt image extraction service responses keyed by service name, such as azure-doc-intelligence or gemini."

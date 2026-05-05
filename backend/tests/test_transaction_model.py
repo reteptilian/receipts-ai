@@ -15,6 +15,7 @@ def test_transaction_accepts_json_aliases():
             "mcc": "5411",
             "mccDescription": "Grocery Stores, Supermarkets",
             "braveSearchResult": "Costco Wholesale - search result",
+            "receiptDataExtractionService": "azure-doc-intelligence",
             "receiptImageExtractionResults": '{"azure-doc-intelligence":{"status":"ok"},"gemini":{"status":"ok"}}',
             "amount": "-42.19",
             "currency": "USD",
@@ -26,6 +27,7 @@ def test_transaction_accepts_json_aliases():
     assert transaction.mcc == "5411"
     assert transaction.mcc_description == "Grocery Stores, Supermarkets"
     assert transaction.brave_search_result == "Costco Wholesale - search result"
+    assert transaction.receipt_data_extraction_service == "azure-doc-intelligence"
     assert (
         transaction.receipt_image_extraction_results
         == '{"azure-doc-intelligence":{"status":"ok"},"gemini":{"status":"ok"}}'
@@ -41,6 +43,7 @@ def test_transaction_accepts_python_field_names():
             "source": "manual",
             "transaction_date": "2026-04-27",
             "payee": "Manual Adjustment",
+            "receipt_data_extraction_service": "gemini-3-flash-lite",
             "receipt_image_extraction_results": '{"gemini":{"status":"ok"}}',
             "amount": "12.00",
             "currency": "USD",
@@ -48,6 +51,7 @@ def test_transaction_accepts_python_field_names():
     )
 
     assert transaction.transaction_date.isoformat() == "2026-04-27"
+    assert transaction.receipt_data_extraction_service == "gemini-3-flash-lite"
     assert transaction.receipt_image_extraction_results == '{"gemini":{"status":"ok"}}'
 
 
