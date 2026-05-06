@@ -91,7 +91,9 @@ bump = true
 [tool.hatch.build.targets.wheel]
 # The source location for the package.
 packages = ["src/receipts_ai"]
-force-include = { "../models/taxonomy.en-US.txt" = "receipts_ai/models/taxonomy.en-US.txt" }
+
+[tool.hatch.build.targets.sdist]
+force-include = { "../models/taxonomy.en-US.txt" = "src/receipts_ai/models/taxonomy.en-US.txt" }
 
 
 # ---- Settings ----
