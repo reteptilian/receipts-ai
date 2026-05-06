@@ -57,7 +57,14 @@ class ReceiptsAIApp(App[None]):
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
         table.cursor_type = "row"
         table.zebra_stripes = True
-        table.add_columns("Date", "Payee", "Description", "Ingestion file", "Amount")
+        table.add_columns(
+            "Date",
+            "Payee",
+            "Description",
+            "Ingestion file",
+            "Receipt?",
+            "Amount",
+        )
         self.run_worker(self._load_transactions, thread=True, name="load-transactions")
 
     def _load_transactions(self) -> None:
@@ -78,6 +85,7 @@ class ReceiptsAIApp(App[None]):
                 transaction.payee or "",
                 transaction.description or "",
                 transaction.ingestion_filename or "",
+                _format_receipt_indicator(transaction),
                 _format_amount(transaction.amount, transaction.currency),
                 key=transaction.id,
             )
@@ -115,6 +123,11 @@ def _format_amount(amount: str, currency: str) -> str:
         formatted_amount = f"{decimal_amount:,.2f}"
 
     return f"{formatted_amount} {currency}"
+
+
+def _format_receipt_indicator(transaction: Transaction) -> str:
+    receipt = transaction.receipt
+    return "Y" if receipt is not None and receipt.items else ""
 
 
 def main() -> None:

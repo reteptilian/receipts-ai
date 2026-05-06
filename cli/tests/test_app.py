@@ -2,7 +2,7 @@ from datetime import date
 from typing import cast
 
 import pytest
-from receipts_ai.models.transaction import Source, Transaction
+from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
 from textual.widgets import DataTable
 
 from receipts_ai_cli.app import ReceiptsAIApp
@@ -60,8 +60,36 @@ async def test_app_displays_transactions_in_table() -> None:
         "Coffee Shop",
         "POS PURCHASE COFFEE",
         "checking.ofx",
+        "",
         "-7.50 USD",
     ]
+
+
+@pytest.mark.anyio
+async def test_app_marks_transactions_with_receipt_items() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.receipt = Receipt(
+        items=[
+            ReceiptItem(
+                description="Latte",
+                amount="7.5",
+                netAmount="7.5",
+            )
+        ]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        row = table.get_row_at(0)
+
+    assert row[4] == "Y"
 
 
 @pytest.mark.anyio
@@ -79,7 +107,7 @@ async def test_app_displays_transactions_sorted_by_date_then_amount() -> None:
 
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         displayed_dates_and_amounts = [
-            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[4])
+            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[5])
             for row_index in range(table.row_count)
         ]
 
