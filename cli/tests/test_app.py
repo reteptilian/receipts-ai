@@ -2,8 +2,14 @@ from datetime import date
 from typing import cast
 
 import pytest
-from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
-from textual.widgets import DataTable, Static
+from receipts_ai.models.transaction import (
+    Receipt,
+    ReceiptItem,
+    Source,
+    Transaction,
+    TransactionUserOverrides,
+)
+from textual.widgets import DataTable, Input
 
 from receipts_ai_cli.app import ReceiptItemsScreen, ReceiptsAIApp
 
@@ -66,6 +72,31 @@ async def test_app_displays_transactions_in_table() -> None:
 
 
 @pytest.mark.anyio
+async def test_app_displays_transaction_overrides_in_table() -> None:
+    transaction = _transaction(
+        "transaction_1",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.user_overrides = TransactionUserOverrides(
+        transaction_date=date(2026, 5, 7),
+        payee="Edited Coffee Shop",
+        amount="-8.25",
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        row = table.get_row_at(0)
+
+    assert row[0] == "2026-05-07"
+    assert row[1] == "Edited Coffee Shop"
+    assert row[5] == "-8.25 USD"
+
+
+@pytest.mark.anyio
 async def test_app_marks_transactions_with_receipt_items() -> None:
     transaction = _transaction(
         "receipt",
@@ -125,12 +156,15 @@ async def test_enter_on_transaction_with_receipt_items_opens_items_screen() -> N
 
         screen = app.screen
         table = cast(DataTable[str], screen.query_one("#receipt-items", DataTable))
-        header_widget = screen.query_one("#receipt-header", Static)
-        header = str(header_widget.content)
+        date_input = screen.query_one("#receipt-date", Input)
+        payee_input = screen.query_one("#receipt-payee", Input)
+        amount_input = screen.query_one("#receipt-amount", Input)
         row = table.get_row_at(0)
 
     assert isinstance(screen, ReceiptItemsScreen)
-    assert header == "2026-05-06 | Payee receipt | -7.50 USD"
+    assert date_input.value == "2026-05-06"
+    assert payee_input.value == "Payee receipt"
+    assert amount_input.value == "-7.5"
     assert row == [
         "Latte",
         "2.0",
@@ -197,3 +231,79 @@ async def test_app_displays_transactions_sorted_by_date_then_amount() -> None:
         ("2026-05-06", "12.00 USD"),
         ("2026-05-07", "-1.00 USD"),
     ]
+
+
+@pytest.mark.anyio
+async def test_receipt_header_inputs_update_transaction_overrides() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.receipt = Receipt(
+        items=[
+            ReceiptItem(
+                description="Latte",
+                amount="7.5",
+                net_amount="7.5",
+            )
+        ]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        date_input = app.screen.query_one("#receipt-date", Input)
+        date_input.focus()
+        date_input.value = "2026-05-07"
+        await pilot.press("enter")
+        payee_input = app.screen.query_one("#receipt-payee", Input)
+        payee_input.focus()
+        payee_input.value = "Edited Payee"
+        await pilot.press("enter")
+        amount_input = app.screen.query_one("#receipt-amount", Input)
+        amount_input.focus()
+        amount_input.value = "-8.25"
+        await pilot.press("enter")
+
+    assert transaction.user_overrides is not None
+    assert transaction.user_overrides.transaction_date == date(2026, 5, 7)
+    assert transaction.user_overrides.payee == "Edited Payee"
+    assert transaction.user_overrides.amount == "-8.25"
+
+
+@pytest.mark.anyio
+async def test_receipt_item_cells_update_item_overrides() -> None:
+    item = ReceiptItem(
+        description="Latte",
+        quantity=2,
+        unit_price="3.75",
+        amount="7.5",
+        net_amount="7.5",
+    )
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.receipt = Receipt(items=[item])
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        await pilot.press("right", "right", "right", "enter")
+        editor_input = app.screen.query_one("#receipt-cell-editor-input", Input)
+        editor_input.value = "8.25"
+        await pilot.press("enter")
+
+        table = cast(DataTable[str], app.screen.query_one("#receipt-items", DataTable))
+        row = table.get_row_at(0)
+
+    assert item.user_overrides is not None
+    assert item.user_overrides.amount == "8.25"
+    assert row[3] == "8.25"
