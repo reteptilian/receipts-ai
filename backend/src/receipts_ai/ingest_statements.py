@@ -29,6 +29,8 @@ from receipts_ai.categorization import (
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.ingest_receipts import (
     file_url_from_path,
+    filter_transactions_on_or_after,
+    parse_after_date,
     populate_transaction_ingestion_metadata,
     sha256_hex,
     upsert_transaction_to_firestore,
@@ -98,6 +100,11 @@ def main() -> None:
         help="Write output to a file instead of stdout.",
     )
     parser.add_argument(
+        "--after",
+        type=parse_after_date,
+        help="Ignore transactions before this date. Use YYYY-MM-DD.",
+    )
+    parser.add_argument(
         "--brave-search",
         action="store_true",
         help="Populate each transaction braveSearchResult with Brave Search summaries.",
@@ -152,6 +159,10 @@ def main() -> None:
     for statement_path in args.statements:
         statement_transactions = transactions_from_file(
             statement_path, statement_format=args.statement_format
+        )
+        statement_transactions = filter_transactions_on_or_after(
+            statement_transactions,
+            args.after,
         )
         if args.brave_search or args.categorize_transactions:
             if cache is not None:

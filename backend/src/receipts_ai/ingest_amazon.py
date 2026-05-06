@@ -30,6 +30,8 @@ from receipts_ai.categorization import (
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.ingest_receipts import (
     file_url_from_path,
+    filter_transactions_on_or_after,
+    parse_after_date,
     populate_transaction_ingestion_metadata,
     sha256_hex,
     upsert_transaction_to_firestore,
@@ -78,6 +80,11 @@ def main() -> None:
     )
     parser.add_argument(
         "-o", "--output", type=Path, help="Write output to a file instead of stdout."
+    )
+    parser.add_argument(
+        "--after",
+        type=parse_after_date,
+        help="Ignore transactions before this date. Use YYYY-MM-DD.",
     )
     parser.add_argument(
         "--brave-search",
@@ -147,6 +154,7 @@ def main() -> None:
             export_path,
             orders_csv_name=args.orders_csv_name,
         )
+        export_transactions = filter_transactions_on_or_after(export_transactions, args.after)
         for transaction in export_transactions:
             _enrich_and_categorize_transaction(
                 transaction,

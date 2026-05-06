@@ -507,6 +507,39 @@ def test_main_processes_multiple_statement_files_as_combined_csv(
     assert [row["amount"] for row in rows] == ["-7.00", "1250.00"]
 
 
+def test_main_after_filters_statement_transactions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    statement_path = tmp_path / "checking.ofx"
+    statement_path.write_text(
+        """
+        <OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>USD
+        <BANKACCTFROM><ACCTID>checking</ACCTID></BANKACCTFROM>
+        <BANKTRANLIST>
+        <STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260427
+        <TRNAMT>-7.00<FITID>checking-1<NAME>Coffee Shop</STMTTRN>
+        <STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260428
+        <TRNAMT>-5.00<FITID>checking-2<NAME>Bagel Shop</STMTTRN>
+        </BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["ingest_statements.py", "--after", "2026-04-28", str(statement_path)],
+    )
+
+    main()
+
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert [row["transaction_date"] for row in rows] == ["2026-04-28"]
+    assert [row["description"] for row in rows] == ["Bagel Shop"]
+
+
 def test_main_can_process_fidelity_csv_statement(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, TextIO
@@ -139,6 +139,11 @@ def main() -> None:
         help="Write output to a file instead of stdout.",
     )
     parser.add_argument(
+        "--after",
+        type=parse_after_date,
+        help="Ignore transactions before this date. Use YYYY-MM-DD.",
+    )
+    parser.add_argument(
         "--brave-search",
         action="store_true",
         help=(
@@ -213,6 +218,15 @@ def main() -> None:
         )
         if transaction.receipt is None:
             raise ValueError(f"transaction from {receipt_path} does not contain a receipt")
+        if not transaction_is_on_or_after(transaction, args.after):
+            LOGGER.info(
+                "Skipping transaction %s from %s dated %s before --after %s",
+                transaction.id,
+                receipt_path,
+                transaction.transaction_date,
+                args.after,
+            )
+            continue
 
         if args.brave_search or args.categorize_items:
             if cache is not None:
@@ -414,6 +428,30 @@ def file_url_from_path(path: Path) -> str:
 
 def sha256_hex(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def parse_after_date(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"invalid date {value!r}; expected YYYY-MM-DD") from error
+
+
+def transaction_is_on_or_after(transaction: Transaction, after: date | None) -> bool:
+    return after is None or transaction.transaction_date >= after
+
+
+def filter_transactions_on_or_after(
+    transactions: list[Transaction],
+    after: date | None,
+) -> list[Transaction]:
+    if after is None:
+        return transactions
+    return [
+        transaction
+        for transaction in transactions
+        if transaction_is_on_or_after(transaction, after)
+    ]
 
 
 def write_transaction_receipt_items_csv(transaction: Transaction, file: TextIO) -> None:

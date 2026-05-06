@@ -176,6 +176,32 @@ def test_main_writes_receipt_item_csv(
     assert rows[-1]["category_allocation.amount"] == "-3.32"
 
 
+def test_main_after_filters_amazon_transactions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    csv_path = tmp_path / "Order History.csv"
+    older_order_rows = "\n".join(SAMPLE_ORDER_CSV.splitlines()[1:])
+    older_order_rows = older_order_rows.replace(
+        "2026-05-01T23:57:58Z",
+        "2026-04-27T23:57:58Z",
+    ).replace(
+        "114-9364152-5237852",
+        "114-9364152-5237000",
+    )
+    csv_path.write_text(f"{SAMPLE_ORDER_CSV}{older_order_rows}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["receipts-ai-ingest-amazon", "--after", "2026-05-01", str(csv_path)],
+    )
+
+    main()
+
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert {row["receipt_number"] for row in rows} == {"114-9364152-5237852"}
+    assert {row["transaction_date"] for row in rows} == {"2026-05-01"}
+
+
 def test_main_categorizes_without_cleaning_amazon_descriptions(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -542,6 +542,79 @@ def test_main_can_enrich_items_with_brave_search(
     assert receipt.items[0].brave_search_result == "search payload"
 
 
+def test_main_after_filters_receipts_before_enrichment_and_upsert(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"receipt")
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+    )
+    calls: list[str] = []
+
+    def fake_analyze_receipt_file(path: Path) -> dict[str, Path]:
+        return {"result": path}
+
+    def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:
+        return transaction
+
+    def fake_enrich_receipt_items_with_brave_search(
+        transaction_to_enrich: Transaction, *, request_delay_seconds: float | None = None
+    ) -> Transaction:
+        _ = transaction_to_enrich, request_delay_seconds
+        calls.append("enrich")
+        return transaction_to_enrich
+
+    def fake_upsert_transaction_to_firestore(
+        transaction_to_upsert: Transaction, *, collection: str
+    ) -> None:
+        _ = transaction_to_upsert, collection
+        calls.append("upsert")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai-ingest-receipts",
+            "--after",
+            "2026-04-28",
+            "--brave-search",
+            "--upsert-firestore",
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        ingest_receipts,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+    monkeypatch.setattr(
+        ingest_receipts,
+        "enrich_receipt_items_with_brave_search",
+        fake_enrich_receipt_items_with_brave_search,
+    )
+    monkeypatch.setattr(
+        ingest_receipts,
+        "upsert_transaction_to_firestore",
+        fake_upsert_transaction_to_firestore,
+    )
+
+    main()
+
+    assert calls == []
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert rows == []
+
+
 def test_main_can_use_openai_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
