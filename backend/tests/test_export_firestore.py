@@ -10,8 +10,8 @@ from typing import Any, TypedDict, Unpack
 import pytest
 
 import receipts_ai
-from receipts_ai import export_firestore_csv
-from receipts_ai.export_firestore_csv import export_firestore_receipt_items_csv
+from receipts_ai import export_firestore
+from receipts_ai.export_firestore import export_firestore_receipt_items_csv
 from receipts_ai.firestore_transactions import (
     set_receipt_item_user_overrides,
     set_transaction_user_overrides,
@@ -399,7 +399,7 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
     assert [row["category_allocation.amount"] for row in rows] == ["-6.50", "-3.00", "-4.49"]
 
 
-def test_export_firestore_csv_unpivots_transactions_without_receipt_items(
+def test_export_firestore_receipt_items_csv_unpivots_transactions_without_receipt_items(
     tmp_path: Path,
 ):
     transaction = Transaction(
@@ -446,7 +446,7 @@ def test_export_firestore_csv_unpivots_transactions_without_receipt_items(
     assert [row["item_taxonomy_1"] for row in rows] == ["", ""]
 
 
-def test_export_firestore_csv_uses_payee_for_credit_card_combined_description(
+def test_export_firestore_receipt_items_csv_uses_payee_for_credit_card_combined_description(
     tmp_path: Path,
 ):
     transaction = Transaction(
@@ -476,7 +476,7 @@ def test_export_firestore_csv_uses_payee_for_credit_card_combined_description(
     assert rows[0]["combined_description"] == "COSTCO WHSE #123"
 
 
-def test_export_firestore_csv_writes_transaction_row_without_category_allocations(
+def test_export_firestore_receipt_items_csv_writes_transaction_row_without_category_allocations(
     tmp_path: Path,
 ):
     transaction = Transaction(
@@ -556,7 +556,7 @@ def test_main_exports_firestore_csv_to_output_file(
         sys,
         "argv",
         [
-            "receipts-ai-export-firestore-csv",
+            "receipts-ai-export-firestore",
             "--firestore-collection",
             "processed-transactions",
             "--output",
@@ -564,11 +564,11 @@ def test_main_exports_firestore_csv_to_output_file(
         ],
     )
     monkeypatch.setattr(
-        export_firestore_csv,
+        export_firestore,
         "export_firestore_receipt_items_csv",
         fake_export_firestore_receipt_items_csv,
     )
 
-    export_firestore_csv.main()
+    export_firestore.main()
 
     assert calls == [(output_path, "processed-transactions")]
