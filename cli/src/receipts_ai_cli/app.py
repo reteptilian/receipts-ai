@@ -164,6 +164,8 @@ class CellEditScreen(ModalScreen[str]):
 class ReceiptItemsScreen(Screen[None]):
     """Screen showing the receipt items for one transaction."""
 
+    app: ReceiptsAIApp
+
     BINDINGS = [
         ("e", "edit_cell", "Edit cell"),
         ("escape", "back", "Back"),
