@@ -400,3 +400,36 @@ async def test_app_reloads_transactions_on_return_from_receipt_items() -> None:
 
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         assert table.get_row_at(0)[1] == "Updated Payee"
+
+
+@pytest.mark.anyio
+async def test_opening_receipt_items_screen_launches_external_viewer() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    # Using setattr to bypass potential static type checking in the test environment
+    object.__setattr__(transaction, "ingestion_type", "receipt_img")
+    object.__setattr__(transaction, "ingestion_file_url", "/path/to/receipt.jpg")
+
+    transaction.receipt = Receipt(
+        items=[
+            ReceiptItem(
+                description="Latte",
+                amount="7.5",
+                net_amount="7.5",
+            )
+        ]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with patch("receipts_ai_cli.app._open_file_in_external_viewer") as mock_open:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.2)  # Wait for worker to start
+
+            assert isinstance(app.screen, ReceiptItemsScreen)
+
+        mock_open.assert_called_once_with("/path/to/receipt.jpg")

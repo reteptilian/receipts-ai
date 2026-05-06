@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import platform
+import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -113,6 +116,21 @@ RECEIPT_ITEM_COLUMNS = (
 )
 
 
+def _open_file_in_external_viewer(filepath: str) -> None:
+    """Opens a file in the system's default external viewer."""
+    system_platform = platform.system()
+    try:
+        if system_platform == "Darwin":  # macOS
+            subprocess.run(["open", filepath], check=True)
+        elif system_platform == "Windows":  # Windows
+            os.startfile(filepath)
+        else:  # Linux (and other Unix-like systems)
+            subprocess.run(["xdg-open", filepath], check=True)
+    except Exception:
+        # Ignore errors when opening external viewer to avoid crashing the app
+        pass
+
+
 class CellEditScreen(ModalScreen[str]):
     """Screen for editing a single cell's value."""
 
@@ -186,6 +204,16 @@ class ReceiptItemsScreen(Screen[None]):
         table.cursor_type = "cell"
         table.zebra_stripes = True
         table.add_columns(*(column.label for column in RECEIPT_ITEM_COLUMNS))
+
+        if (
+            getattr(self._transaction, "ingestion_type", None) == "receipt_img"
+            and (ingestion_file_url := getattr(self._transaction, "ingestion_file_url", None))
+        ):
+            self.run_worker(
+                lambda: _open_file_in_external_viewer(ingestion_file_url),
+                thread=True,
+                name=f"open-viewer-{self._transaction.id}",
+            )
 
         receipt = self._transaction.receipt
         if receipt is None:
