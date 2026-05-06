@@ -92,12 +92,38 @@
     },
     "linkedTransactionIds": {
       "type": "array",
-      "description": "Other transaction records that represent the same real-world purchase, such as a receipt import matched to a statement row.",
+      "description": "Deprecated pairwise links to other transaction records that represent the same real-world purchase. Prefer transactionGroupId for display grouping.",
       "items": {
         "$ref": "#/$defs/nonEmptyString"
       },
       "uniqueItems": true,
       "default": []
+    },
+    "transactionGroupId": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Stable identifier shared by imported transaction records that represent the same real-world transaction. UIs should collapse records with the same group id into one displayed transaction."
+    },
+    "groupRole": {
+      "type": "string",
+      "enum": ["primary", "supporting", "excluded_from_display"],
+      "description": "How this source record should participate when a transaction group is displayed."
+    },
+    "matchStatus": {
+      "type": "string",
+      "enum": ["unmatched", "candidate", "confirmed", "rejected"],
+      "default": "unmatched",
+      "description": "Current matching state for this transaction record."
+    },
+    "matchSource": {
+      "type": "string",
+      "enum": ["user", "model", "rule", "importer"],
+      "description": "How the transaction match or grouping decision was made."
+    },
+    "matchConfidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Confidence score for automated or suggested transaction matching."
     },
     "notes": {
       "type": "string"

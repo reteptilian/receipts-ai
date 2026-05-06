@@ -377,6 +377,35 @@ def test_upsert_transaction_to_firestore_merges_transaction_document(
     )
 
 
+def test_create_firestore_client_sets_emulator_env_from_config_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    sentinel_client = object()
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("FIRESTORE_EMULATOR_HOST", raising=False)
+    (tmp_path / ".receipts_ai.config").write_text(
+        "\n".join(
+            (
+                "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080",
+                "FIREBASE_PROJECT_ID=receipts-ai-local",
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ingest_receipts,
+        "_create_firestore_emulator_client",
+        lambda: sentinel_client,
+    )
+
+    client = ingest_receipts.create_firestore_client()
+
+    assert client is sentinel_client
+    assert ingest_receipts.os.environ["FIRESTORE_EMULATOR_HOST"] == "127.0.0.1:8080"
+
+
 def test_json_output_includes_receipt_item_category():
     receipt = Receipt(
         total="4.49",

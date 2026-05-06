@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import sys
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
@@ -352,6 +353,7 @@ def create_firestore_client() -> FirestoreClient:
     service_account_key_filepath = config_value(FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR)
 
     if emulator_host:
+        os.environ[FIRESTORE_EMULATOR_HOST_ENV_VAR] = emulator_host
         LOGGER.info(
             "Creating Firestore client for emulator at %s using project %s",
             emulator_host,

@@ -40,6 +40,38 @@ class Status(StrEnum):
     void = "void"
 
 
+class GroupRole(StrEnum):
+    """
+    How this source record should participate when a transaction group is displayed.
+    """
+
+    primary = "primary"
+    supporting = "supporting"
+    excluded_from_display = "excluded_from_display"
+
+
+class MatchStatus(StrEnum):
+    """
+    Current matching state for this transaction record.
+    """
+
+    unmatched = "unmatched"
+    candidate = "candidate"
+    confirmed = "confirmed"
+    rejected = "rejected"
+
+
+class MatchSource(StrEnum):
+    """
+    How the transaction match or grouping decision was made.
+    """
+
+    user = "user"
+    model = "model"
+    rule = "rule"
+    importer = "importer"
+
+
 NonEmptyString = TypeAliasType("NonEmptyString", Annotated[str, Field(min_length=1)])
 
 
@@ -350,9 +382,46 @@ class Transaction(BaseModel):
         list[NonEmptyString] | None,
         Field(
             alias="linkedTransactionIds",
-            description="Other transaction records that represent the same real-world purchase, such as a receipt import matched to a statement row.",
+            description="Deprecated pairwise links to other transaction records that represent the same real-world purchase. Prefer transactionGroupId for display grouping.",
         ),
     ] = []
+    transaction_group_id: Annotated[
+        str | None,
+        Field(
+            alias="transactionGroupId",
+            description="Stable identifier shared by imported transaction records that represent the same real-world transaction. UIs should collapse records with the same group id into one displayed transaction.",
+            min_length=1,
+        ),
+    ] = None
+    group_role: Annotated[
+        GroupRole | None,
+        Field(
+            alias="groupRole",
+            description="How this source record should participate when a transaction group is displayed.",
+        ),
+    ] = None
+    match_status: Annotated[
+        MatchStatus | None,
+        Field(
+            alias="matchStatus", description="Current matching state for this transaction record."
+        ),
+    ] = MatchStatus.unmatched
+    match_source: Annotated[
+        MatchSource | None,
+        Field(
+            alias="matchSource",
+            description="How the transaction match or grouping decision was made.",
+        ),
+    ] = None
+    match_confidence: Annotated[
+        float | None,
+        Field(
+            alias="matchConfidence",
+            description="Confidence score for automated or suggested transaction matching.",
+            ge=0.0,
+            le=1.0,
+        ),
+    ] = None
     notes: str | None = None
     created_at: Annotated[AwareDatetime | None, Field(alias="createdAt")] = None
     updated_at: Annotated[AwareDatetime | None, Field(alias="updatedAt")] = None
