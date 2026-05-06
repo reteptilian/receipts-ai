@@ -25,6 +25,7 @@ from textual.containers import Center, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
+from textual.widgets.data_table import RowKey
 
 TransactionLoader = Callable[[], Sequence[Transaction]]
 
@@ -147,13 +148,16 @@ class ReceiptItemsScreen(Screen[None]):
 
     BINDINGS = [
         ("e", "edit_cell", "Edit cell"),
-        ("escape", "app.pop_screen", "Back"),
-        ("q", "app.pop_screen", "Back"),
+        ("escape", "back", "Back"),
+        ("q", "back", "Back"),
     ]
 
     def __init__(self, transaction: Transaction) -> None:
         super().__init__()
         self._transaction = transaction
+
+    def action_back(self) -> None:
+        self.dismiss()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -437,15 +441,23 @@ class ReceiptsAIApp(App[None]):
         self.run_worker(self._load_transactions, thread=True, name="load-transactions")
 
     def _load_transactions(self) -> None:
+        table = cast(DataTable[str], self.query_one("#transactions", DataTable))
+        cursor_coordinate = table.cursor_coordinate
+        cursor_row_key = None
+        if table.is_valid_coordinate(cursor_coordinate):
+            cursor_row_key = table.coordinate_to_cell_key(cursor_coordinate).row_key
+
         try:
             transactions = list(self._transaction_loader())
         except Exception as exc:  # pragma: no cover - exercised through app runtime.
             self.call_from_thread(self._show_error, exc)
             return
 
-        self.call_from_thread(self._show_transactions, transactions)
+        self.call_from_thread(self._show_transactions, transactions, cursor_row_key)
 
-    def _show_transactions(self, transactions: Sequence[Transaction]) -> None:
+    def _show_transactions(
+        self, transactions: Sequence[Transaction], cursor_row_key: RowKey | None = None
+    ) -> None:
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
         table.clear()
         sorted_transactions = sorted(transactions, key=_transaction_sort_key)
@@ -462,6 +474,12 @@ class ReceiptsAIApp(App[None]):
                 _format_amount(_effective_transaction_amount(transaction), transaction.currency),
                 key=transaction.id,
             )
+
+        if cursor_row_key is not None:
+            try:
+                table.move_cursor(row=table.get_row_index(cursor_row_key))
+            except Exception:
+                pass
 
         status = self.query_one("#status", Static)
         status.remove_class("error")
@@ -490,7 +508,10 @@ class ReceiptsAIApp(App[None]):
         if transaction is None or not _has_receipt_items(transaction):
             return
 
-        self.push_screen(ReceiptItemsScreen(transaction))
+        def on_return(_: None) -> None:
+            self.run_worker(self._load_transactions, thread=True, name="load-transactions")
+
+        self.push_screen(ReceiptItemsScreen(transaction), on_return)
 
 
 def _transaction_sort_key(transaction: Transaction) -> tuple[object, ...]:

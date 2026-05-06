@@ -353,3 +353,50 @@ async def test_receipt_item_description_update() -> None:
     assert item.user_overrides is not None
     assert item.user_overrides.description == "New Latte Name"
     assert row[0] == "New Latte Name"
+
+
+@pytest.mark.anyio
+async def test_app_reloads_transactions_on_return_from_receipt_items() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.receipt = Receipt(
+        items=[
+            ReceiptItem(
+                description="Latte",
+                amount="7.5",
+                net_amount="7.5",
+            )
+        ]
+    )
+
+    # Use a mutable list to simulate changing data in Firestore
+    transactions = [transaction]
+
+    def loader() -> list[Transaction]:
+        return list(transactions)
+
+    app = ReceiptsAIApp(transaction_loader=loader)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        assert table.get_row_at(0)[1] == "Payee receipt"
+
+        # Go to items screen
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert isinstance(app.screen, ReceiptItemsScreen)
+
+        # Simulate an edit that would be persisted to Firestore
+        transaction.user_overrides = TransactionUserOverrides(payee="Updated Payee")
+
+        # Go back
+        await pilot.press("escape")
+        await pilot.pause(0.5)  # Wait for refresh
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        assert table.get_row_at(0)[1] == "Updated Payee"
