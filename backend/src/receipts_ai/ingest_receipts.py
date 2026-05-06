@@ -425,8 +425,15 @@ def write_transactions_receipt_items_csv(
 ) -> None:
     writer = csv.DictWriter(file, fieldnames=TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES)
     writer.writeheader()
-    for transaction in transactions:
-        writer.writerows(_transaction_receipt_item_rows(transaction))
+    writer.writerows(transaction_receipt_item_rows(transactions))
+
+
+def transaction_receipt_item_rows(
+    transactions: list[Transaction] | tuple[Transaction, ...],
+) -> list[dict[str, object | None]]:
+    return [
+        row for transaction in transactions for row in _transaction_receipt_item_rows(transaction)
+    ]
 
 
 def write_transaction_json(transaction: Transaction, file: TextIO) -> None:

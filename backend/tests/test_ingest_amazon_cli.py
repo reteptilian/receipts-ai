@@ -36,9 +36,10 @@ def test_parses_amazon_orders_csv_as_itemized_transactions():
     assert transaction.ingestion_datetime.date() == date.today()
     assert transaction.ingestion_filename == "Your Orders.csv"
     assert transaction.ingestion_file_url is None
-    assert transaction.ingestion_file_sha256_hex == hashlib.sha256(
-        SAMPLE_ORDER_CSV.encode("utf-8")
-    ).hexdigest()
+    assert (
+        transaction.ingestion_file_sha256_hex
+        == hashlib.sha256(SAMPLE_ORDER_CSV.encode("utf-8")).hexdigest()
+    )
     assert transaction.ingestion_type == "amazon"
     assert transaction.external_id == "114-9364152-5237852"
     assert transaction.account_id == "amazon:Visa - 4637"
@@ -80,9 +81,9 @@ def test_parses_combined_amazon_timestamp_cell():
 def test_skips_amazon_order_history_notice_rows():
     notice_row = (
         "Not Available,REDACTED,REDACTED,USD,Not Available,Not Available,Not Available,"
-        "Not Available,\"Due to technical limitations, please refer to your Order History "
+        'Not Available,"Due to technical limitations, please refer to your Order History '
         "(available in your Amazon account) for certain details about any orders placed prior "
-        "to 2002\",legacy-notice,Closed,1,Visa - 4637,Not Available,Not Available,"
+        'to 2002",legacy-notice,Closed,1,Visa - 4637,Not Available,Not Available,'
         "Not Applicable,Not Available,Not Available,Not Available,Not Available,REDACTED,"
         "0,Not Available,0,0,0,0,Amazon.com\n"
     )
@@ -117,9 +118,10 @@ def test_finds_order_history_csv_by_basename_inside_zip(tmp_path: Path):
     assert len(transactions) == 1
     assert transactions[0].ingestion_filename == "Your Amazon Orders/Order History.csv"
     assert transactions[0].ingestion_file_url == export_path.resolve().as_uri()
-    assert transactions[0].ingestion_file_sha256_hex == hashlib.sha256(
-        export_path.read_bytes()
-    ).hexdigest()
+    assert (
+        transactions[0].ingestion_file_sha256_hex
+        == hashlib.sha256(export_path.read_bytes()).hexdigest()
+    )
     assert transactions[0].receipt is not None
     assert transactions[0].receipt.source_document_id == (
         f"{export_path}:Your Amazon Orders/Order History.csv"
@@ -165,9 +167,10 @@ def test_main_writes_receipt_item_csv(
     assert rows[0]["combined_description"].startswith("Gaiam Yoga Block")
     assert rows[0]["ingestion_filename"] == "Order History.csv"
     assert rows[0]["ingestion_file_url"] == csv_path.resolve().as_uri()
-    assert rows[0]["ingestion_file_sha256_hex"] == hashlib.sha256(
-        SAMPLE_ORDER_CSV.encode("utf-8")
-    ).hexdigest()
+    assert (
+        rows[0]["ingestion_file_sha256_hex"]
+        == hashlib.sha256(SAMPLE_ORDER_CSV.encode("utf-8")).hexdigest()
+    )
     assert rows[0]["ingestion_type"] == "amazon"
     assert rows[-1]["item_line_type"] == "tax"
     assert rows[-1]["category_allocation.amount"] == "-3.32"

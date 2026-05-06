@@ -224,7 +224,9 @@ def transactions_from_amazon_orders_csv(
     for transaction in transactions:
         populate_transaction_ingestion_metadata(
             transaction,
-            ingestion_filename=ingestion_filename or _source_filename(source) or DEFAULT_ORDERS_CSV_NAME,
+            ingestion_filename=ingestion_filename
+            or _source_filename(source)
+            or DEFAULT_ORDERS_CSV_NAME,
             ingestion_file_url=ingestion_file_url,
             ingestion_file_sha256_hex=ingestion_file_sha256_hex
             or sha256_hex(content.encode("utf-8")),

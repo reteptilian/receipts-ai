@@ -237,9 +237,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     assert rows[0]["ingestion_type"] == "receipt_img"
     assert rows[0]["item_description"] == "Coffee"
     assert "item_category_id" not in rows[0]
-    assert rows[0]["category_allocation.category_id"] == (
-        "Food & Dining > Fast Food & Coffee"
-    )
+    assert rows[0]["category_allocation.category_id"] == ("Food & Dining > Fast Food & Coffee")
     assert rows[0]["category_allocation.amount"] == "-7.00"
 
 
@@ -790,9 +788,9 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
     ) -> Transaction:
         assert client.__class__.__name__ == "CachedCategoryModelClient"
         assert transaction_to_categorize.receipt is not None
-        transaction_to_categorize.receipt.items[0].category_id = (
-            "Food & Dining > Fast Food & Coffee"
-        )
+        transaction_to_categorize.receipt.items[
+            0
+        ].category_id = "Food & Dining > Fast Food & Coffee"
         return transaction_to_categorize
 
     def fake_clean_receipt_item_descriptions(
@@ -829,7 +827,9 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
         fake_transaction_from_document_intelligence_result,
     )
     monkeypatch.setattr(ingest_receipts, "create_brave_search_client", lambda: FakeBraveClient())
-    monkeypatch.setattr(ingest_receipts, "create_ollama_category_client", lambda: FakeCategoryClient())
+    monkeypatch.setattr(
+        ingest_receipts, "create_ollama_category_client", lambda: FakeCategoryClient()
+    )
     monkeypatch.setattr(
         ingest_receipts,
         "enrich_receipt_items_with_brave_search",
@@ -1073,9 +1073,7 @@ def test_main_can_use_vector_product_taxonomy_method(
     def fake_categorize_receipt_items(transaction_to_categorize: Transaction) -> Transaction:
         calls.append("categorize")
         assert transaction_to_categorize.receipt is not None
-        transaction_to_categorize.receipt.items[0].category_id = (
-            "Shopping & Retail > Electronics"
-        )
+        transaction_to_categorize.receipt.items[0].category_id = "Shopping & Retail > Electronics"
         return transaction_to_categorize
 
     def fake_classify_receipt_items_by_product_taxonomy_vector_search(

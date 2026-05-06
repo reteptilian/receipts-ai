@@ -227,9 +227,9 @@ def test_parses_sgml_qfx_credit_card_transactions(tmp_path: Path):
     assert charge.ingestion_datetime.date() == date.today()
     assert charge.ingestion_filename == "credit-card.qfx"
     assert charge.ingestion_file_url == statement_path.resolve().as_uri()
-    assert charge.ingestion_file_sha256_hex == hashlib.sha256(
-        statement_path.read_bytes()
-    ).hexdigest()
+    assert (
+        charge.ingestion_file_sha256_hex == hashlib.sha256(statement_path.read_bytes()).hexdigest()
+    )
     assert charge.ingestion_type == "qfx"
     assert charge.external_id == "2026042701"
     assert charge.account_id == "5555444433331111"
@@ -538,9 +538,7 @@ Date downloaded 05/02/2026 11:08 am
 
     rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
     assert [row["transaction_date"] for row in rows] == ["2026-05-01"]
-    assert [row["description"] for row in rows] == [
-        "DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)"
-    ]
+    assert [row["description"] for row in rows] == ["DIRECT DEBIT JPMORGAN CHASECHASE ACH (Cash)"]
     assert [row["amount"] for row in rows] == ["-3562.71"]
 
 
@@ -600,9 +598,7 @@ def test_main_can_upsert_firestore(
     )
     calls: list[tuple[str | None, str]] = []
 
-    def fake_upsert_transaction_to_firestore(
-        transaction: Transaction, *, collection: str
-    ) -> None:
+    def fake_upsert_transaction_to_firestore(transaction: Transaction, *, collection: str) -> None:
         calls.append((transaction.payee, collection))
 
     monkeypatch.setattr(

@@ -161,8 +161,7 @@ def transaction_from_openai_receipt(
     selected_model = (
         model
         if model is not None
-        else config_value(OPENAI_MODEL_ENV_VAR, DEFAULT_OPENAI_MODEL)
-        or DEFAULT_OPENAI_MODEL
+        else config_value(OPENAI_MODEL_ENV_VAR, DEFAULT_OPENAI_MODEL) or DEFAULT_OPENAI_MODEL
     )
     selected_client: OpenAIReceiptClient
     if client is not None:

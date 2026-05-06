@@ -158,9 +158,7 @@ def test_receipt_item_user_overrides_description():
             "description": "Original",
             "amount": "1.00",
             "netAmount": "1.00",
-            "userOverrides": {
-                "description": "Overridden"
-            }
+            "userOverrides": {"description": "Overridden"},
         }
     )
 

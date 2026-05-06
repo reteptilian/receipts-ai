@@ -150,9 +150,7 @@ def test_create_brave_search_client_reads_home_config_file(
     assert client.endpoint == "https://example.test/config-search"
 
 
-def test_create_brave_search_client_requires_key(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_create_brave_search_client_requires_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     monkeypatch.delenv("BRAVE_API_KEY", raising=False)

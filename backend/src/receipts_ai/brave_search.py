@@ -190,7 +190,9 @@ def enrich_transactions_with_brave_search(
         result = active_client.search(query)
         if not query_is_cached:
             sent_live_request = True
-        transaction.brave_search_result = json.dumps(_search_result_summaries(result), sort_keys=True)
+        transaction.brave_search_result = json.dumps(
+            _search_result_summaries(result), sort_keys=True
+        )
         logger.info("Stored Brave Search response on transaction %s", index + 1)
     return transactions
 

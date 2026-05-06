@@ -14,4 +14,4 @@ def transaction_combined_description(transaction: Transaction) -> str | None:
         and ":" not in transaction.account_id
     ):
         return transaction.payee
-    return transaction.description
+    return transaction.description or transaction.payee

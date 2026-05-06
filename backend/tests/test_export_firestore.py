@@ -111,6 +111,99 @@ class FakeFirestoreClient:
         return self.collection_references[collection_path]
 
 
+class FakeWorksheet:
+    _next_id = 1
+
+    def __init__(self, title: str, rows: int, cols: int) -> None:
+        self.title = title
+        self.rows = rows
+        self.cols = cols
+        self.id = FakeWorksheet._next_id
+        FakeWorksheet._next_id += 1
+        self.values: list[list[object]] = []
+        self.clear_calls = 0
+        self.freeze_calls: list[dict[str, int | None]] = []
+
+    def clear(self) -> None:
+        self.clear_calls += 1
+        self.values = []
+
+    def resize(self, *, rows: int | None = None, cols: int | None = None) -> None:
+        if rows is not None:
+            self.rows = rows
+        if cols is not None:
+            self.cols = cols
+
+    def update(
+        self,
+        values: list[list[object]],
+        *,
+        range_name: str,
+        value_input_option: str,
+    ) -> None:
+        assert range_name == "A1"
+        assert value_input_option == "USER_ENTERED"
+        self.values = values
+
+    def freeze(self, *, rows: int | None = None, cols: int | None = None) -> None:
+        self.freeze_calls.append({"rows": rows, "cols": cols})
+
+
+class FakeSpreadsheet:
+    def __init__(self) -> None:
+        self.worksheets_by_title: dict[str, FakeWorksheet] = {
+            "Sheet1": FakeWorksheet(title="Sheet1", rows=1000, cols=26)
+        }
+        self.deleted_worksheet_titles: list[str] = []
+        self.batch_update_calls: list[dict[str, Any]] = []
+
+    def worksheet(self, title: str) -> FakeWorksheet:
+        import gspread
+
+        if title not in self.worksheets_by_title:
+            raise gspread.WorksheetNotFound(title)
+        return self.worksheets_by_title[title]
+
+    def add_worksheet(self, *, title: str, rows: int, cols: int) -> FakeWorksheet:
+        worksheet = FakeWorksheet(title=title, rows=rows, cols=cols)
+        self.worksheets_by_title[title] = worksheet
+        return worksheet
+
+    def del_worksheet(self, worksheet: FakeWorksheet) -> None:
+        self.deleted_worksheet_titles.append(worksheet.title)
+        del self.worksheets_by_title[worksheet.title]
+
+    def batch_update(self, body: dict[str, Any]) -> None:
+        self.batch_update_calls.append(body)
+
+
+class FakeGspreadClient:
+    def __init__(self) -> None:
+        self.created_titles: list[str] = []
+        self.opened_titles: list[str] = []
+        self.opened_keys: list[str] = []
+        self.opened_urls: list[str] = []
+        self.spreadsheet = FakeSpreadsheet()
+
+    def open(self, title: str) -> FakeSpreadsheet:
+        import gspread
+
+        self.opened_titles.append(title)
+        raise gspread.SpreadsheetNotFound(title)
+
+    def create(self, title: str) -> FakeSpreadsheet:
+        self.created_titles.append(title)
+        return self.spreadsheet
+
+    def open_by_key(self, key: str) -> FakeSpreadsheet:
+        self.opened_keys.append(key)
+        return self.spreadsheet
+
+    def open_by_url(self, url: str) -> FakeSpreadsheet:
+        self.opened_urls.append(url)
+        return self.spreadsheet
+
+
 def test_streams_transactions_from_firestore_documents():
     transaction = Transaction(
         id="receipt_1",
@@ -503,7 +596,7 @@ def test_export_firestore_receipt_items_csv_writes_transaction_row_without_categ
     assert len(rows) == 1
     assert rows[0]["transaction_id"] == "statement_1"
     assert rows[0]["transaction_amount"] == "-7.00"
-    assert rows[0]["combined_description"] == ""
+    assert rows[0]["combined_description"] == "Coffee Shop"
     assert rows[0]["category_allocation.category_id"] == ""
     assert rows[0]["category_allocation.amount"] == ""
     assert rows[0]["item_description"] == ""
@@ -536,6 +629,98 @@ def test_export_skips_missing_firestore_documents(tmp_path: Path):
     rows = list(csv.DictReader(StringIO(output_path.read_text(encoding="utf-8"))))
     assert len(rows) == 1
     assert rows[0]["transaction_id"] == "receipt_1"
+
+
+def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_pivot():
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-10.00",
+        currency="USD",
+        receipt=Receipt(
+            items=[
+                ReceiptItem(
+                    description="Coffee",
+                    amount="7.00",
+                    net_amount="6.50",
+                    category_id="Food & Dining > Coffee Shops",
+                ),
+                ReceiptItem(
+                    description="Bagel",
+                    amount="3.00",
+                    category_id="Food & Dining > Bakeries",
+                ),
+            ]
+        ),
+    )
+    firestore_client = FakeFirestoreClient(
+        [FakeDocumentSnapshot("receipt_1", transaction_firestore_document(transaction))]
+    )
+    gspread_client = FakeGspreadClient()
+
+    export_firestore.export_firestore_receipt_items_google_sheet(
+        spreadsheet_title="Receipt Budget",
+        gspread_client=gspread_client,
+        client=firestore_client,
+        collection="test-transactions",
+    )
+
+    assert gspread_client.opened_titles == ["Receipt Budget"]
+    assert gspread_client.created_titles == ["Receipt Budget"]
+    spreadsheet = gspread_client.spreadsheet
+    records = spreadsheet.worksheet("records")
+    budget = spreadsheet.worksheet("budget")
+    assert spreadsheet.deleted_worksheet_titles == ["Sheet1"]
+    assert "Sheet1" not in spreadsheet.worksheets_by_title
+    header = records.values[0]
+    category_column = header.index("category_allocation.category_id")
+    description_column = header.index("combined_description")
+    amount_column = header.index("category_allocation.amount")
+    assert records.values[1][description_column] == "Coffee"
+    assert records.values[1][category_column] == "Food & Dining > Coffee Shops"
+    assert records.values[1][amount_column] == "-6.50"
+    assert records.values[2][description_column] == "Bagel"
+    assert records.freeze_calls == [{"rows": 1, "cols": None}]
+
+    pivot = spreadsheet.batch_update_calls[0]["requests"][0]["updateCells"]["rows"][0]["values"][0][
+        "pivotTable"
+    ]
+    assert pivot["source"]["sheetId"] == records.id
+    assert pivot["source"]["endRowIndex"] == 3
+    assert [row["sourceColumnOffset"] for row in pivot["rows"]] == [
+        category_column,
+        description_column,
+    ]
+    assert pivot["values"] == [
+        {
+            "sourceColumnOffset": amount_column,
+            "summarizeFunction": "SUM",
+            "name": "Sum of category_allocation.amount",
+        }
+    ]
+    assert spreadsheet.batch_update_calls[0]["requests"][0]["updateCells"]["start"] == {
+        "sheetId": budget.id,
+        "rowIndex": 0,
+        "columnIndex": 0,
+    }
+
+
+def test_export_firestore_receipt_items_google_sheet_opens_existing_sheet_by_id():
+    client = FakeFirestoreClient([])
+    gspread_client = FakeGspreadClient()
+
+    export_firestore.export_firestore_receipt_items_google_sheet(
+        spreadsheet_id="spreadsheet-key",
+        gspread_client=gspread_client,
+        client=client,
+        collection="test-transactions",
+    )
+
+    assert gspread_client.opened_keys == ["spreadsheet-key"]
+    assert gspread_client.created_titles == []
+    assert gspread_client.spreadsheet.worksheet("records").values[0][0] == "transaction_id"
 
 
 def test_main_exports_firestore_csv_to_output_file(
@@ -572,3 +757,44 @@ def test_main_exports_firestore_csv_to_output_file(
     export_firestore.main()
 
     assert calls == [(output_path, "processed-transactions")]
+
+
+def test_main_exports_firestore_google_sheet(monkeypatch: pytest.MonkeyPatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_export_firestore_receipt_items_google_sheet(**kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai-export-firestore",
+            "--firestore-collection",
+            "processed-transactions",
+            "--google-sheet-title",
+            "Receipt Budget",
+            "--google-oauth-credentials",
+            "/tmp/credentials.json",
+            "--google-oauth-authorized-user",
+            "/tmp/authorized_user.json",
+        ],
+    )
+    monkeypatch.setattr(
+        export_firestore,
+        "export_firestore_receipt_items_google_sheet",
+        fake_export_firestore_receipt_items_google_sheet,
+    )
+
+    export_firestore.main()
+
+    assert calls == [
+        {
+            "spreadsheet_title": "Receipt Budget",
+            "spreadsheet_id": None,
+            "spreadsheet_url": None,
+            "oauth_credentials_path": Path("/tmp/credentials.json"),
+            "oauth_authorized_user_path": Path("/tmp/authorized_user.json"),
+            "collection": "processed-transactions",
+        }
+    ]

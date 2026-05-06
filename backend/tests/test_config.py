@@ -7,9 +7,7 @@ import pytest
 from receipts_ai.config import config_value, first_config_value
 
 
-def test_config_value_reads_home_config_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_config_value_reads_home_config_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     (tmp_path / ".receipts_ai.config").write_text(
@@ -27,9 +25,7 @@ def test_config_value_reads_home_config_file(
     assert config_value("OPENAI_MODEL") == "gpt-test"
 
 
-def test_config_value_strips_matching_quotes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_config_value_strips_matching_quotes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("OLLAMA_URL", raising=False)
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
@@ -60,9 +56,7 @@ def test_environment_value_takes_precedence_over_home_config_file(
     assert config_value("OPENAI_API_KEY") == "env-key"
 
 
-def test_first_config_value_checks_keys_in_order(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_first_config_value_checks_keys_in_order(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("PRIMARY_KEY", raising=False)
     monkeypatch.delenv("ALTERNATE_KEY", raising=False)

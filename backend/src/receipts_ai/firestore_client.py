@@ -108,6 +108,7 @@ def _firebase_app(
 
 
 def _firestore_project_id() -> str:
-    return first_config_value(
-        FIRESTORE_PROJECT_ID_ENV_VARS, DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
-    ) or DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
+    return (
+        first_config_value(FIRESTORE_PROJECT_ID_ENV_VARS, DEFAULT_FIREBASE_EMULATOR_PROJECT_ID)
+        or DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
+    )

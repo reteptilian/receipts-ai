@@ -71,9 +71,7 @@ OFX_CREDIT_CARD_ACCOUNT_TYPES = frozenset(("CREDITCARD", "CREDITLINE"))
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Ingest one or more statement files."
-    )
+    parser = argparse.ArgumentParser(description="Ingest one or more statement files.")
     parser.add_argument(
         "statements",
         metavar="statement",
@@ -176,9 +174,7 @@ def main() -> None:
                 categorize_transactions(statement_transactions)
         if args.upsert_firestore:
             for transaction in statement_transactions:
-                upsert_transaction_to_firestore(
-                    transaction, collection=args.firestore_collection
-                )
+                upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
         transactions.extend(statement_transactions)
 
     _write_transactions(transactions, output_format=args.format, output_path=args.output)
@@ -186,9 +182,7 @@ def main() -> None:
 
 def transactions_from_ofx_file(statement_path: Path) -> list[Transaction]:
     content = statement_path.read_bytes()
-    transactions = transactions_from_ofx(
-        content.decode("utf-8-sig"), source=statement_path
-    )
+    transactions = transactions_from_ofx(content.decode("utf-8-sig"), source=statement_path)
     return _populate_transactions_ingestion_metadata(
         transactions,
         ingestion_filename=statement_path.name,
@@ -200,9 +194,7 @@ def transactions_from_ofx_file(statement_path: Path) -> list[Transaction]:
 
 def transactions_from_qfx_file(statement_path: Path) -> list[Transaction]:
     content = statement_path.read_bytes()
-    transactions = transactions_from_ofx(
-        content.decode("utf-8-sig"), source=statement_path
-    )
+    transactions = transactions_from_ofx(content.decode("utf-8-sig"), source=statement_path)
     return _populate_transactions_ingestion_metadata(
         transactions,
         ingestion_filename=statement_path.name,
@@ -663,6 +655,7 @@ def _fidelity_external_id(row: dict[str, str]) -> str:
         ).encode("utf-8")
     ).hexdigest()[:24]
     return f"fidelity_csv_{digest}"
+
 
 if __name__ == "__main__":
     main()

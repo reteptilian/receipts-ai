@@ -156,8 +156,8 @@ def set_receipt_item_user_overrides(
             f"receipt item index {resolved_index} is out of range for transaction {transaction_id}"
         )
 
-    transaction.receipt.items[resolved_index].user_overrides = (
-        _receipt_item_user_overrides(user_overrides)
+    transaction.receipt.items[resolved_index].user_overrides = _receipt_item_user_overrides(
+        user_overrides
     )
     items_document = [
         item.model_dump(mode="json", by_alias=True, exclude_none=True)

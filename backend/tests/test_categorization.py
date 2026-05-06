@@ -574,7 +574,8 @@ def test_categorize_transactions_rejects_too_many_single_token_alias_choices():
     )
     categories: dict[str, object] = {
         "Budget": {
-            f"Category {index}": {} for index in range(1, MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES + 2)
+            f"Category {index}": {}
+            for index in range(1, MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES + 2)
         }
     }
     client = FakeProbabilityCategoryClient([])
