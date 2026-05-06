@@ -6,7 +6,6 @@ from typing import cast
 
 from receipts_ai.firestore_transactions import transactions_from_firestore
 from receipts_ai.models.transaction import Transaction
-from receipts_ai.transactions import transaction_combined_description
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header, Static
 
@@ -58,7 +57,7 @@ class ReceiptsAIApp(App[None]):
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
         table.cursor_type = "row"
         table.zebra_stripes = True
-        table.add_columns("Date", "Description", "Ingestion file", "Amount")
+        table.add_columns("Date", "Payee", "Description", "Ingestion file", "Amount")
         self.run_worker(self._load_transactions, thread=True, name="load-transactions")
 
     def _load_transactions(self) -> None:
@@ -76,7 +75,8 @@ class ReceiptsAIApp(App[None]):
         for transaction in transactions:
             table.add_row(
                 transaction.transaction_date.isoformat(),
-                transaction_combined_description(transaction) or "",
+                transaction.payee or "",
+                transaction.description or "",
                 transaction.ingestion_filename or "",
                 _format_amount(transaction.amount, transaction.currency),
                 key=transaction.id,

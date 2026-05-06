@@ -36,4 +36,10 @@ async def test_app_displays_transactions_in_table() -> None:
         row = table.get_row_at(0)
 
     assert table.row_count == 1
-    assert row == ["2026-05-06", "Coffee Shop", "checking.ofx", "-7.50 USD"]
+    assert row == [
+        "2026-05-06",
+        "Coffee Shop",
+        "POS PURCHASE COFFEE",
+        "checking.ofx",
+        "-7.50 USD",
+    ]
