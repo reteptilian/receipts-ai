@@ -16,6 +16,19 @@
       "enum": ["bank_statement", "receipt", "amazon_order", "manual"],
       "description": "How this transaction entered the system."
     },
+    "ingestionDate": {
+      "$ref": "#/$defs/isoDate",
+      "description": "Date this transaction was ingested into the system."
+    },
+    "ingestionFilename": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Source filename or archive member name used to ingest this transaction."
+    },
+    "ingestionType": {
+      "type": "string",
+      "enum": ["ofx", "qfx", "fidelity_csv", "receipt_img", "amazon"],
+      "description": "Input format or importer used to ingest this transaction."
+    },
     "externalId": {
       "$ref": "#/$defs/nonEmptyString",
       "description": "Importer-provided identifier, if one exists."

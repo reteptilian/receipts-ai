@@ -22,6 +22,18 @@ class Source(StrEnum):
     manual = "manual"
 
 
+class IngestionType(StrEnum):
+    """
+    Input format or importer used to ingest this transaction.
+    """
+
+    ofx = "ofx"
+    qfx = "qfx"
+    fidelity_csv = "fidelity_csv"
+    receipt_img = "receipt_img"
+    amazon = "amazon"
+
+
 class Kind(StrEnum):
     """
     User-facing transaction kind.
@@ -283,6 +295,27 @@ class Transaction(BaseModel):
         ),
     ]
     source: Annotated[Source, Field(description="How this transaction entered the system.")]
+    ingestion_date: Annotated[
+        date | None,
+        Field(
+            alias="ingestionDate", description="Date this transaction was ingested into the system."
+        ),
+    ] = None
+    ingestion_filename: Annotated[
+        str | None,
+        Field(
+            alias="ingestionFilename",
+            description="Source filename or archive member name used to ingest this transaction.",
+            min_length=1,
+        ),
+    ] = None
+    ingestion_type: Annotated[
+        IngestionType | None,
+        Field(
+            alias="ingestionType",
+            description="Input format or importer used to ingest this transaction.",
+        ),
+    ] = None
     external_id: Annotated[
         str | None,
         Field(
