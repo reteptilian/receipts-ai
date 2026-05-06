@@ -16,9 +16,9 @@
       "enum": ["bank_statement", "receipt", "amazon_order", "manual"],
       "description": "How this transaction entered the system."
     },
-    "ingestionDate": {
-      "$ref": "#/$defs/isoDate",
-      "description": "Date this transaction was ingested into the system."
+    "ingestionDatetime": {
+      "$ref": "#/$defs/isoDateTime",
+      "description": "ISO 8601 date-time when this transaction was ingested into the system."
     },
     "ingestionFilename": {
       "$ref": "#/$defs/nonEmptyString",

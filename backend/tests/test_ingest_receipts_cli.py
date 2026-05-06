@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import TypedDict, Unpack
@@ -109,7 +109,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "combined_description": "Coffee",
             "transaction_amount": "",
             "transaction_currency": "",
-            "ingestion_date": "",
+            "ingestion_datetime": "",
             "ingestion_filename": "",
             "ingestion_file_sha256_hex": "",
             "ingestion_type": "",
@@ -152,7 +152,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "combined_description": "Bagel",
             "transaction_amount": "",
             "transaction_currency": "",
-            "ingestion_date": "",
+            "ingestion_datetime": "",
             "ingestion_filename": "",
             "ingestion_file_sha256_hex": "",
             "ingestion_type": "",
@@ -194,7 +194,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
-        ingestion_date=date(2026, 5, 6),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc),
         ingestion_filename="receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
@@ -227,7 +227,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     assert rows[0]["combined_description"] == "Coffee"
     assert rows[0]["transaction_amount"] == "-11.00"
     assert rows[0]["transaction_currency"] == "USD"
-    assert rows[0]["ingestion_date"] == "2026-05-06"
+    assert rows[0]["ingestion_datetime"] == "2026-05-06T07:08:09+00:00"
     assert rows[0]["ingestion_filename"] == "receipt.pdf"
     assert rows[0]["ingestion_file_sha256_hex"] == "0" * 64
     assert rows[0]["ingestion_type"] == "receipt_img"
@@ -259,7 +259,7 @@ def test_transaction_json_output_wraps_nested_receipt_struct():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
-        ingestion_date=date(2026, 5, 6),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc),
         ingestion_filename="receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
@@ -317,7 +317,7 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
-        ingestion_date=date(2026, 5, 6),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc),
         ingestion_filename="receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
@@ -335,7 +335,7 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
 
     assert document["transactionDate"] == "2026-04-27"
     assert document["source"] == "receipt"
-    assert document["ingestionDate"] == "2026-05-06"
+    assert document["ingestionDatetime"] == "2026-05-06T07:08:09Z"
     assert document["ingestionFilename"] == "receipt.pdf"
     assert document["ingestionFileSha256Hex"] == "0" * 64
     assert document["ingestionType"] == "receipt_img"

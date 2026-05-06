@@ -295,10 +295,11 @@ class Transaction(BaseModel):
         ),
     ]
     source: Annotated[Source, Field(description="How this transaction entered the system.")]
-    ingestion_date: Annotated[
-        date | None,
+    ingestion_datetime: Annotated[
+        AwareDatetime | None,
         Field(
-            alias="ingestionDate", description="Date this transaction was ingested into the system."
+            alias="ingestionDatetime",
+            description="ISO 8601 date-time when this transaction was ingested into the system.",
         ),
     ] = None
     ingestion_filename: Annotated[

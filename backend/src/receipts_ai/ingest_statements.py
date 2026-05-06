@@ -37,7 +37,7 @@ from receipts_ai.models.transaction import IngestionType, Kind, Source, Status, 
 CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
     "source",
-    "ingestion_date",
+    "ingestion_datetime",
     "ingestion_filename",
     "ingestion_file_sha256_hex",
     "ingestion_type",
@@ -349,8 +349,8 @@ def _transaction_rows(transactions: Iterable[Transaction]) -> list[dict[str, obj
             {
                 "transaction_id": transaction.id,
                 "source": transaction.source.value,
-                "ingestion_date": transaction.ingestion_date.isoformat()
-                if transaction.ingestion_date is not None
+                "ingestion_datetime": transaction.ingestion_datetime.isoformat()
+                if transaction.ingestion_datetime is not None
                 else None,
                 "ingestion_filename": transaction.ingestion_filename,
                 "ingestion_file_sha256_hex": transaction.ingestion_file_sha256_hex,

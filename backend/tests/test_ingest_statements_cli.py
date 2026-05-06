@@ -4,7 +4,7 @@ import csv
 import hashlib
 import json
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from io import StringIO
 from pathlib import Path
 
@@ -188,7 +188,8 @@ def test_parses_sgml_qfx_credit_card_transactions(tmp_path: Path):
     assert len(transactions) == 2
     charge = transactions[0]
     assert charge.source == Source.bank_statement
-    assert charge.ingestion_date == date.today()
+    assert charge.ingestion_datetime is not None
+    assert charge.ingestion_datetime.date() == date.today()
     assert charge.ingestion_filename == "credit-card.qfx"
     assert charge.ingestion_file_sha256_hex == hashlib.sha256(
         statement_path.read_bytes()
@@ -323,7 +324,7 @@ def test_writes_transaction_csv_rows():
     transaction = Transaction(
         id="bank_statement_1",
         source=Source.bank_statement,
-        ingestion_date=date(2026, 5, 6),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc),
         ingestion_filename="checking.ofx",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.ofx,
@@ -349,7 +350,7 @@ def test_writes_transaction_csv_rows():
         {
             "transaction_id": "bank_statement_1",
             "source": "bank_statement",
-            "ingestion_date": "2026-05-06",
+            "ingestion_datetime": "2026-05-06T07:08:09+00:00",
             "ingestion_filename": "checking.ofx",
             "ingestion_file_sha256_hex": "0" * 64,
             "ingestion_type": "ofx",

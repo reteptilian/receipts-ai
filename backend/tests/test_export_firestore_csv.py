@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import csv
 import sys
-from datetime import date
+from datetime import UTC, date, datetime
 from io import StringIO
 from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
 import pytest
 
+import receipts_ai
 from receipts_ai import export_firestore_csv
-from receipts_ai.export_firestore_csv import (
-    export_firestore_receipt_items_csv,
+from receipts_ai.export_firestore_csv import export_firestore_receipt_items_csv
+from receipts_ai.firestore_transactions import (
     stream_transactions_from_firestore,
+    transactions_from_firestore,
 )
 from receipts_ai.ingest_receipts import transaction_firestore_document
 from receipts_ai.models.transaction import (
@@ -90,7 +92,7 @@ def test_streams_transactions_from_firestore_documents():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
-        ingestion_date=date(2026, 5, 6),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
@@ -112,11 +114,43 @@ def test_streams_transactions_from_firestore_documents():
     assert transactions == [transaction]
 
 
+def test_downloads_all_transactions_from_firestore_documents():
+    first = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+    )
+    second = Transaction(
+        id="statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 28),
+        description="ACH CREDIT PAYROLL",
+        amount="100.00",
+        currency="USD",
+    )
+    client = FakeFirestoreClient(
+        [
+            FakeDocumentSnapshot("receipt_1", transaction_firestore_document(first)),
+            FakeDocumentSnapshot("missing", None),
+            FakeDocumentSnapshot("statement_1", transaction_firestore_document(second)),
+        ]
+    )
+
+    transactions = transactions_from_firestore(client=client, collection="test-transactions")
+
+    assert client.collections == ["test-transactions"]
+    assert transactions == [first, second]
+    assert receipts_ai.transactions_from_firestore is transactions_from_firestore
+
+
 def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path: Path):
     first = Transaction(
         id="receipt_1",
         source=Source.receipt,
-        ingestion_date=date(2026, 5, 6),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
@@ -180,7 +214,11 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
     assert "category_allocation.category_id" in rows[0]
     assert "category_allocation.amount" in rows[0]
     assert [row["transaction_id"] for row in rows] == ["receipt_1", "receipt_1", "receipt_2"]
-    assert [row["ingestion_date"] for row in rows] == ["2026-05-06", "2026-05-06", ""]
+    assert [row["ingestion_datetime"] for row in rows] == [
+        "2026-05-06T07:08:09+00:00",
+        "2026-05-06T07:08:09+00:00",
+        "",
+    ]
     assert [row["ingestion_filename"] for row in rows] == ["receipt.pdf", "receipt.pdf", ""]
     assert [row["ingestion_file_sha256_hex"] for row in rows] == [
         "0" * 64,

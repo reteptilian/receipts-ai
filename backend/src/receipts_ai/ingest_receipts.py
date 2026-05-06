@@ -8,7 +8,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from datetime import date
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
@@ -49,7 +49,7 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "combined_description",
     "transaction_amount",
     "transaction_currency",
-    "ingestion_date",
+    "ingestion_datetime",
     "ingestion_filename",
     "ingestion_file_sha256_hex",
     "ingestion_type",
@@ -440,9 +440,9 @@ def populate_transaction_ingestion_metadata(
     ingestion_filename: str,
     ingestion_file_sha256_hex: str,
     ingestion_type: IngestionType,
-    ingestion_date: date | None = None,
+    ingestion_datetime: datetime | None = None,
 ) -> Transaction:
-    transaction.ingestion_date = ingestion_date or date.today()
+    transaction.ingestion_datetime = ingestion_datetime or datetime.now(timezone.utc)
     transaction.ingestion_filename = ingestion_filename
     transaction.ingestion_file_sha256_hex = ingestion_file_sha256_hex
     transaction.ingestion_type = ingestion_type
@@ -562,8 +562,8 @@ def _transaction_receipt_item_rows(
         "combined_description": combined_description,
         "transaction_amount": transaction.amount,
         "transaction_currency": transaction.currency,
-        "ingestion_date": transaction.ingestion_date.isoformat()
-        if transaction.ingestion_date is not None
+        "ingestion_datetime": transaction.ingestion_datetime.isoformat()
+        if transaction.ingestion_datetime is not None
         else None,
         "ingestion_filename": transaction.ingestion_filename,
         "ingestion_file_sha256_hex": transaction.ingestion_file_sha256_hex,
@@ -581,8 +581,8 @@ def _transaction_receipt_item_rows(
             transaction_description=transaction.description,
             transaction_amount=transaction.amount,
             transaction_currency=transaction.currency,
-            ingestion_date=transaction.ingestion_date.isoformat()
-            if transaction.ingestion_date is not None
+            ingestion_datetime=transaction.ingestion_datetime.isoformat()
+            if transaction.ingestion_datetime is not None
             else None,
             ingestion_filename=transaction.ingestion_filename,
             ingestion_file_sha256_hex=transaction.ingestion_file_sha256_hex,
@@ -625,7 +625,7 @@ def _receipt_item_rows(
     transaction_description: str | None = None,
     transaction_amount: str | None = None,
     transaction_currency: str | None = None,
-    ingestion_date: str | None = None,
+    ingestion_datetime: str | None = None,
     ingestion_filename: str | None = None,
     ingestion_file_sha256_hex: str | None = None,
     ingestion_type: str | None = None,
@@ -644,7 +644,7 @@ def _receipt_item_rows(
             "combined_description": item.description,
             "transaction_amount": transaction_amount,
             "transaction_currency": transaction_currency,
-            "ingestion_date": ingestion_date,
+            "ingestion_datetime": ingestion_datetime,
             "ingestion_filename": ingestion_filename,
             "ingestion_file_sha256_hex": ingestion_file_sha256_hex,
             "ingestion_type": ingestion_type,

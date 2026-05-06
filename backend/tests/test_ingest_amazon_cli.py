@@ -32,7 +32,8 @@ def test_parses_amazon_orders_csv_as_itemized_transactions():
     transaction = transactions[0]
     assert transaction.id.startswith("amazon_order_")
     assert transaction.source == Source.amazon_order
-    assert transaction.ingestion_date == date.today()
+    assert transaction.ingestion_datetime is not None
+    assert transaction.ingestion_datetime.date() == date.today()
     assert transaction.ingestion_filename == "Your Orders.csv"
     assert transaction.ingestion_file_sha256_hex == hashlib.sha256(
         SAMPLE_ORDER_CSV.encode("utf-8")
