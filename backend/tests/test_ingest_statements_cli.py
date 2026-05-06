@@ -4,7 +4,7 @@ import csv
 import hashlib
 import json
 import sys
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from io import StringIO
 from pathlib import Path
 
@@ -324,7 +324,7 @@ def test_writes_transaction_csv_rows():
     transaction = Transaction(
         id="bank_statement_1",
         source=Source.bank_statement,
-        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="checking.ofx",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.ofx,

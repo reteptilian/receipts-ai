@@ -31,8 +31,12 @@ classifiers = [
 # ---- Main dependencies ----
 
 dependencies = [
+    "receipts-ai",
     "textual>=6.8.0",
 ]
+
+[tool.uv.sources]
+receipts-ai = { path = "../backend", editable = true }
 
 
 # ---- Dev dependencies ----

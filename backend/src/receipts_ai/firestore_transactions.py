@@ -4,7 +4,7 @@ import logging
 from collections.abc import Iterable
 from typing import Any, Protocol, cast
 
-from receipts_ai.ingest_receipts import DEFAULT_FIRESTORE_COLLECTION, create_firestore_client
+from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION, create_firestore_client
 from receipts_ai.models.transaction import Transaction
 
 __all__ = (

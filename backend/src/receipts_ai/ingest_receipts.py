@@ -5,13 +5,11 @@ import csv
 import hashlib
 import json
 import logging
-import os
 import sys
-from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
+from typing import Any, TextIO
 
 from receipts_ai.brave_search import (
     CachedBraveSearchClient,
@@ -28,18 +26,21 @@ from receipts_ai.categorization import (
     clean_receipt_item_descriptions,
     create_ollama_category_client,
 )
-from receipts_ai.config import config_value, first_config_value
+from receipts_ai.config import config_value
 from receipts_ai.document_intelligence import analyze_receipt_file
-from receipts_ai.models.transaction import IngestionType, Receipt, Source, Transaction
+from receipts_ai.firestore_client import (
+    DEFAULT_FIRESTORE_COLLECTION,
+    FirestoreClient,
+    create_firestore_client,
+)
+from receipts_ai.models.transaction import IngestionType, Receipt, Transaction
 from receipts_ai.openai_receipt_extraction import (
     DEFAULT_OPENAI_MODEL,
     OPENAI_MODEL_ENV_VAR,
     transaction_from_openai_receipt,
 )
 from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
-
-if TYPE_CHECKING:
-    from firebase_admin import App
+from receipts_ai.transactions import transaction_combined_description
 
 CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
@@ -93,28 +94,7 @@ TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES: tuple[str, ...] = tuple(
     "category_allocation.amount",
 )
 
-DEFAULT_FIRESTORE_COLLECTION = "transactions"
-DEFAULT_FIREBASE_EMULATOR_PROJECT_ID = "receipts-ai-local"
-FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR = "FIREBASE_SERVICE_ACCT_KEY_FILEPATH"
-FIRESTORE_EMULATOR_HOST_ENV_VAR = "FIRESTORE_EMULATOR_HOST"
-FIRESTORE_PROJECT_ID_ENV_VARS = (
-    "FIREBASE_PROJECT_ID",
-    "GOOGLE_CLOUD_PROJECT",
-    "GCLOUD_PROJECT",
-)
 LOGGER = logging.getLogger(__name__)
-
-
-class FirestoreDocumentReference(Protocol):
-    def set(self, document_data: dict[str, Any], *, merge: bool = False) -> object: ...
-
-
-class FirestoreCollectionReference(Protocol):
-    def document(self, document_id: str) -> FirestoreDocumentReference: ...
-
-
-class FirestoreClient(Protocol):
-    def collection(self, collection_path: str) -> FirestoreCollectionReference: ...
 
 
 def main() -> None:
@@ -364,32 +344,6 @@ def _process_receipt(
     raise ValueError(f"unsupported receipt pipeline: {pipeline}")
 
 
-def create_firestore_client() -> FirestoreClient:
-    emulator_host = config_value(FIRESTORE_EMULATOR_HOST_ENV_VAR)
-    service_account_key_filepath = config_value(FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR)
-
-    if emulator_host:
-        os.environ[FIRESTORE_EMULATOR_HOST_ENV_VAR] = emulator_host
-        LOGGER.info(
-            "Creating Firestore client for emulator at %s using project %s",
-            emulator_host,
-            _firestore_project_id(),
-        )
-        return _create_firestore_emulator_client()
-
-    if service_account_key_filepath:
-        LOGGER.info(
-            "Creating Firestore client from service account file %s",
-            service_account_key_filepath,
-        )
-        return _create_firestore_service_account_client(Path(service_account_key_filepath))
-
-    raise RuntimeError(
-        "Set FIRESTORE_EMULATOR_HOST to use the local Firestore emulator or "
-        "FIREBASE_SERVICE_ACCT_KEY_FILEPATH to use production Cloud Firestore."
-    )
-
-
 def upsert_transaction_to_firestore(
     transaction: Transaction,
     *,
@@ -442,7 +396,7 @@ def populate_transaction_ingestion_metadata(
     ingestion_type: IngestionType,
     ingestion_datetime: datetime | None = None,
 ) -> Transaction:
-    transaction.ingestion_datetime = ingestion_datetime or datetime.now(timezone.utc)
+    transaction.ingestion_datetime = ingestion_datetime or datetime.now(UTC)
     transaction.ingestion_filename = ingestion_filename
     transaction.ingestion_file_sha256_hex = ingestion_file_sha256_hex
     transaction.ingestion_type = ingestion_type
@@ -451,59 +405,6 @@ def populate_transaction_ingestion_metadata(
 
 def sha256_hex(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
-
-
-def _create_firestore_emulator_client() -> FirestoreClient:
-    from firebase_admin import firestore
-    from google.auth.credentials import AnonymousCredentials
-
-    # from google.cloud import firestore
-
-    project_id = _firestore_project_id()
-    cred = AnonymousCredentials()
-    LOGGER.debug("Initializing Firebase app for Firestore emulator with project %s", project_id)
-    app = _firebase_app(
-        name="receipts-ai-firestore-emulator", options={"projectId": project_id}, credential=cred
-    )
-    return cast(FirestoreClient, cast(object, firestore.client(app=app)))
-
-
-def _create_firestore_service_account_client(service_account_key_filepath: Path) -> FirestoreClient:
-    from firebase_admin import credentials, firestore
-
-    if not service_account_key_filepath.is_file():
-        raise RuntimeError(
-            f"{FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR} must point to a service account JSON file"
-        )
-
-    LOGGER.debug("Initializing Firebase app with service account credentials")
-    credential = credentials.Certificate(str(service_account_key_filepath))
-    app = _firebase_app(name="receipts-ai-firestore-service-account", credential=credential)
-    return cast(FirestoreClient, cast(object, firestore.client(app=app)))
-
-
-def _firebase_app(
-    *,
-    name: str,
-    credential: Any | None = None,
-    options: dict[str, str] | None = None,
-) -> App:
-    import firebase_admin
-
-    try:
-        return cast("App", firebase_admin.get_app(name))
-    except ValueError:
-        initialize_app = cast(  # type: ignore[reportUnknownMemberType]
-            "Callable[[Any | None, dict[str, str] | None, str], App]",
-            firebase_admin.initialize_app,
-        )
-        return initialize_app(credential, options, name)
-
-
-def _firestore_project_id() -> str:
-    return first_config_value(
-        FIRESTORE_PROJECT_ID_ENV_VARS, DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
-    ) or DEFAULT_FIREBASE_EMULATOR_PROJECT_ID
 
 
 def write_transaction_receipt_items_csv(transaction: Transaction, file: TextIO) -> None:
@@ -553,7 +454,7 @@ def write_receipt_json(receipt: Receipt, file: TextIO) -> None:
 def _transaction_receipt_item_rows(
     transaction: Transaction,
 ) -> list[dict[str, object | None]]:
-    combined_description = _transaction_combined_description(transaction)
+    combined_description = transaction_combined_description(transaction)
     transaction_fields: dict[str, object | None] = {
         "transaction_id": transaction.id,
         "transaction_date": transaction.transaction_date.isoformat(),
@@ -603,17 +504,6 @@ def _transaction_receipt_item_rows(
             row["category_allocation.amount"] = allocation.amount
         rows.append(row)
     return rows
-
-
-def _transaction_combined_description(transaction: Transaction) -> str | None:
-    if (
-        transaction.source == Source.bank_statement
-        and transaction.payee is not None
-        and transaction.account_id is not None
-        and ":" not in transaction.account_id
-    ):
-        return transaction.payee
-    return transaction.description
 
 
 def _receipt_item_rows(

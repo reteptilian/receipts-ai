@@ -19,6 +19,7 @@ __all__ = (  # noqa: F405
     "receipt_from_document_intelligence_result",
     "search_product_taxonomy_embeddings",
     "stream_transactions_from_firestore",
+    "transaction_combined_description",
     "transaction_from_openai_receipt",
     "transaction_firestore_document",
     "transactions_from_firestore",
@@ -28,7 +29,9 @@ __all__ = (  # noqa: F405
 from .brave_search import *  # noqa: F403
 from .categorization import *  # noqa: F403
 from .document_intelligence import *  # noqa: F403
+from .firestore_client import *  # noqa: F403
 from .firestore_transactions import *  # noqa: F403
 from .ingest_receipts import *  # noqa: F403
 from .openai_receipt_extraction import *  # noqa: F403
 from .receipt_extraction import *  # noqa: F403
+from .transactions import *  # noqa: F403

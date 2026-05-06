@@ -6,14 +6,14 @@ import json
 import logging
 import os
 import sys
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from io import StringIO
 from pathlib import Path
 from typing import TypedDict, Unpack
 
 import pytest
 
-from receipts_ai import ingest_receipts
+from receipts_ai import firestore_client, ingest_receipts
 from receipts_ai.ingest_receipts import (
     CSV_FIELDNAMES,
     main,
@@ -194,7 +194,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
-        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
@@ -259,7 +259,7 @@ def test_transaction_json_output_wraps_nested_receipt_struct():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
-        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
@@ -317,7 +317,7 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
-        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc),
+        ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
@@ -426,12 +426,12 @@ def test_create_firestore_client_sets_emulator_env_from_config_file(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        ingest_receipts,
+        firestore_client,
         "_create_firestore_emulator_client",
         lambda: sentinel_client,
     )
 
-    client = ingest_receipts.create_firestore_client()
+    client = firestore_client.create_firestore_client()
 
     assert client is sentinel_client
     assert os.environ["FIRESTORE_EMULATOR_HOST"] == "127.0.0.1:8080"

@@ -27,8 +27,8 @@ from receipts_ai.categorization import (
     classify_receipt_items_by_product_taxonomy_vector_search,
     create_ollama_category_client,
 )
+from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.ingest_receipts import (
-    DEFAULT_FIRESTORE_COLLECTION,
     populate_transaction_ingestion_metadata,
     sha256_hex,
     upsert_transaction_to_firestore,

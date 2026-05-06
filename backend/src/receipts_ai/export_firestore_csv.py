@@ -6,14 +6,12 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
+from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.firestore_transactions import (
     FirestoreTransactionClient,
     stream_transactions_from_firestore,
 )
-from receipts_ai.ingest_receipts import (
-    DEFAULT_FIRESTORE_COLLECTION,
-    write_transactions_receipt_items_csv,
-)
+from receipts_ai.ingest_receipts import write_transactions_receipt_items_csv
 
 LOGGER = logging.getLogger(__name__)
 
