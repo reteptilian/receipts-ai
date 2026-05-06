@@ -87,6 +87,18 @@ class MatchSource(StrEnum):
 NonEmptyString = TypeAliasType("NonEmptyString", Annotated[str, Field(min_length=1)])
 
 
+DecimalString = TypeAliasType(
+    "DecimalString",
+    Annotated[
+        str,
+        Field(
+            description="Decimal amount encoded as a string to avoid floating point rounding errors.",
+            pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+        ),
+    ],
+)
+
+
 class Source1(StrEnum):
     """
     How this allocation was assigned.
@@ -118,6 +130,50 @@ class CategoryAllocation(BaseModel):
     source: Annotated[Source1 | None, Field(description="How this allocation was assigned.")] = None
 
 
+class Source2(StrEnum):
+    """
+    Indicates that this allocation was assigned by the user.
+    """
+
+    user = "user"
+
+
+class UserCategoryAllocation(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    category_id: Annotated[str, Field(alias="categoryId", min_length=1)]
+    amount: Annotated[
+        str,
+        Field(
+            description="Signed amount allocated to this category.",
+            pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+        ),
+    ]
+    source: Annotated[
+        Source2 | None,
+        Field(description="Indicates that this allocation was assigned by the user."),
+    ] = Source2.user
+
+
+class TransactionUserOverrides(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    description: Annotated[
+        str | None, Field(description="User-provided correction for the transaction description.")
+    ] = None
+    category_allocations: Annotated[
+        list[UserCategoryAllocation] | None,
+        Field(
+            alias="categoryAllocations",
+            description="User-provided category split. When present, this replaces categoryAllocations in effective/display views, including when empty.",
+        ),
+    ] = None
+
+
 class LineType(StrEnum):
     item = "item"
     tax = "tax"
@@ -128,6 +184,114 @@ class LineType(StrEnum):
     discount = "discount"
     return_ = "return"
     other = "other"
+
+
+Quantity = TypeAliasType("Quantity", Annotated[float, Field(gt=0.0)])
+
+
+class ReceiptItemUserOverrides(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    quantity: Quantity | None = None
+    unit_price: Annotated[DecimalString | None, Field(alias="unitPrice")] = None
+    amount: Annotated[
+        str | None,
+        Field(
+            description="User-provided correction for the signed line amount.",
+            pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+        ),
+    ] = None
+    discount_amount: Annotated[
+        DecimalString | None,
+        Field(
+            alias="discountAmount",
+            description="User-provided correction for the signed discount amount.",
+        ),
+    ] = None
+    discount_description: Annotated[
+        NonEmptyString | None,
+        Field(
+            alias="discountDescription",
+            description="User-provided correction for the discount description.",
+        ),
+    ] = None
+    net_amount: Annotated[
+        str | None,
+        Field(
+            alias="netAmount",
+            description="User-provided correction for the final line amount after discount.",
+            pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+        ),
+    ] = None
+    line_type: Annotated[LineType | None, Field(alias="lineType")] = None
+    category_id: Annotated[NonEmptyString | None, Field(alias="categoryId")] = None
+    taxonomy1: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the first-level product taxonomy category."
+        ),
+    ] = None
+    taxonomy2: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the second-level product taxonomy category."
+        ),
+    ] = None
+    taxonomy3: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the third-level product taxonomy category."
+        ),
+    ] = None
+    taxonomy4: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the fourth-level product taxonomy category."
+        ),
+    ] = None
+    taxonomy5: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the fifth-level product taxonomy category."
+        ),
+    ] = None
+    taxonomy6: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the sixth-level product taxonomy category."
+        ),
+    ] = None
+    taxonomy7: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the seventh-level product taxonomy category."
+        ),
+    ] = None
+    taxonomy8: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the eighth-level product taxonomy category."
+        ),
+    ] = None
+    taxonomy9: Annotated[
+        NonEmptyString | None,
+        Field(
+            description="User-provided correction for the ninth-level product taxonomy category."
+        ),
+    ] = None
+
+
+class ExtractionMetadata(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    model: Annotated[str | None, Field(min_length=1)] = None
+    confidence: Annotated[float | None, Field(ge=0.0, le=1.0)] = None
+    extracted_at: Annotated[AwareDatetime | None, Field(alias="extractedAt")] = None
+    raw_text: Annotated[str | None, Field(alias="rawText")] = None
 
 
 class ReceiptItem(BaseModel):
@@ -225,6 +389,13 @@ class ReceiptItem(BaseModel):
     taxonomy9: Annotated[
         str | None, Field(description="Ninth-level product taxonomy category.", min_length=1)
     ] = None
+    user_overrides: Annotated[
+        ReceiptItemUserOverrides | None,
+        Field(
+            alias="userOverrides",
+            description="User-provided corrections for editable receipt item fields. Present fields replace the extracted values in effective/display views.",
+        ),
+    ] = None
     confidence: Annotated[
         float | None,
         Field(
@@ -233,17 +404,6 @@ class ReceiptItem(BaseModel):
             le=1.0,
         ),
     ] = None
-
-
-class ExtractionMetadata(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=True,
-    )
-    model: Annotated[str | None, Field(min_length=1)] = None
-    confidence: Annotated[float | None, Field(ge=0.0, le=1.0)] = None
-    extracted_at: Annotated[AwareDatetime | None, Field(alias="extractedAt")] = None
-    raw_text: Annotated[str | None, Field(alias="rawText")] = None
 
 
 class Receipt(BaseModel):
@@ -401,6 +561,13 @@ class Transaction(BaseModel):
             validate_default=True,
         ),
     ] = []
+    user_overrides: Annotated[
+        TransactionUserOverrides | None,
+        Field(
+            alias="userOverrides",
+            description="User-provided corrections for editable transaction fields. Present fields replace the extracted values in effective/display views.",
+        ),
+    ] = None
     receipt: Annotated[
         Receipt | None, Field(description="Itemized receipt data associated with this transaction.")
     ] = None

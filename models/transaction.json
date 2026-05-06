@@ -96,6 +96,10 @@
       },
       "default": []
     },
+    "userOverrides": {
+      "$ref": "#/$defs/transactionUserOverrides",
+      "description": "User-provided corrections for editable transaction fields. Present fields replace the extracted values in effective/display views."
+    },
     "receipt": {
       "$ref": "#/$defs/receipt",
       "description": "Itemized receipt data associated with this transaction."
@@ -198,6 +202,50 @@
           "type": "string",
           "enum": ["user", "model", "rule", "receipt"],
           "description": "How this allocation was assigned."
+        }
+      }
+    },
+    "userCategoryAllocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categoryId", "amount"],
+      "properties": {
+        "categoryId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "amount": {
+          "$ref": "#/$defs/decimalString",
+          "description": "Signed amount allocated to this category."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["user"],
+          "default": "user",
+          "description": "Indicates that this allocation was assigned by the user."
+        }
+      }
+    },
+    "transactionUserOverrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the transaction description."
+        },
+        "categoryAllocations": {
+          "type": "array",
+          "description": "User-provided category split. When present, this replaces categoryAllocations in effective/display views, including when empty.",
+          "items": {
+            "$ref": "#/$defs/userCategoryAllocation"
+          }
         }
       }
     },
@@ -322,11 +370,192 @@
           "$ref": "#/$defs/nonEmptyString",
           "description": "Ninth-level product taxonomy category."
         },
+        "userOverrides": {
+          "$ref": "#/$defs/receiptItemUserOverrides",
+          "description": "User-provided corrections for editable receipt item fields. Present fields replace the extracted values in effective/display views."
+        },
         "confidence": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
           "description": "Confidence score when the line category or extraction was inferred."
+        }
+      }
+    },
+    "receiptItemUserOverrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "quantity": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unitPrice": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "amount": {
+          "$ref": "#/$defs/decimalString",
+          "description": "User-provided correction for the signed line amount."
+        },
+        "discountAmount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimalString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the signed discount amount."
+        },
+        "discountDescription": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the discount description."
+        },
+        "netAmount": {
+          "$ref": "#/$defs/decimalString",
+          "description": "User-provided correction for the final line amount after discount."
+        },
+        "lineType": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["item", "tax", "tip", "service_charge", "shipping", "fee", "discount", "return", "other"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categoryId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "taxonomy1": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the first-level product taxonomy category."
+        },
+        "taxonomy2": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the second-level product taxonomy category."
+        },
+        "taxonomy3": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the third-level product taxonomy category."
+        },
+        "taxonomy4": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the fourth-level product taxonomy category."
+        },
+        "taxonomy5": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the fifth-level product taxonomy category."
+        },
+        "taxonomy6": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the sixth-level product taxonomy category."
+        },
+        "taxonomy7": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the seventh-level product taxonomy category."
+        },
+        "taxonomy8": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the eighth-level product taxonomy category."
+        },
+        "taxonomy9": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the ninth-level product taxonomy category."
         }
       }
     },
