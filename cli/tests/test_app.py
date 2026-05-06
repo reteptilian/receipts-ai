@@ -8,6 +8,25 @@ from textual.widgets import DataTable
 from receipts_ai_cli.app import ReceiptsAIApp
 
 
+def _transaction(
+    transaction_id: str,
+    *,
+    transaction_date: date,
+    amount: str,
+) -> Transaction:
+    return Transaction(
+        id=transaction_id,
+        source=Source.bank_statement,
+        account_id="checking",
+        transaction_date=transaction_date,
+        payee=f"Payee {transaction_id}",
+        description=f"Description {transaction_id}",
+        amount=amount,
+        currency="USD",
+        ingestion_filename="checking.ofx",
+    )
+
+
 def test_app_title_defaults_to_class_name() -> None:
     app = ReceiptsAIApp()
 
@@ -42,4 +61,31 @@ async def test_app_displays_transactions_in_table() -> None:
         "POS PURCHASE COFFEE",
         "checking.ofx",
         "-7.50 USD",
+    ]
+
+
+@pytest.mark.anyio
+async def test_app_displays_transactions_sorted_by_date_then_amount() -> None:
+    transactions = [
+        _transaction("late", transaction_date=date(2026, 5, 7), amount="-1"),
+        _transaction("higher_amount", transaction_date=date(2026, 5, 6), amount="12"),
+        _transaction("earlier", transaction_date=date(2026, 5, 5), amount="100"),
+        _transaction("lower_amount", transaction_date=date(2026, 5, 6), amount="2"),
+    ]
+    app = ReceiptsAIApp(transaction_loader=lambda: transactions)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        displayed_dates_and_amounts = [
+            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[4])
+            for row_index in range(table.row_count)
+        ]
+
+    assert displayed_dates_and_amounts == [
+        ("2026-05-05", "100.00 USD"),
+        ("2026-05-06", "2.00 USD"),
+        ("2026-05-06", "12.00 USD"),
+        ("2026-05-07", "-1.00 USD"),
     ]

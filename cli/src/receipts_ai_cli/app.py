@@ -72,7 +72,7 @@ class ReceiptsAIApp(App[None]):
     def _show_transactions(self, transactions: Sequence[Transaction]) -> None:
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
         table.clear()
-        for transaction in transactions:
+        for transaction in sorted(transactions, key=_transaction_sort_key):
             table.add_row(
                 transaction.transaction_date.isoformat(),
                 transaction.payee or "",
@@ -95,6 +95,15 @@ class ReceiptsAIApp(App[None]):
         status = self.query_one("#status", Static)
         status.add_class("error")
         status.update(f"Unable to load transactions: {exc}")
+
+
+def _transaction_sort_key(transaction: Transaction) -> tuple[object, ...]:
+    try:
+        amount = Decimal(transaction.amount)
+    except InvalidOperation:
+        return (transaction.transaction_date, 1, transaction.amount)
+
+    return (transaction.transaction_date, 0, amount)
 
 
 def _format_amount(amount: str, currency: str) -> str:
