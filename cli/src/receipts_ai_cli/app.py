@@ -16,9 +16,9 @@ from receipts_ai.models.transaction import (
     TransactionUserOverrides,
 )
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Center, Horizontal, Vertical
 from textual.coordinate import Coordinate
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 
 TransactionLoader = Callable[[], Sequence[Transaction]]
@@ -34,12 +34,6 @@ class ReceiptItemColumn:
     parser: ReceiptItemParser
     formatter: ReceiptItemFormatter
     direct_edit: bool = False
-
-
-@dataclass(frozen=True)
-class CellEdit:
-    row_index: int
-    column_index: int
 
 
 RECEIPT_ITEM_COLUMNS = (
@@ -114,19 +108,48 @@ RECEIPT_ITEM_COLUMNS = (
 )
 
 
+class CellEditScreen(ModalScreen[str]):
+    """Screen for editing a single cell's value."""
+
+    def __init__(self, label: str, value: str) -> None:
+        super().__init__()
+        self._label = label
+        self._value = value
+
+    def compose(self) -> ComposeResult:
+        with Center():
+            with Vertical(id="cell-edit-dialog"):
+                yield Label(f"Edit {self._label}")
+                yield Input(self._value, id="cell-edit-input")
+                with Horizontal(id="cell-edit-buttons"):
+                    yield Static("Enter to Save / Esc to Cancel", id="cell-edit-help")
+
+    def on_mount(self) -> None:
+        self.query_one("#cell-edit-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
+    def action_cancel(self) -> None:
+        self.dismiss()
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+    ]
+
+
 class ReceiptItemsScreen(Screen[None]):
     """Screen showing the receipt items for one transaction."""
 
     BINDINGS = [
         ("e", "edit_cell", "Edit cell"),
-        ("escape", "back_or_cancel", "Back"),
+        ("escape", "app.pop_screen", "Back"),
         ("q", "app.pop_screen", "Back"),
     ]
 
     def __init__(self, transaction: Transaction) -> None:
         super().__init__()
         self._transaction = transaction
-        self._active_cell_edit: CellEdit | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -147,9 +170,6 @@ class ReceiptItemsScreen(Screen[None]):
             )
             yield Static(self._transaction.currency, id="receipt-currency")
         yield DataTable(id="receipt-items")
-        with Horizontal(id="receipt-cell-editor", classes="hidden"):
-            yield Label("Cell", id="receipt-cell-editor-label")
-            yield Input(id="receipt-cell-editor-input", compact=True)
         yield Static("", id="receipt-edit-status")
         yield Footer()
 
@@ -174,13 +194,7 @@ class ReceiptItemsScreen(Screen[None]):
             self.action_edit_cell()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        input_widget = event.input
-        if input_widget.id == "receipt-cell-editor-input":
-            self._commit_cell_edit(input_widget.value)
-            event.stop()
-            return
-
-        self._commit_header_input(input_widget)
+        self._commit_header_input(event.input)
 
     def on_input_blurred(self, event: Input.Blurred) -> None:
         if event.input.id in {"receipt-date", "receipt-payee", "receipt-amount"}:
@@ -192,25 +206,14 @@ class ReceiptItemsScreen(Screen[None]):
         if not table.is_valid_coordinate(coordinate):
             return
 
-        row_index = coordinate.row
-        column_index = coordinate.column
-        column = RECEIPT_ITEM_COLUMNS[column_index]
+        column = RECEIPT_ITEM_COLUMNS[coordinate.column]
         value = table.get_cell_at(coordinate)
-        editor = self.query_one("#receipt-cell-editor")
-        editor.remove_class("hidden")
-        label = self.query_one("#receipt-cell-editor-label", Label)
-        label.update(f"{column.label}:")
-        input_widget = self.query_one("#receipt-cell-editor-input", Input)
-        input_widget.value = str(value)
-        self._active_cell_edit = CellEdit(row_index=row_index, column_index=column_index)
-        input_widget.focus()
 
-    def action_back_or_cancel(self) -> None:
-        if self._active_cell_edit is not None:
-            self._hide_cell_editor()
-            return
+        def check_edit(new_value: str | None) -> None:
+            if new_value is not None:
+                self._commit_cell_edit(coordinate, new_value)
 
-        self.dismiss()
+        self.app.push_screen(CellEditScreen(column.label, str(value)), check_edit)
 
     def _commit_header_input(self, input_widget: Input) -> None:
         value = input_widget.value.strip()
@@ -230,18 +233,13 @@ class ReceiptItemsScreen(Screen[None]):
 
         self._show_edit_status("Transaction override updated")
 
-    def _commit_cell_edit(self, raw_value: str) -> None:
-        cell_edit = self._active_cell_edit
-        if cell_edit is None:
-            return
-
+    def _commit_cell_edit(self, coordinate: Coordinate, raw_value: str) -> None:
         receipt = self._transaction.receipt
         if receipt is None:
-            self._hide_cell_editor()
             return
 
-        item = receipt.items[cell_edit.row_index]
-        column = RECEIPT_ITEM_COLUMNS[cell_edit.column_index]
+        item = receipt.items[coordinate.row]
+        column = RECEIPT_ITEM_COLUMNS[coordinate.column]
         try:
             parsed_value = column.parser(raw_value.strip())
             if column.direct_edit:
@@ -254,12 +252,10 @@ class ReceiptItemsScreen(Screen[None]):
 
         table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
         table.update_cell_at(
-            Coordinate(cell_edit.row_index, cell_edit.column_index),
+            coordinate,
             column.formatter(item),
             update_width=True,
         )
-        table.focus()
-        self._hide_cell_editor()
         self._show_edit_status(f"{column.label} updated")
 
     def _set_transaction_override(self, field_name: str, value: object | None) -> None:
@@ -278,13 +274,6 @@ class ReceiptItemsScreen(Screen[None]):
         update = overrides.model_dump()
         update[field_name] = value
         item.user_overrides = ReceiptItemUserOverrides.model_validate(update)
-
-    def _hide_cell_editor(self) -> None:
-        editor = self.query_one("#receipt-cell-editor")
-        editor.add_class("hidden")
-        self._active_cell_edit = None
-        table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
-        table.focus()
 
     def _show_edit_status(self, message: str) -> None:
         status = self.query_one("#receipt-edit-status", Static)
@@ -348,18 +337,21 @@ class ReceiptsAIApp(App[None]):
         padding: 0 1;
     }
 
-    #receipt-cell-editor {
-        dock: bottom;
+    #cell-edit-dialog {
+        padding: 1 2;
+        width: 60;
         height: auto;
-        padding: 0 1;
+        border: thick $primary;
+        background: $surface;
     }
 
-    #receipt-cell-editor-label {
-        width: auto;
-        padding-right: 1;
+    #cell-edit-input {
+        margin: 1 0;
     }
 
-    #receipt-cell-editor-input {
+    #cell-edit-help {
+        color: $text-muted;
+        text-align: center;
         width: 1fr;
     }
 
@@ -584,3 +576,4 @@ def _parse_optional_line_type(value: str) -> LineType | None:
 
 def main() -> None:
     ReceiptsAIApp().run()
+
