@@ -20,6 +20,7 @@ from receipts_ai.ingest_receipts import (
 LOGGER = logging.getLogger(__name__)
 RECORDS_SHEET_TITLE = "records"
 BUDGET_SHEET_TITLE = "budget"
+STUFF_SHEET_TITLE = "stuff"
 DEFAULT_GOOGLE_SHEET_TITLE = "Sheet1"
 
 
@@ -210,11 +211,15 @@ def _write_export_spreadsheet(
         cols=len(TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES),
     )
     budget = _reset_worksheet(spreadsheet, BUDGET_SHEET_TITLE, rows=1000, cols=26)
+    stuff = _reset_worksheet(spreadsheet, STUFF_SHEET_TITLE, rows=1000, cols=26)
     values = _sheet_values(rows)
     records.update(values, range_name="A1", value_input_option="USER_ENTERED")
     records.freeze(rows=1)
     _add_budget_pivot_table(
         spreadsheet, records_sheet=records, budget_sheet=budget, row_count=len(values)
+    )
+    _add_stuff_pivot_table(
+        spreadsheet, records_sheet=records, stuff_sheet=stuff, row_count=len(values)
     )
     _delete_default_google_sheet(spreadsheet)
 
@@ -306,6 +311,79 @@ def _add_budget_pivot_table(
                                                     "sourceColumnOffset": amount_column,
                                                     "summarizeFunction": "SUM",
                                                     "name": "Sum of category_allocation.amount",
+                                                }
+                                            ],
+                                            "valueLayout": "HORIZONTAL",
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        "fields": "pivotTable",
+                    }
+                }
+            ]
+        }
+    )
+
+
+def _add_stuff_pivot_table(
+    spreadsheet: Any,
+    *,
+    records_sheet: Any,
+    stuff_sheet: Any,
+    row_count: int,
+) -> None:
+    row_columns = [
+        TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES.index(fieldname)
+        for fieldname in (
+            "item_taxonomy_1",
+            "item_taxonomy_2",
+            "item_taxonomy_3",
+            "item_taxonomy_4",
+            "item_taxonomy_5",
+            "item_taxonomy_6",
+            "combined_description",
+        )
+    ]
+    amount_column = TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES.index("item_net_amount")
+    spreadsheet.batch_update(
+        {
+            "requests": [
+                {
+                    "updateCells": {
+                        "start": {
+                            "sheetId": stuff_sheet.id,
+                            "rowIndex": 0,
+                            "columnIndex": 0,
+                        },
+                        "rows": [
+                            {
+                                "values": [
+                                    {
+                                        "pivotTable": {
+                                            "source": {
+                                                "sheetId": records_sheet.id,
+                                                "startRowIndex": 0,
+                                                "startColumnIndex": 0,
+                                                "endRowIndex": row_count,
+                                                "endColumnIndex": len(
+                                                    TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES
+                                                ),
+                                            },
+                                            "rows": [
+                                                {
+                                                    "sourceColumnOffset": column,
+                                                    "showTotals": True,
+                                                    "sortOrder": "ASCENDING",
+                                                }
+                                                for column in row_columns
+                                            ],
+                                            "values": [
+                                                {
+                                                    "sourceColumnOffset": amount_column,
+                                                    "summarizeFunction": "SUM",
+                                                    "name": "Sum of item_net_amount",
                                                 }
                                             ],
                                             "valueLayout": "HORIZONTAL",

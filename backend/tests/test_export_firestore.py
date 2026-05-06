@@ -414,6 +414,12 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
                     amount="7.00",
                     net_amount="6.50",
                     category_id="Food & Dining > Coffee Shops",
+                    taxonomy1="Food & Dining",
+                    taxonomy2="Coffee Shops",
+                    taxonomy3="Prepared Drinks",
+                    taxonomy4="Coffee",
+                    taxonomy5="Hot Drinks",
+                    taxonomy6="Latte",
                 ),
                 ReceiptItem(
                     description="Bagel",
@@ -672,28 +678,43 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
     spreadsheet = gspread_client.spreadsheet
     records = spreadsheet.worksheet("records")
     budget = spreadsheet.worksheet("budget")
+    stuff = spreadsheet.worksheet("stuff")
     assert spreadsheet.deleted_worksheet_titles == ["Sheet1"]
     assert "Sheet1" not in spreadsheet.worksheets_by_title
     header = records.values[0]
     category_column = header.index("category_allocation.category_id")
     description_column = header.index("combined_description")
     amount_column = header.index("category_allocation.amount")
+    item_net_amount_column = header.index("item_net_amount")
+    stuff_row_columns = [
+        header.index(fieldname)
+        for fieldname in (
+            "item_taxonomy_1",
+            "item_taxonomy_2",
+            "item_taxonomy_3",
+            "item_taxonomy_4",
+            "item_taxonomy_5",
+            "item_taxonomy_6",
+            "combined_description",
+        )
+    ]
     assert records.values[1][description_column] == "Coffee"
     assert records.values[1][category_column] == "Food & Dining > Coffee Shops"
     assert records.values[1][amount_column] == "-6.50"
+    assert records.values[1][item_net_amount_column] == "6.50"
     assert records.values[2][description_column] == "Bagel"
     assert records.freeze_calls == [{"rows": 1, "cols": None}]
 
-    pivot = spreadsheet.batch_update_calls[0]["requests"][0]["updateCells"]["rows"][0]["values"][0][
-        "pivotTable"
-    ]
-    assert pivot["source"]["sheetId"] == records.id
-    assert pivot["source"]["endRowIndex"] == 3
-    assert [row["sourceColumnOffset"] for row in pivot["rows"]] == [
+    budget_pivot = spreadsheet.batch_update_calls[0]["requests"][0]["updateCells"]["rows"][0][
+        "values"
+    ][0]["pivotTable"]
+    assert budget_pivot["source"]["sheetId"] == records.id
+    assert budget_pivot["source"]["endRowIndex"] == 3
+    assert [row["sourceColumnOffset"] for row in budget_pivot["rows"]] == [
         category_column,
         description_column,
     ]
-    assert pivot["values"] == [
+    assert budget_pivot["values"] == [
         {
             "sourceColumnOffset": amount_column,
             "summarizeFunction": "SUM",
@@ -702,6 +723,25 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
     ]
     assert spreadsheet.batch_update_calls[0]["requests"][0]["updateCells"]["start"] == {
         "sheetId": budget.id,
+        "rowIndex": 0,
+        "columnIndex": 0,
+    }
+
+    stuff_pivot = spreadsheet.batch_update_calls[1]["requests"][0]["updateCells"]["rows"][0][
+        "values"
+    ][0]["pivotTable"]
+    assert stuff_pivot["source"]["sheetId"] == records.id
+    assert stuff_pivot["source"]["endRowIndex"] == 3
+    assert [row["sourceColumnOffset"] for row in stuff_pivot["rows"]] == stuff_row_columns
+    assert stuff_pivot["values"] == [
+        {
+            "sourceColumnOffset": item_net_amount_column,
+            "summarizeFunction": "SUM",
+            "name": "Sum of item_net_amount",
+        }
+    ]
+    assert spreadsheet.batch_update_calls[1]["requests"][0]["updateCells"]["start"] == {
+        "sheetId": stuff.id,
         "rowIndex": 0,
         "columnIndex": 0,
     }
