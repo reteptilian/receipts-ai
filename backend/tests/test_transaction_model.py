@@ -20,6 +20,11 @@ def test_transaction_accepts_json_aliases():
             "amount": "-42.19",
             "currency": "USD",
             "linkedTransactionIds": ["receipt_1"],
+            "transactionGroupId": "rtx_1",
+            "groupRole": "primary",
+            "matchStatus": "confirmed",
+            "matchSource": "user",
+            "matchConfidence": 1.0,
         }
     )
 
@@ -34,6 +39,11 @@ def test_transaction_accepts_json_aliases():
     )
     assert transaction.linked_transaction_ids is not None
     assert transaction.linked_transaction_ids[0] == "receipt_1"
+    assert transaction.transaction_group_id == "rtx_1"
+    assert transaction.group_role == "primary"
+    assert transaction.match_status == "confirmed"
+    assert transaction.match_source == "user"
+    assert transaction.match_confidence == 1.0
 
 
 def test_transaction_accepts_python_field_names():
@@ -53,6 +63,30 @@ def test_transaction_accepts_python_field_names():
     assert transaction.transaction_date.isoformat() == "2026-04-27"
     assert transaction.receipt_data_extraction_service == "gemini-3-flash-lite"
     assert transaction.receipt_image_extraction_results == '{"gemini":{"status":"ok"}}'
+    assert transaction.match_status == "unmatched"
+
+
+def test_transaction_accepts_match_metadata_python_field_names():
+    transaction = Transaction.model_validate(
+        {
+            "id": "receipt_1",
+            "source": "receipt",
+            "transaction_date": "2026-04-27",
+            "amount": "42.19",
+            "currency": "USD",
+            "transaction_group_id": "rtx_1",
+            "group_role": "supporting",
+            "match_status": "candidate",
+            "match_source": "model",
+            "match_confidence": 0.78,
+        }
+    )
+
+    assert transaction.transaction_group_id == "rtx_1"
+    assert transaction.group_role == "supporting"
+    assert transaction.match_status == "candidate"
+    assert transaction.match_source == "model"
+    assert transaction.match_confidence == 0.78
 
 
 def test_transaction_payee_is_optional():
