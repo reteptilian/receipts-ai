@@ -7,7 +7,11 @@ from decimal import Decimal, InvalidOperation
 from typing import cast
 
 from pydantic import ValidationError
-from receipts_ai.firestore_transactions import transactions_from_firestore
+from receipts_ai.firestore_transactions import (
+    set_receipt_item_user_overrides,
+    set_transaction_user_overrides,
+    transactions_from_firestore,
+)
 from receipts_ai.models.transaction import (
     LineType,
     ReceiptItem,
@@ -15,6 +19,7 @@ from receipts_ai.models.transaction import (
     Transaction,
     TransactionUserOverrides,
 )
+from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.containers import Center, Horizontal, Vertical
 from textual.coordinate import Coordinate
@@ -41,8 +46,7 @@ RECEIPT_ITEM_COLUMNS = (
         "Description",
         "description",
         lambda value: _parse_required_text(value, "Description"),
-        lambda item: item.description,
-        direct_edit=True,
+        lambda item: cast(str, _effective_receipt_item_value(item, "description")),
     ),
     ReceiptItemColumn(
         "Quantity",
@@ -231,7 +235,12 @@ class ReceiptItemsScreen(Screen[None]):
             self._show_edit_error(str(exc))
             return
 
-        self._show_edit_status("Transaction override updated")
+        self._show_edit_status("Saving transaction override...")
+        self.run_worker(
+            self._persist_transaction_overrides,
+            thread=True,
+            name=f"persist-tx-{self._transaction.id}",
+        )
 
     def _commit_cell_edit(self, coordinate: Coordinate, raw_value: str) -> None:
         receipt = self._transaction.receipt
@@ -242,10 +251,7 @@ class ReceiptItemsScreen(Screen[None]):
         column = RECEIPT_ITEM_COLUMNS[coordinate.column]
         try:
             parsed_value = column.parser(raw_value.strip())
-            if column.direct_edit:
-                setattr(item, column.field_name, parsed_value)
-            else:
-                self._set_receipt_item_override(item, column.field_name, parsed_value)
+            self._set_receipt_item_override(item, column.field_name, parsed_value)
         except (ValueError, ValidationError) as exc:
             self._show_edit_error(str(exc))
             return
@@ -256,7 +262,33 @@ class ReceiptItemsScreen(Screen[None]):
             column.formatter(item),
             update_width=True,
         )
-        self._show_edit_status(f"{column.label} updated")
+        self._show_edit_status(f"Saving {column.label}...")
+        self.run_worker(
+            lambda: self._persist_receipt_item_overrides(item, coordinate.row),
+            thread=True,
+            name=f"persist-item-{item.id or coordinate.row}",
+        )
+
+    def _persist_transaction_overrides(self) -> None:
+        try:
+            set_transaction_user_overrides(
+                self._transaction.id, cast(TransactionUserOverrides, self._transaction.user_overrides)
+            )
+            self.app.call_from_thread(self._show_edit_status, "Transaction override persisted")
+        except Exception as exc:
+            self.app.call_from_thread(self._show_edit_error, f"Failed to persist: {exc}")
+
+    def _persist_receipt_item_overrides(self, item: ReceiptItem, index: int) -> None:
+        try:
+            set_receipt_item_user_overrides(
+                self._transaction.id,
+                cast(ReceiptItemUserOverrides, item.user_overrides),
+                receipt_item_id=item.id,
+                item_index=None if item.id else index,
+            )
+            self.app.call_from_thread(self._show_edit_status, "Item override persisted")
+        except Exception as exc:
+            self.app.call_from_thread(self._show_edit_error, f"Failed to persist item: {exc}")
 
     def _set_transaction_override(self, field_name: str, value: object | None) -> None:
         overrides = self._transaction.user_overrides or TransactionUserOverrides()
@@ -278,12 +310,12 @@ class ReceiptItemsScreen(Screen[None]):
     def _show_edit_status(self, message: str) -> None:
         status = self.query_one("#receipt-edit-status", Static)
         status.remove_class("error")
-        status.update(message)
+        status.update(escape(message))
 
     def _show_edit_error(self, message: str) -> None:
         status = self.query_one("#receipt-edit-status", Static)
         status.add_class("error")
-        status.update(message)
+        status.update(escape(message))
 
 
 class ReceiptsAIApp(App[None]):

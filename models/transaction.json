@@ -409,6 +409,17 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the line item description."
+        },
         "quantity": {
           "anyOf": [
             {

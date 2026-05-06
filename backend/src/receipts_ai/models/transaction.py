@@ -212,6 +212,9 @@ class ReceiptItemUserOverrides(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
+    description: Annotated[
+        str | None, Field(description="User-provided correction for the line item description.")
+    ] = None
     quantity: Quantity | None = None
     unit_price: Annotated[DecimalString | None, Field(alias="unitPrice")] = None
     amount: Annotated[

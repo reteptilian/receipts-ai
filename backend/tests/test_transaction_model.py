@@ -152,6 +152,23 @@ def test_transaction_rejects_invalid_currency():
         )
 
 
+def test_receipt_item_user_overrides_description():
+    item = ReceiptItem.model_validate(
+        {
+            "description": "Original",
+            "amount": "1.00",
+            "netAmount": "1.00",
+            "userOverrides": {
+                "description": "Overridden"
+            }
+        }
+    )
+
+    assert item.description == "Original"
+    assert item.user_overrides is not None
+    assert item.user_overrides.description == "Overridden"
+
+
 def test_transaction_rejects_invalid_mcc():
     with pytest.raises(ValidationError):
         Transaction.model_validate(
