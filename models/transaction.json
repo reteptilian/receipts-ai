@@ -255,6 +255,10 @@
           ],
           "description": "User-provided correction for the transaction description."
         },
+        "transactionDate": {
+          "$ref": "#/$defs/isoDate",
+          "description": "User-provided correction for the transaction date."
+        },
         "amount": {
           "$ref": "#/$defs/decimalString",
           "description": "User-provided correction for the signed transaction amount."

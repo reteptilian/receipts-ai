@@ -27,7 +27,6 @@ from receipts_ai.models.transaction import (
     ReceiptItemUserOverrides,
     Source,
     Transaction,
-    TransactionUserOverrides,
 )
 from receipts_ai.models.transaction import (
     ReceiptItem as GeneratedReceiptItem,
@@ -177,10 +176,11 @@ def test_sets_transaction_user_overrides_in_firestore():
 
     set_transaction_user_overrides(
         "statement_1",
-        TransactionUserOverrides(
-            description="Costco",
-            category_allocations=[],
-        ),
+        {
+            "description": "Costco",
+            "transactionDate": "2026-04-28",
+            "categoryAllocations": [],
+        },
         client=client,
         collection="test-transactions",
         updated_at=updated_at,
@@ -193,6 +193,7 @@ def test_sets_transaction_user_overrides_in_firestore():
             {
                 "userOverrides": {
                     "description": "Costco",
+                    "transactionDate": "2026-04-28",
                     "categoryAllocations": [],
                 },
                 "updatedAt": "2026-05-06T07:08:09Z",

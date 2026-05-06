@@ -169,6 +169,13 @@ class TransactionUserOverrides(BaseModel):
     description: Annotated[
         str | None, Field(description="User-provided correction for the transaction description.")
     ] = None
+    transaction_date: Annotated[
+        date | None,
+        Field(
+            alias="transactionDate",
+            description="User-provided correction for the transaction date.",
+        ),
+    ] = None
     amount: Annotated[
         str | None,
         Field(
