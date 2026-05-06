@@ -162,8 +162,19 @@ class TransactionUserOverrides(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
+    payee: Annotated[
+        NonEmptyString | None,
+        Field(description="User-provided correction for the transaction payee."),
+    ] = None
     description: Annotated[
         str | None, Field(description="User-provided correction for the transaction description.")
+    ] = None
+    amount: Annotated[
+        str | None,
+        Field(
+            description="User-provided correction for the signed transaction amount.",
+            pattern="^-?(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+        ),
     ] = None
     category_allocations: Annotated[
         list[UserCategoryAllocation] | None,

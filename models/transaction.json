@@ -233,6 +233,17 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "payee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the transaction payee."
+        },
         "description": {
           "anyOf": [
             {
@@ -243,6 +254,10 @@
             }
           ],
           "description": "User-provided correction for the transaction description."
+        },
+        "amount": {
+          "$ref": "#/$defs/decimalString",
+          "description": "User-provided correction for the signed transaction amount."
         },
         "categoryAllocations": {
           "type": "array",

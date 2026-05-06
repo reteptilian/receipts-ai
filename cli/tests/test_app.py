@@ -3,9 +3,9 @@ from typing import cast
 
 import pytest
 from receipts_ai.models.transaction import Receipt, ReceiptItem, Source, Transaction
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 
-from receipts_ai_cli.app import ReceiptsAIApp
+from receipts_ai_cli.app import ReceiptItemsScreen, ReceiptsAIApp
 
 
 def _transaction(
@@ -77,7 +77,7 @@ async def test_app_marks_transactions_with_receipt_items() -> None:
             ReceiptItem(
                 description="Latte",
                 amount="7.5",
-                netAmount="7.5",
+                net_amount="7.5",
             )
         ]
     )
@@ -90,6 +90,86 @@ async def test_app_marks_transactions_with_receipt_items() -> None:
         row = table.get_row_at(0)
 
     assert row[4] == "Y"
+
+
+@pytest.mark.anyio
+async def test_enter_on_transaction_with_receipt_items_opens_items_screen() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.receipt = Receipt(
+        items=[
+            ReceiptItem(
+                description="Latte",
+                quantity=2,
+                unit_price="3.75",
+                amount="7.5",
+                discount_amount="-1",
+                discount_description="Promo",
+                net_amount="6.5",
+                category_id="coffee",
+                taxonomy1="Food",
+                taxonomy2="Drink",
+                taxonomy9="Latte",
+            )
+        ]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        screen = app.screen
+        table = cast(DataTable[str], screen.query_one("#receipt-items", DataTable))
+        header_widget = screen.query_one("#receipt-header", Static)
+        header = str(header_widget.content)
+        row = table.get_row_at(0)
+
+    assert isinstance(screen, ReceiptItemsScreen)
+    assert header == "2026-05-06 | Payee receipt | -7.50 USD"
+    assert row == [
+        "Latte",
+        "2.0",
+        "3.75",
+        "7.5",
+        "-1",
+        "Promo",
+        "6.5",
+        "item",
+        "coffee",
+        "Food",
+        "Drink",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "Latte",
+    ]
+
+
+@pytest.mark.anyio
+async def test_enter_on_transaction_without_receipt_items_stays_on_transactions() -> None:
+    transaction = _transaction(
+        "no_receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+
+    assert table.row_count == 1
 
 
 @pytest.mark.anyio

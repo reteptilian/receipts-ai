@@ -18,6 +18,8 @@ __all__ = (  # noqa: F405
     "main",
     "receipt_from_document_intelligence_result",
     "search_product_taxonomy_embeddings",
+    "set_receipt_item_user_overrides",
+    "set_transaction_user_overrides",
     "stream_transactions_from_firestore",
     "transaction_combined_description",
     "transaction_from_openai_receipt",

@@ -13,6 +13,8 @@ import receipts_ai
 from receipts_ai import export_firestore_csv
 from receipts_ai.export_firestore_csv import export_firestore_receipt_items_csv
 from receipts_ai.firestore_transactions import (
+    set_receipt_item_user_overrides,
+    set_transaction_user_overrides,
     stream_transactions_from_firestore,
     transactions_from_firestore,
 )
@@ -22,8 +24,10 @@ from receipts_ai.models.transaction import (
     IngestionType,
     LineType,
     Receipt,
+    ReceiptItemUserOverrides,
     Source,
     Transaction,
+    TransactionUserOverrides,
 )
 from receipts_ai.models.transaction import (
     ReceiptItem as GeneratedReceiptItem,
@@ -70,9 +74,26 @@ class FakeDocumentSnapshot:
         return self._document
 
 
+class FakeDocumentReference:
+    def __init__(self, collection: FakeCollection, document_id: str) -> None:
+        self.collection = collection
+        self.document_id = document_id
+
+    def get(self) -> FakeDocumentSnapshot:
+        return FakeDocumentSnapshot(self.document_id, self.collection.documents[self.document_id])
+
+    def set(self, document_data: dict[str, Any], *, merge: bool = False) -> None:
+        self.collection.set_calls.append((self.document_id, document_data, merge))
+
+
 class FakeCollection:
     def __init__(self, snapshots: list[FakeDocumentSnapshot]) -> None:
         self.snapshots = snapshots
+        self.documents = {snapshot.id: snapshot.to_dict() for snapshot in snapshots}
+        self.set_calls: list[tuple[str, dict[str, Any], bool]] = []
+
+    def document(self, document_id: str) -> FakeDocumentReference:
+        return FakeDocumentReference(self, document_id)
 
     def stream(self) -> list[FakeDocumentSnapshot]:
         return self.snapshots
@@ -82,10 +103,13 @@ class FakeFirestoreClient:
     def __init__(self, snapshots: list[FakeDocumentSnapshot]) -> None:
         self.snapshots = snapshots
         self.collections: list[str] = []
+        self.collection_references: dict[str, FakeCollection] = {}
 
     def collection(self, collection_path: str) -> FakeCollection:
         self.collections.append(collection_path)
-        return FakeCollection(self.snapshots)
+        if collection_path not in self.collection_references:
+            self.collection_references[collection_path] = FakeCollection(self.snapshots)
+        return self.collection_references[collection_path]
 
 
 def test_streams_transactions_from_firestore_documents():
@@ -145,6 +169,134 @@ def test_downloads_all_transactions_from_firestore_documents():
     assert client.collections == ["test-transactions"]
     assert transactions == [first, second]
     assert receipts_ai.transactions_from_firestore is transactions_from_firestore
+
+
+def test_sets_transaction_user_overrides_in_firestore():
+    updated_at = datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC)
+    client = FakeFirestoreClient([])
+
+    set_transaction_user_overrides(
+        "statement_1",
+        TransactionUserOverrides(
+            description="Costco",
+            category_allocations=[],
+        ),
+        client=client,
+        collection="test-transactions",
+        updated_at=updated_at,
+    )
+
+    collection = client.collection_references["test-transactions"]
+    assert collection.set_calls == [
+        (
+            "statement_1",
+            {
+                "userOverrides": {
+                    "description": "Costco",
+                    "categoryAllocations": [],
+                },
+                "updatedAt": "2026-05-06T07:08:09Z",
+            },
+            True,
+        )
+    ]
+
+
+def test_sets_receipt_item_user_overrides_in_firestore_by_index():
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-10.00",
+        currency="USD",
+        receipt=Receipt(
+            total="10.00",
+            items=[
+                ReceiptItem(id="coffee", description="Coffee", amount="7.00"),
+                ReceiptItem(id="bagel", description="Bagel", amount="3.00"),
+            ],
+        ),
+    )
+    client = FakeFirestoreClient(
+        [FakeDocumentSnapshot("receipt_1", transaction_firestore_document(transaction))]
+    )
+
+    set_receipt_item_user_overrides(
+        "receipt_1",
+        ReceiptItemUserOverrides(
+            amount="4.00",
+            net_amount="4.00",
+            category_id="Food & Dining > Bakeries",
+        ),
+        item_index=1,
+        client=client,
+        collection="test-transactions",
+        updated_at=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
+    )
+
+    collection = client.collection_references["test-transactions"]
+    assert collection.set_calls == [
+        (
+            "receipt_1",
+            {
+                "receipt": {
+                    "items": [
+                        {
+                            "id": "coffee",
+                            "description": "Coffee",
+                            "amount": "7.00",
+                            "netAmount": "7.00",
+                            "lineType": "item",
+                        },
+                        {
+                            "id": "bagel",
+                            "description": "Bagel",
+                            "amount": "3.00",
+                            "netAmount": "3.00",
+                            "lineType": "item",
+                            "userOverrides": {
+                                "amount": "4.00",
+                                "netAmount": "4.00",
+                                "categoryId": "Food & Dining > Bakeries",
+                            },
+                        },
+                    ]
+                },
+                "updatedAt": "2026-05-06T07:08:09Z",
+            },
+            True,
+        )
+    ]
+
+
+def test_sets_receipt_item_user_overrides_in_firestore_by_item_id():
+    transaction = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(id="coffee", description="Coffee", amount="7.00")]),
+    )
+    client = FakeFirestoreClient(
+        [FakeDocumentSnapshot("receipt_1", transaction_firestore_document(transaction))]
+    )
+
+    set_receipt_item_user_overrides(
+        "receipt_1",
+        {"categoryId": "Food & Dining > Coffee Shops"},
+        receipt_item_id="coffee",
+        client=client,
+        collection="test-transactions",
+        updated_at=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
+    )
+
+    collection = client.collection_references["test-transactions"]
+    assert collection.set_calls[0][1]["receipt"]["items"][0]["userOverrides"] == {
+        "categoryId": "Food & Dining > Coffee Shops"
+    }
 
 
 def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path: Path):
