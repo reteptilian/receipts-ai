@@ -111,6 +111,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "transaction_currency": "",
             "ingestion_datetime": "",
             "ingestion_filename": "",
+            "ingestion_file_url": "",
             "ingestion_file_sha256_hex": "",
             "ingestion_type": "",
             "receipt_id": "",
@@ -154,6 +155,7 @@ def test_writes_one_csv_row_per_receipt_item():
             "transaction_currency": "",
             "ingestion_datetime": "",
             "ingestion_filename": "",
+            "ingestion_file_url": "",
             "ingestion_file_sha256_hex": "",
             "ingestion_type": "",
             "receipt_id": "",
@@ -196,6 +198,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
         source=Source.receipt,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
+        ingestion_file_url="file:///tmp/receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
@@ -229,6 +232,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     assert rows[0]["transaction_currency"] == "USD"
     assert rows[0]["ingestion_datetime"] == "2026-05-06T07:08:09+00:00"
     assert rows[0]["ingestion_filename"] == "receipt.pdf"
+    assert rows[0]["ingestion_file_url"] == "file:///tmp/receipt.pdf"
     assert rows[0]["ingestion_file_sha256_hex"] == "0" * 64
     assert rows[0]["ingestion_type"] == "receipt_img"
     assert rows[0]["item_description"] == "Coffee"
@@ -261,6 +265,7 @@ def test_transaction_json_output_wraps_nested_receipt_struct():
         source=Source.receipt,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
+        ingestion_file_url="file:///tmp/receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
@@ -319,6 +324,7 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
         source=Source.receipt,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
+        ingestion_file_url="file:///tmp/receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
@@ -337,6 +343,7 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
     assert document["source"] == "receipt"
     assert document["ingestionDatetime"] == "2026-05-06T07:08:09Z"
     assert document["ingestionFilename"] == "receipt.pdf"
+    assert document["ingestionFileUrl"] == "file:///tmp/receipt.pdf"
     assert document["ingestionFileSha256Hex"] == "0" * 64
     assert document["ingestionType"] == "receipt_img"
     assert document["receipt"] == {

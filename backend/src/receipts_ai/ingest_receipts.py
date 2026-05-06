@@ -52,6 +52,7 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_currency",
     "ingestion_datetime",
     "ingestion_filename",
+    "ingestion_file_url",
     "ingestion_file_sha256_hex",
     "ingestion_type",
     "receipt_id",
@@ -329,6 +330,7 @@ def _process_receipt(
         return populate_transaction_ingestion_metadata(
             transaction_from_document_intelligence_result(result),
             ingestion_filename=receipt_path.name,
+            ingestion_file_url=file_url_from_path(receipt_path),
             ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
             ingestion_type=IngestionType.receipt_img,
         )
@@ -337,6 +339,7 @@ def _process_receipt(
         return populate_transaction_ingestion_metadata(
             transaction_from_openai_receipt(receipt_path, model=openai_model, cache=cache),
             ingestion_filename=receipt_path.name,
+            ingestion_file_url=file_url_from_path(receipt_path),
             ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
             ingestion_type=IngestionType.receipt_img,
         )
@@ -394,13 +397,19 @@ def populate_transaction_ingestion_metadata(
     ingestion_filename: str,
     ingestion_file_sha256_hex: str,
     ingestion_type: IngestionType,
+    ingestion_file_url: str | None = None,
     ingestion_datetime: datetime | None = None,
 ) -> Transaction:
     transaction.ingestion_datetime = ingestion_datetime or datetime.now(UTC)
     transaction.ingestion_filename = ingestion_filename
+    transaction.ingestion_file_url = ingestion_file_url
     transaction.ingestion_file_sha256_hex = ingestion_file_sha256_hex
     transaction.ingestion_type = ingestion_type
     return transaction
+
+
+def file_url_from_path(path: Path) -> str:
+    return path.resolve().as_uri()
 
 
 def sha256_hex(content: bytes) -> str:
@@ -467,6 +476,7 @@ def _transaction_receipt_item_rows(
         if transaction.ingestion_datetime is not None
         else None,
         "ingestion_filename": transaction.ingestion_filename,
+        "ingestion_file_url": transaction.ingestion_file_url,
         "ingestion_file_sha256_hex": transaction.ingestion_file_sha256_hex,
         "ingestion_type": transaction.ingestion_type.value
         if transaction.ingestion_type is not None
@@ -486,6 +496,7 @@ def _transaction_receipt_item_rows(
             if transaction.ingestion_datetime is not None
             else None,
             ingestion_filename=transaction.ingestion_filename,
+            ingestion_file_url=transaction.ingestion_file_url,
             ingestion_file_sha256_hex=transaction.ingestion_file_sha256_hex,
             ingestion_type=transaction.ingestion_type.value
             if transaction.ingestion_type is not None
@@ -517,6 +528,7 @@ def _receipt_item_rows(
     transaction_currency: str | None = None,
     ingestion_datetime: str | None = None,
     ingestion_filename: str | None = None,
+    ingestion_file_url: str | None = None,
     ingestion_file_sha256_hex: str | None = None,
     ingestion_type: str | None = None,
     include_brave_search_result: bool = True,
@@ -536,6 +548,7 @@ def _receipt_item_rows(
             "transaction_currency": transaction_currency,
             "ingestion_datetime": ingestion_datetime,
             "ingestion_filename": ingestion_filename,
+            "ingestion_file_url": ingestion_file_url,
             "ingestion_file_sha256_hex": ingestion_file_sha256_hex,
             "ingestion_type": ingestion_type,
             "receipt_id": receipt.id,

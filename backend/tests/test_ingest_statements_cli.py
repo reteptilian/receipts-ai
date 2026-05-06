@@ -226,6 +226,7 @@ def test_parses_sgml_qfx_credit_card_transactions(tmp_path: Path):
     assert charge.ingestion_datetime is not None
     assert charge.ingestion_datetime.date() == date.today()
     assert charge.ingestion_filename == "credit-card.qfx"
+    assert charge.ingestion_file_url == statement_path.resolve().as_uri()
     assert charge.ingestion_file_sha256_hex == hashlib.sha256(
         statement_path.read_bytes()
     ).hexdigest()
@@ -361,6 +362,7 @@ def test_writes_transaction_csv_rows():
         source=Source.bank_statement,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="checking.ofx",
+        ingestion_file_url="file:///tmp/checking.ofx",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.ofx,
         external_id="fitid-1",
@@ -387,6 +389,7 @@ def test_writes_transaction_csv_rows():
             "source": "bank_statement",
             "ingestion_datetime": "2026-05-06T07:08:09+00:00",
             "ingestion_filename": "checking.ofx",
+            "ingestion_file_url": "file:///tmp/checking.ofx",
             "ingestion_file_sha256_hex": "0" * 64,
             "ingestion_type": "ofx",
             "external_id": "fitid-1",

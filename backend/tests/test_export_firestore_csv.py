@@ -94,6 +94,7 @@ def test_streams_transactions_from_firestore_documents():
         source=Source.receipt,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
+        ingestion_file_url="file:///tmp/receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
@@ -152,6 +153,7 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
         source=Source.receipt,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
+        ingestion_file_url="file:///tmp/receipt.pdf",
         ingestion_file_sha256_hex="0" * 64,
         ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
@@ -220,6 +222,11 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
         "",
     ]
     assert [row["ingestion_filename"] for row in rows] == ["receipt.pdf", "receipt.pdf", ""]
+    assert [row["ingestion_file_url"] for row in rows] == [
+        "file:///tmp/receipt.pdf",
+        "file:///tmp/receipt.pdf",
+        "",
+    ]
     assert [row["ingestion_file_sha256_hex"] for row in rows] == [
         "0" * 64,
         "0" * 64,

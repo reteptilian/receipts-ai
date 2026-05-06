@@ -470,6 +470,14 @@ class Transaction(BaseModel):
             min_length=1,
         ),
     ] = None
+    ingestion_file_url: Annotated[
+        str | None,
+        Field(
+            alias="ingestionFileUrl",
+            description="URL for the source file used to ingest this transaction.",
+            min_length=1,
+        ),
+    ] = None
     ingestion_file_sha256_hex: Annotated[
         str | None,
         Field(

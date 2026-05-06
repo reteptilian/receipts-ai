@@ -29,6 +29,7 @@ from receipts_ai.categorization import (
 )
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.ingest_receipts import (
+    file_url_from_path,
     populate_transaction_ingestion_metadata,
     sha256_hex,
     upsert_transaction_to_firestore,
@@ -183,6 +184,7 @@ def transactions_from_amazon_export_zip(
         content,
         source=f"{export_path}:{member_name}",
         ingestion_filename=member_name,
+        ingestion_file_url=file_url_from_path(export_path),
         ingestion_file_sha256_hex=sha256_hex(export_bytes),
     )
 
@@ -193,6 +195,7 @@ def transactions_from_amazon_orders_csv_file(orders_csv_path: Path) -> list[Tran
         content.decode("utf-8-sig"),
         source=str(orders_csv_path),
         ingestion_filename=orders_csv_path.name,
+        ingestion_file_url=file_url_from_path(orders_csv_path),
         ingestion_file_sha256_hex=sha256_hex(content),
     )
 
@@ -202,6 +205,7 @@ def transactions_from_amazon_orders_csv(
     *,
     source: str | None = None,
     ingestion_filename: str | None = None,
+    ingestion_file_url: str | None = None,
     ingestion_file_sha256_hex: str | None = None,
 ) -> list[Transaction]:
     reader = csv.DictReader(content.splitlines())
@@ -221,6 +225,7 @@ def transactions_from_amazon_orders_csv(
         populate_transaction_ingestion_metadata(
             transaction,
             ingestion_filename=ingestion_filename or _source_filename(source) or DEFAULT_ORDERS_CSV_NAME,
+            ingestion_file_url=ingestion_file_url,
             ingestion_file_sha256_hex=ingestion_file_sha256_hex
             or sha256_hex(content.encode("utf-8")),
             ingestion_type=IngestionType.amazon,

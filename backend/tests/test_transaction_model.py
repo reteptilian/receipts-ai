@@ -10,6 +10,7 @@ def test_transaction_accepts_json_aliases():
         {
             "id": "txn_1",
             "source": "bank_statement",
+            "ingestionFileUrl": "file:///tmp/statement.ofx",
             "transactionDate": "2026-04-27",
             "payee": "Costco",
             "mcc": "5411",
@@ -29,6 +30,7 @@ def test_transaction_accepts_json_aliases():
     )
 
     assert transaction.transaction_date.isoformat() == "2026-04-27"
+    assert transaction.ingestion_file_url == "file:///tmp/statement.ofx"
     assert transaction.mcc == "5411"
     assert transaction.mcc_description == "Grocery Stores, Supermarkets"
     assert transaction.brave_search_result == "Costco Wholesale - search result"
@@ -51,6 +53,7 @@ def test_transaction_accepts_python_field_names():
         {
             "id": "txn_1",
             "source": "manual",
+            "ingestion_file_url": "file:///tmp/manual.json",
             "transaction_date": "2026-04-27",
             "payee": "Manual Adjustment",
             "receipt_data_extraction_service": "gemini-3-flash-lite",
@@ -61,6 +64,7 @@ def test_transaction_accepts_python_field_names():
     )
 
     assert transaction.transaction_date.isoformat() == "2026-04-27"
+    assert transaction.ingestion_file_url == "file:///tmp/manual.json"
     assert transaction.receipt_data_extraction_service == "gemini-3-flash-lite"
     assert transaction.receipt_image_extraction_results == '{"gemini":{"status":"ok"}}'
     assert transaction.match_status == "unmatched"

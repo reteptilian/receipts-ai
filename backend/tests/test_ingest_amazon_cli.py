@@ -35,6 +35,7 @@ def test_parses_amazon_orders_csv_as_itemized_transactions():
     assert transaction.ingestion_datetime is not None
     assert transaction.ingestion_datetime.date() == date.today()
     assert transaction.ingestion_filename == "Your Orders.csv"
+    assert transaction.ingestion_file_url is None
     assert transaction.ingestion_file_sha256_hex == hashlib.sha256(
         SAMPLE_ORDER_CSV.encode("utf-8")
     ).hexdigest()
@@ -115,6 +116,7 @@ def test_finds_order_history_csv_by_basename_inside_zip(tmp_path: Path):
 
     assert len(transactions) == 1
     assert transactions[0].ingestion_filename == "Your Amazon Orders/Order History.csv"
+    assert transactions[0].ingestion_file_url == export_path.resolve().as_uri()
     assert transactions[0].ingestion_file_sha256_hex == hashlib.sha256(
         export_path.read_bytes()
     ).hexdigest()
@@ -139,6 +141,7 @@ def test_requires_explicit_orders_csv_name_when_zip_has_multiple_matches(tmp_pat
 
     assert len(transactions) == 1
     assert transactions[0].ingestion_filename == "two/Order History.csv"
+    assert transactions[0].ingestion_file_url == export_path.resolve().as_uri()
     assert transactions[0].receipt is not None
     assert transactions[0].receipt.source_document_id == f"{export_path}:two/Order History.csv"
 
@@ -161,6 +164,7 @@ def test_main_writes_receipt_item_csv(
     ]
     assert rows[0]["combined_description"].startswith("Gaiam Yoga Block")
     assert rows[0]["ingestion_filename"] == "Order History.csv"
+    assert rows[0]["ingestion_file_url"] == csv_path.resolve().as_uri()
     assert rows[0]["ingestion_file_sha256_hex"] == hashlib.sha256(
         SAMPLE_ORDER_CSV.encode("utf-8")
     ).hexdigest()

@@ -28,6 +28,7 @@ from receipts_ai.categorization import (
 )
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.ingest_receipts import (
+    file_url_from_path,
     populate_transaction_ingestion_metadata,
     sha256_hex,
     upsert_transaction_to_firestore,
@@ -39,6 +40,7 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "source",
     "ingestion_datetime",
     "ingestion_filename",
+    "ingestion_file_url",
     "ingestion_file_sha256_hex",
     "ingestion_type",
     "external_id",
@@ -190,6 +192,7 @@ def transactions_from_ofx_file(statement_path: Path) -> list[Transaction]:
     return _populate_transactions_ingestion_metadata(
         transactions,
         ingestion_filename=statement_path.name,
+        ingestion_file_url=file_url_from_path(statement_path),
         ingestion_file_sha256_hex=sha256_hex(content),
         ingestion_type=IngestionType.ofx,
     )
@@ -203,6 +206,7 @@ def transactions_from_qfx_file(statement_path: Path) -> list[Transaction]:
     return _populate_transactions_ingestion_metadata(
         transactions,
         ingestion_filename=statement_path.name,
+        ingestion_file_url=file_url_from_path(statement_path),
         ingestion_file_sha256_hex=sha256_hex(content),
         ingestion_type=IngestionType.qfx,
     )
@@ -252,6 +256,7 @@ def transactions_from_fidelity_csv_file(statement_path: Path) -> list[Transactio
     return _populate_transactions_ingestion_metadata(
         transactions,
         ingestion_filename=statement_path.name,
+        ingestion_file_url=file_url_from_path(statement_path),
         ingestion_file_sha256_hex=sha256_hex(content),
         ingestion_type=IngestionType.fidelity_csv,
     )
@@ -354,6 +359,7 @@ def _transaction_rows(transactions: Iterable[Transaction]) -> list[dict[str, obj
                 if transaction.ingestion_datetime is not None
                 else None,
                 "ingestion_filename": transaction.ingestion_filename,
+                "ingestion_file_url": transaction.ingestion_file_url,
                 "ingestion_file_sha256_hex": transaction.ingestion_file_sha256_hex,
                 "ingestion_type": transaction.ingestion_type.value
                 if transaction.ingestion_type is not None
@@ -389,11 +395,13 @@ def _populate_transactions_ingestion_metadata(
     ingestion_filename: str,
     ingestion_file_sha256_hex: str,
     ingestion_type: IngestionType,
+    ingestion_file_url: str | None = None,
 ) -> list[Transaction]:
     for transaction in transactions:
         populate_transaction_ingestion_metadata(
             transaction,
             ingestion_filename=ingestion_filename,
+            ingestion_file_url=ingestion_file_url,
             ingestion_file_sha256_hex=ingestion_file_sha256_hex,
             ingestion_type=ingestion_type,
         )

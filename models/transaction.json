@@ -24,6 +24,10 @@
       "$ref": "#/$defs/nonEmptyString",
       "description": "Source filename or archive member name used to ingest this transaction."
     },
+    "ingestionFileUrl": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "URL for the source file used to ingest this transaction."
+    },
     "ingestionFileSha256Hex": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$",
