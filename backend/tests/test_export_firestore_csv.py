@@ -17,6 +17,7 @@ from receipts_ai.export_firestore_csv import (
 from receipts_ai.ingest_receipts import transaction_firestore_document
 from receipts_ai.models.transaction import (
     CategoryAllocation,
+    IngestionType,
     LineType,
     Receipt,
     Source,
@@ -89,6 +90,10 @@ def test_streams_transactions_from_firestore_documents():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
+        ingestion_date=date(2026, 5, 6),
+        ingestion_filename="receipt.pdf",
+        ingestion_file_sha256_hex="0" * 64,
+        ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
         payee="Coffee Shop",
         amount="-7.00",
@@ -111,6 +116,10 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
     first = Transaction(
         id="receipt_1",
         source=Source.receipt,
+        ingestion_date=date(2026, 5, 6),
+        ingestion_filename="receipt.pdf",
+        ingestion_file_sha256_hex="0" * 64,
+        ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
         payee="Coffee Shop",
         amount="-10.00",
@@ -171,6 +180,14 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
     assert "category_allocation.category_id" in rows[0]
     assert "category_allocation.amount" in rows[0]
     assert [row["transaction_id"] for row in rows] == ["receipt_1", "receipt_1", "receipt_2"]
+    assert [row["ingestion_date"] for row in rows] == ["2026-05-06", "2026-05-06", ""]
+    assert [row["ingestion_filename"] for row in rows] == ["receipt.pdf", "receipt.pdf", ""]
+    assert [row["ingestion_file_sha256_hex"] for row in rows] == [
+        "0" * 64,
+        "0" * 64,
+        "",
+    ]
+    assert [row["ingestion_type"] for row in rows] == ["receipt_img", "receipt_img", ""]
     assert [row["item_index"] for row in rows] == ["1", "2", "1"]
     assert [row["item_description"] for row in rows] == ["Coffee", "Bagel", "Saltines"]
     assert [row["transaction_description"] for row in rows] == ["", "", ""]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import sys
 from datetime import date
@@ -22,6 +23,7 @@ from receipts_ai.ingest_statements import (
 )
 from receipts_ai.models.transaction import (
     CategoryAllocation,
+    IngestionType,
     Kind,
     Source,
     Source1,
@@ -186,6 +188,12 @@ def test_parses_sgml_qfx_credit_card_transactions(tmp_path: Path):
     assert len(transactions) == 2
     charge = transactions[0]
     assert charge.source == Source.bank_statement
+    assert charge.ingestion_date == date.today()
+    assert charge.ingestion_filename == "credit-card.qfx"
+    assert charge.ingestion_file_sha256_hex == hashlib.sha256(
+        statement_path.read_bytes()
+    ).hexdigest()
+    assert charge.ingestion_type == "qfx"
     assert charge.external_id == "2026042701"
     assert charge.account_id == "5555444433331111"
     assert charge.transaction_date == date(2026, 4, 27)
@@ -315,6 +323,10 @@ def test_writes_transaction_csv_rows():
     transaction = Transaction(
         id="bank_statement_1",
         source=Source.bank_statement,
+        ingestion_date=date(2026, 5, 6),
+        ingestion_filename="checking.ofx",
+        ingestion_file_sha256_hex="0" * 64,
+        ingestion_type=IngestionType.ofx,
         external_id="fitid-1",
         account_id="acct-1",
         transaction_date=date(2026, 4, 27),
@@ -337,6 +349,10 @@ def test_writes_transaction_csv_rows():
         {
             "transaction_id": "bank_statement_1",
             "source": "bank_statement",
+            "ingestion_date": "2026-05-06",
+            "ingestion_filename": "checking.ofx",
+            "ingestion_file_sha256_hex": "0" * 64,
+            "ingestion_type": "ofx",
             "external_id": "fitid-1",
             "account_id": "acct-1",
             "transaction_date": "2026-04-27",

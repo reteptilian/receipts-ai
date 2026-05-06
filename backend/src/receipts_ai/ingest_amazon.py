@@ -29,11 +29,14 @@ from receipts_ai.categorization import (
 )
 from receipts_ai.ingest_receipts import (
     DEFAULT_FIRESTORE_COLLECTION,
+    populate_transaction_ingestion_metadata,
+    sha256_hex,
     upsert_transaction_to_firestore,
     write_transactions_json,
     write_transactions_receipt_items_csv,
 )
 from receipts_ai.models.transaction import (
+    IngestionType,
     Kind,
     LineType,
     Receipt,
@@ -171,6 +174,7 @@ def transactions_from_amazon_export(
 def transactions_from_amazon_export_zip(
     export_path: Path, *, orders_csv_name: str = DEFAULT_ORDERS_CSV_NAME
 ) -> list[Transaction]:
+    export_bytes = export_path.read_bytes()
     with zipfile.ZipFile(export_path) as archive:
         member_name = _orders_csv_member_name(archive.namelist(), orders_csv_name=orders_csv_name)
         with archive.open(member_name) as file:
@@ -178,18 +182,27 @@ def transactions_from_amazon_export_zip(
     return transactions_from_amazon_orders_csv(
         content,
         source=f"{export_path}:{member_name}",
+        ingestion_filename=member_name,
+        ingestion_file_sha256_hex=sha256_hex(export_bytes),
     )
 
 
 def transactions_from_amazon_orders_csv_file(orders_csv_path: Path) -> list[Transaction]:
+    content = orders_csv_path.read_bytes()
     return transactions_from_amazon_orders_csv(
-        orders_csv_path.read_text(encoding="utf-8-sig"),
+        content.decode("utf-8-sig"),
         source=str(orders_csv_path),
+        ingestion_filename=orders_csv_path.name,
+        ingestion_file_sha256_hex=sha256_hex(content),
     )
 
 
 def transactions_from_amazon_orders_csv(
-    content: str, *, source: str | None = None
+    content: str,
+    *,
+    source: str | None = None,
+    ingestion_filename: str | None = None,
+    ingestion_file_sha256_hex: str | None = None,
 ) -> list[Transaction]:
     reader = csv.DictReader(content.splitlines())
     rows_by_order_id: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -204,6 +217,14 @@ def transactions_from_amazon_orders_csv(
         _transaction_from_amazon_order_rows(order_id, rows, source=source)
         for order_id, rows in rows_by_order_id.items()
     ]
+    for transaction in transactions:
+        populate_transaction_ingestion_metadata(
+            transaction,
+            ingestion_filename=ingestion_filename or _source_filename(source) or DEFAULT_ORDERS_CSV_NAME,
+            ingestion_file_sha256_hex=ingestion_file_sha256_hex
+            or sha256_hex(content.encode("utf-8")),
+            ingestion_type=IngestionType.amazon,
+        )
     transactions.sort(
         key=lambda transaction: (transaction.transaction_date, transaction.external_id or "")
     )
@@ -414,6 +435,14 @@ def _clean_value(value: str | None) -> str | None:
     if not stripped or stripped == "Not Available" or stripped == "Not Applicable":
         return None
     return stripped
+
+
+def _source_filename(source: str | None) -> str | None:
+    if source is None:
+        return None
+    if ":" in source:
+        return source.rsplit(":", maxsplit=1)[1]
+    return Path(source).name
 
 
 def _required_csv_value(row: dict[str, str], fieldname: str, *, row_index: int) -> str:

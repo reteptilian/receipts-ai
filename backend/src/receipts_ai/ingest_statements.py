@@ -28,13 +28,19 @@ from receipts_ai.categorization import (
 )
 from receipts_ai.ingest_receipts import (
     DEFAULT_FIRESTORE_COLLECTION,
+    populate_transaction_ingestion_metadata,
+    sha256_hex,
     upsert_transaction_to_firestore,
 )
-from receipts_ai.models.transaction import Kind, Source, Status, Transaction
+from receipts_ai.models.transaction import IngestionType, Kind, Source, Status, Transaction
 
 CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
     "source",
+    "ingestion_date",
+    "ingestion_filename",
+    "ingestion_file_sha256_hex",
+    "ingestion_type",
     "external_id",
     "account_id",
     "transaction_date",
@@ -58,7 +64,6 @@ CSV_FIELDNAMES: tuple[str, ...] = (
 LOGGER = logging.getLogger(__name__)
 OFX_AGGREGATE_TAGS = ("STMTRS", "CCSTMTRS")
 OFX_TRANSACTION_PATTERN = re.compile(r"<STMTTRN>\s*(.*?)\s*</STMTTRN>", re.IGNORECASE | re.DOTALL)
-OFX_COMPATIBLE_FORMATS = frozenset(("ofx", "qfx"))
 OFX_MEMO_MCC_PATTERN = re.compile(r";\s*0?(\d{4})\s*;")
 
 
@@ -177,15 +182,35 @@ def main() -> None:
 
 
 def transactions_from_ofx_file(statement_path: Path) -> list[Transaction]:
-    return transactions_from_ofx(statement_path.read_text(encoding="utf-8-sig"), source=statement_path)
+    content = statement_path.read_bytes()
+    transactions = transactions_from_ofx(
+        content.decode("utf-8-sig"), source=statement_path
+    )
+    return _populate_transactions_ingestion_metadata(
+        transactions,
+        ingestion_filename=statement_path.name,
+        ingestion_file_sha256_hex=sha256_hex(content),
+        ingestion_type=IngestionType.ofx,
+    )
 
 
 def transactions_from_qfx_file(statement_path: Path) -> list[Transaction]:
-    return transactions_from_ofx_file(statement_path)
+    content = statement_path.read_bytes()
+    transactions = transactions_from_ofx(
+        content.decode("utf-8-sig"), source=statement_path
+    )
+    return _populate_transactions_ingestion_metadata(
+        transactions,
+        ingestion_filename=statement_path.name,
+        ingestion_file_sha256_hex=sha256_hex(content),
+        ingestion_type=IngestionType.qfx,
+    )
 
 
 def transactions_from_file(statement_path: Path, *, statement_format: str) -> list[Transaction]:
-    if statement_format in OFX_COMPATIBLE_FORMATS:
+    if statement_format == "qfx":
+        return transactions_from_qfx_file(statement_path)
+    if statement_format == "ofx":
         return transactions_from_ofx_file(statement_path)
     if statement_format == "fidelity-csv":
         return transactions_from_fidelity_csv_file(statement_path)
@@ -219,8 +244,15 @@ def transactions_from_ofx(ofx: str, *, source: Path | str | None = None) -> list
 
 
 def transactions_from_fidelity_csv_file(statement_path: Path) -> list[Transaction]:
-    return transactions_from_fidelity_csv(
-        statement_path.read_text(encoding="utf-8-sig"), source=statement_path
+    content = statement_path.read_bytes()
+    transactions = transactions_from_fidelity_csv(
+        content.decode("utf-8-sig"), source=statement_path
+    )
+    return _populate_transactions_ingestion_metadata(
+        transactions,
+        ingestion_filename=statement_path.name,
+        ingestion_file_sha256_hex=sha256_hex(content),
+        ingestion_type=IngestionType.fidelity_csv,
     )
 
 
@@ -317,6 +349,14 @@ def _transaction_rows(transactions: Iterable[Transaction]) -> list[dict[str, obj
             {
                 "transaction_id": transaction.id,
                 "source": transaction.source.value,
+                "ingestion_date": transaction.ingestion_date.isoformat()
+                if transaction.ingestion_date is not None
+                else None,
+                "ingestion_filename": transaction.ingestion_filename,
+                "ingestion_file_sha256_hex": transaction.ingestion_file_sha256_hex,
+                "ingestion_type": transaction.ingestion_type.value
+                if transaction.ingestion_type is not None
+                else None,
                 "external_id": transaction.external_id,
                 "account_id": transaction.account_id,
                 "transaction_date": transaction.transaction_date.isoformat(),
@@ -340,6 +380,23 @@ def _transaction_rows(transactions: Iterable[Transaction]) -> list[dict[str, obj
             }
         )
     return rows
+
+
+def _populate_transactions_ingestion_metadata(
+    transactions: list[Transaction],
+    *,
+    ingestion_filename: str,
+    ingestion_file_sha256_hex: str,
+    ingestion_type: IngestionType,
+) -> list[Transaction]:
+    for transaction in transactions:
+        populate_transaction_ingestion_metadata(
+            transaction,
+            ingestion_filename=ingestion_filename,
+            ingestion_file_sha256_hex=ingestion_file_sha256_hex,
+            ingestion_type=ingestion_type,
+        )
+    return transactions
 
 
 def _statement_blocks(ofx: str) -> list[tuple[str, bool]]:

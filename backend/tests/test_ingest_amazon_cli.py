@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import sys
 import zipfile
 from datetime import date
@@ -31,6 +32,12 @@ def test_parses_amazon_orders_csv_as_itemized_transactions():
     transaction = transactions[0]
     assert transaction.id.startswith("amazon_order_")
     assert transaction.source == Source.amazon_order
+    assert transaction.ingestion_date == date.today()
+    assert transaction.ingestion_filename == "Your Orders.csv"
+    assert transaction.ingestion_file_sha256_hex == hashlib.sha256(
+        SAMPLE_ORDER_CSV.encode("utf-8")
+    ).hexdigest()
+    assert transaction.ingestion_type == "amazon"
     assert transaction.external_id == "114-9364152-5237852"
     assert transaction.account_id == "amazon:Visa - 4637"
     assert transaction.transaction_date == date(2026, 5, 1)
@@ -106,6 +113,10 @@ def test_finds_order_history_csv_by_basename_inside_zip(tmp_path: Path):
     transactions = transactions_from_amazon_export_zip(export_path)
 
     assert len(transactions) == 1
+    assert transactions[0].ingestion_filename == "Your Amazon Orders/Order History.csv"
+    assert transactions[0].ingestion_file_sha256_hex == hashlib.sha256(
+        export_path.read_bytes()
+    ).hexdigest()
     assert transactions[0].receipt is not None
     assert transactions[0].receipt.source_document_id == (
         f"{export_path}:Your Amazon Orders/Order History.csv"
@@ -126,6 +137,7 @@ def test_requires_explicit_orders_csv_name_when_zip_has_multiple_matches(tmp_pat
     )
 
     assert len(transactions) == 1
+    assert transactions[0].ingestion_filename == "two/Order History.csv"
     assert transactions[0].receipt is not None
     assert transactions[0].receipt.source_document_id == f"{export_path}:two/Order History.csv"
 
@@ -147,6 +159,11 @@ def test_main_writes_receipt_item_csv(
         "114-9364152-5237852",
     ]
     assert rows[0]["combined_description"].startswith("Gaiam Yoga Block")
+    assert rows[0]["ingestion_filename"] == "Order History.csv"
+    assert rows[0]["ingestion_file_sha256_hex"] == hashlib.sha256(
+        SAMPLE_ORDER_CSV.encode("utf-8")
+    ).hexdigest()
+    assert rows[0]["ingestion_type"] == "amazon"
     assert rows[-1]["item_line_type"] == "tax"
     assert rows[-1]["category_allocation.amount"] == "-3.32"
 

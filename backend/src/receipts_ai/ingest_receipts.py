@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import logging
 import os
 import sys
 from collections.abc import Callable
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
@@ -28,7 +30,7 @@ from receipts_ai.categorization import (
 )
 from receipts_ai.config import config_value, first_config_value
 from receipts_ai.document_intelligence import analyze_receipt_file
-from receipts_ai.models.transaction import Receipt, Source, Transaction
+from receipts_ai.models.transaction import IngestionType, Receipt, Source, Transaction
 from receipts_ai.openai_receipt_extraction import (
     DEFAULT_OPENAI_MODEL,
     OPENAI_MODEL_ENV_VAR,
@@ -47,6 +49,10 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "combined_description",
     "transaction_amount",
     "transaction_currency",
+    "ingestion_date",
+    "ingestion_filename",
+    "ingestion_file_sha256_hex",
+    "ingestion_type",
     "receipt_id",
     "source_document_id",
     "receipt_number",
@@ -340,10 +346,20 @@ def _process_receipt(
             if cache is not None
             else analyze_receipt_file(receipt_path)
         )
-        return transaction_from_document_intelligence_result(result)
+        return populate_transaction_ingestion_metadata(
+            transaction_from_document_intelligence_result(result),
+            ingestion_filename=receipt_path.name,
+            ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
+            ingestion_type=IngestionType.receipt_img,
+        )
 
     if pipeline == "openai":
-        return transaction_from_openai_receipt(receipt_path, model=openai_model, cache=cache)
+        return populate_transaction_ingestion_metadata(
+            transaction_from_openai_receipt(receipt_path, model=openai_model, cache=cache),
+            ingestion_filename=receipt_path.name,
+            ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
+            ingestion_type=IngestionType.receipt_img,
+        )
 
     raise ValueError(f"unsupported receipt pipeline: {pipeline}")
 
@@ -416,6 +432,25 @@ def upsert_transaction_to_firestore(
 
 def transaction_firestore_document(transaction: Transaction) -> dict[str, Any]:
     return transaction.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def populate_transaction_ingestion_metadata(
+    transaction: Transaction,
+    *,
+    ingestion_filename: str,
+    ingestion_file_sha256_hex: str,
+    ingestion_type: IngestionType,
+    ingestion_date: date | None = None,
+) -> Transaction:
+    transaction.ingestion_date = ingestion_date or date.today()
+    transaction.ingestion_filename = ingestion_filename
+    transaction.ingestion_file_sha256_hex = ingestion_file_sha256_hex
+    transaction.ingestion_type = ingestion_type
+    return transaction
+
+
+def sha256_hex(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
 
 
 def _create_firestore_emulator_client() -> FirestoreClient:
@@ -527,6 +562,14 @@ def _transaction_receipt_item_rows(
         "combined_description": combined_description,
         "transaction_amount": transaction.amount,
         "transaction_currency": transaction.currency,
+        "ingestion_date": transaction.ingestion_date.isoformat()
+        if transaction.ingestion_date is not None
+        else None,
+        "ingestion_filename": transaction.ingestion_filename,
+        "ingestion_file_sha256_hex": transaction.ingestion_file_sha256_hex,
+        "ingestion_type": transaction.ingestion_type.value
+        if transaction.ingestion_type is not None
+        else None,
     }
 
     if transaction.receipt is not None:
@@ -538,6 +581,14 @@ def _transaction_receipt_item_rows(
             transaction_description=transaction.description,
             transaction_amount=transaction.amount,
             transaction_currency=transaction.currency,
+            ingestion_date=transaction.ingestion_date.isoformat()
+            if transaction.ingestion_date is not None
+            else None,
+            ingestion_filename=transaction.ingestion_filename,
+            ingestion_file_sha256_hex=transaction.ingestion_file_sha256_hex,
+            ingestion_type=transaction.ingestion_type.value
+            if transaction.ingestion_type is not None
+            else None,
             include_brave_search_result=False,
             include_item_category_id=False,
             include_category_allocation=True,
@@ -574,6 +625,10 @@ def _receipt_item_rows(
     transaction_description: str | None = None,
     transaction_amount: str | None = None,
     transaction_currency: str | None = None,
+    ingestion_date: str | None = None,
+    ingestion_filename: str | None = None,
+    ingestion_file_sha256_hex: str | None = None,
+    ingestion_type: str | None = None,
     include_brave_search_result: bool = True,
     include_item_category_id: bool = True,
     include_category_allocation: bool = False,
@@ -589,6 +644,10 @@ def _receipt_item_rows(
             "combined_description": item.description,
             "transaction_amount": transaction_amount,
             "transaction_currency": transaction_currency,
+            "ingestion_date": ingestion_date,
+            "ingestion_filename": ingestion_filename,
+            "ingestion_file_sha256_hex": ingestion_file_sha256_hex,
+            "ingestion_type": ingestion_type,
             "receipt_id": receipt.id,
             "source_document_id": receipt.source_document_id,
             "receipt_number": receipt.receipt_number,

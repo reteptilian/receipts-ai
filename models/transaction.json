@@ -24,6 +24,11 @@
       "$ref": "#/$defs/nonEmptyString",
       "description": "Source filename or archive member name used to ingest this transaction."
     },
+    "ingestionFileSha256Hex": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Lowercase hexadecimal SHA-256 digest of the source file bytes used to ingest this transaction."
+    },
     "ingestionType": {
       "type": "string",
       "enum": ["ofx", "qfx", "fidelity_csv", "receipt_img", "amazon"],

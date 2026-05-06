@@ -309,6 +309,14 @@ class Transaction(BaseModel):
             min_length=1,
         ),
     ] = None
+    ingestion_file_sha256_hex: Annotated[
+        str | None,
+        Field(
+            alias="ingestionFileSha256Hex",
+            description="Lowercase hexadecimal SHA-256 digest of the source file bytes used to ingest this transaction.",
+            pattern="^[a-f0-9]{64}$",
+        ),
+    ] = None
     ingestion_type: Annotated[
         IngestionType | None,
         Field(

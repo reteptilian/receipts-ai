@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import logging
+import os
 import sys
 from datetime import date
 from io import StringIO
@@ -25,6 +27,7 @@ from receipts_ai.ingest_receipts import (
 )
 from receipts_ai.models.transaction import (
     ExtractionMetadata,
+    IngestionType,
     LineType,
     Receipt,
     Source,
@@ -106,6 +109,10 @@ def test_writes_one_csv_row_per_receipt_item():
             "combined_description": "Coffee",
             "transaction_amount": "",
             "transaction_currency": "",
+            "ingestion_date": "",
+            "ingestion_filename": "",
+            "ingestion_file_sha256_hex": "",
+            "ingestion_type": "",
             "receipt_id": "",
             "source_document_id": "",
             "receipt_number": "",
@@ -145,6 +152,10 @@ def test_writes_one_csv_row_per_receipt_item():
             "combined_description": "Bagel",
             "transaction_amount": "",
             "transaction_currency": "",
+            "ingestion_date": "",
+            "ingestion_filename": "",
+            "ingestion_file_sha256_hex": "",
+            "ingestion_type": "",
             "receipt_id": "",
             "source_document_id": "",
             "receipt_number": "",
@@ -183,6 +194,10 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
+        ingestion_date=date(2026, 5, 6),
+        ingestion_filename="receipt.pdf",
+        ingestion_file_sha256_hex="0" * 64,
+        ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
         payee="Coffee Shop",
         description="",
@@ -212,6 +227,10 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     assert rows[0]["combined_description"] == "Coffee"
     assert rows[0]["transaction_amount"] == "-11.00"
     assert rows[0]["transaction_currency"] == "USD"
+    assert rows[0]["ingestion_date"] == "2026-05-06"
+    assert rows[0]["ingestion_filename"] == "receipt.pdf"
+    assert rows[0]["ingestion_file_sha256_hex"] == "0" * 64
+    assert rows[0]["ingestion_type"] == "receipt_img"
     assert rows[0]["item_description"] == "Coffee"
     assert "item_category_id" not in rows[0]
     assert rows[0]["category_allocation.category_id"] == (
@@ -240,6 +259,10 @@ def test_transaction_json_output_wraps_nested_receipt_struct():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
+        ingestion_date=date(2026, 5, 6),
+        ingestion_filename="receipt.pdf",
+        ingestion_file_sha256_hex="0" * 64,
+        ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
         payee="Coffee Shop",
         amount="-7.00",
@@ -294,6 +317,10 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
+        ingestion_date=date(2026, 5, 6),
+        ingestion_filename="receipt.pdf",
+        ingestion_file_sha256_hex="0" * 64,
+        ingestion_type=IngestionType.receipt_img,
         transaction_date=date(2026, 4, 27),
         payee="Coffee Shop",
         amount="-7.00",
@@ -308,6 +335,10 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
 
     assert document["transactionDate"] == "2026-04-27"
     assert document["source"] == "receipt"
+    assert document["ingestionDate"] == "2026-05-06"
+    assert document["ingestionFilename"] == "receipt.pdf"
+    assert document["ingestionFileSha256Hex"] == "0" * 64
+    assert document["ingestionType"] == "receipt_img"
     assert document["receipt"] == {
         "total": "7.00",
         "items": [
@@ -403,7 +434,7 @@ def test_create_firestore_client_sets_emulator_env_from_config_file(
     client = ingest_receipts.create_firestore_client()
 
     assert client is sentinel_client
-    assert ingest_receipts.os.environ["FIRESTORE_EMULATOR_HOST"] == "127.0.0.1:8080"
+    assert os.environ["FIRESTORE_EMULATOR_HOST"] == "127.0.0.1:8080"
 
 
 def test_json_output_includes_receipt_item_category():
@@ -613,6 +644,10 @@ def test_main_processes_multiple_receipts_as_combined_csv(
     rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
     assert analyze_calls == [receipt_1_path, receipt_2_path]
     assert [row["transaction_id"] for row in rows] == ["transaction_001", "transaction_002"]
+    assert [row["ingestion_file_sha256_hex"] for row in rows] == [
+        hashlib.sha256(b"receipt 1").hexdigest(),
+        hashlib.sha256(b"receipt 2").hexdigest(),
+    ]
     assert [row["item_description"] for row in rows] == ["Item 001", "Item 002"]
 
 
