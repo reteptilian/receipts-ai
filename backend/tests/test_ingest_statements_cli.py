@@ -118,6 +118,41 @@ def test_parses_xml_ofx_credit_card_transactions():
     assert transaction.kind == Kind.income
 
 
+def test_treats_creditline_account_type_as_credit_card():
+    transactions = transactions_from_ofx(
+        """
+        <OFX>
+          <BANKMSGSRSV1>
+            <STMTTRNRS>
+              <STMTRS>
+                <CURDEF>USD
+                <BANKACCTFROM>
+                  <ACCTID>costco-visa</ACCTID>
+                  <ACCTTYPE>CREDITLINE</ACCTTYPE>
+                </BANKACCTFROM>
+                <BANKTRANLIST>
+                  <STMTTRN>
+                    <TRNTYPE>DEBIT
+                    <DTPOSTED>20260403090000
+                    <TRNAMT>-73.54
+                    <FITID>20260403090015
+                    <NAME>LAS MARGARITAS ISSAQUAH ISS
+                  </STMTTRN>
+                </BANKTRANLIST>
+              </STMTRS>
+            </STMTTRNRS>
+          </BANKMSGSRSV1>
+        </OFX>
+        """
+    )
+
+    assert len(transactions) == 1
+    transaction = transactions[0]
+    assert transaction.account_id == "costco-visa:CREDITLINE"
+    assert transaction.payee == "LAS MARGARITAS ISSAQUAH ISS"
+    assert transaction.description is None
+
+
 def test_parses_sgml_qfx_credit_card_transactions(tmp_path: Path):
     statement_path = tmp_path / "credit-card.qfx"
     statement_path.write_text(

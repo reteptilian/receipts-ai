@@ -65,6 +65,7 @@ LOGGER = logging.getLogger(__name__)
 OFX_AGGREGATE_TAGS = ("STMTRS", "CCSTMTRS")
 OFX_TRANSACTION_PATTERN = re.compile(r"<STMTTRN>\s*(.*?)\s*</STMTTRN>", re.IGNORECASE | re.DOTALL)
 OFX_MEMO_MCC_PATTERN = re.compile(r";\s*0?(\d{4})\s*;")
+OFX_CREDIT_CARD_ACCOUNT_TYPES = frozenset(("CREDITCARD", "CREDITLINE"))
 
 
 def main() -> None:
@@ -403,12 +404,17 @@ def _statement_blocks(ofx: str) -> list[tuple[str, bool]]:
     blocks: list[tuple[str, bool]] = []
     for tag in OFX_AGGREGATE_TAGS:
         blocks.extend(
-            (block, tag.upper() == "CCSTMTRS")
+            (block, tag.upper() == "CCSTMTRS" or _is_credit_card_account(block))
             for block in re.findall(
                 rf"<{tag}>\s*(.*?)\s*</{tag}>", ofx, flags=re.IGNORECASE | re.DOTALL
             )
         )
-    return blocks or [(ofx, False)]
+    return blocks or [(ofx, _is_credit_card_account(ofx))]
+
+
+def _is_credit_card_account(statement_block: str) -> bool:
+    account_type = _tag_value(statement_block, "ACCTTYPE")
+    return account_type is not None and account_type.upper() in OFX_CREDIT_CARD_ACCOUNT_TYPES
 
 
 def _transaction_from_block(
