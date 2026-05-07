@@ -11,6 +11,7 @@ from receipts_ai.models.transaction import (
     Source,
     Transaction,
     TransactionUserOverrides,
+    UserCategoryAllocation,
 )
 from textual import events
 from textual.geometry import Size
@@ -70,6 +71,7 @@ async def test_app_displays_transactions_in_table() -> None:
         "2026-05-06",
         "Coffee Shop",
         "POS PURCHASE COFFEE",
+        "",
         "checking.ofx",
         "",
         "-7.50 USD",
@@ -95,7 +97,7 @@ async def test_transaction_table_description_column_has_capped_fixed_width() -> 
         await pilot.pause()
 
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
-        app.on_resize(events.Resize(Size(200, 24), Size(200, 24)))
+        app.on_resize(events.Resize(Size(240, 24), Size(240, 24)))
         description_column = table.ordered_columns[2]
 
     assert description_column.auto_width is False
@@ -124,7 +126,72 @@ async def test_app_displays_transaction_overrides_in_table() -> None:
 
     assert row[0] == "2026-05-07"
     assert row[1] == "Edited Coffee Shop"
-    assert row[5] == "-8.25 USD"
+    assert row[6] == "-8.25 USD"
+
+
+@pytest.mark.anyio
+async def test_app_displays_transaction_category_allocations_in_table() -> None:
+    no_category = _transaction(
+        "no_category",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    single_category = _transaction(
+        "single_category",
+        transaction_date=date(2026, 5, 7),
+        amount="-8.25",
+    )
+    single_category.category_allocations = [
+        CategoryAllocation(category_id="Taxes > Income Taxes", amount="-8.25")
+    ]
+    multiple_categories = _transaction(
+        "multiple_categories",
+        transaction_date=date(2026, 5, 8),
+        amount="-100",
+    )
+    multiple_categories.category_allocations = [
+        CategoryAllocation(category_id="Meals > Coffee", amount="-35"),
+        CategoryAllocation(category_id="Taxes > Income Taxes", amount="-65"),
+    ]
+    app = ReceiptsAIApp(
+        transaction_loader=lambda: [no_category, single_category, multiple_categories]
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        rows = [table.get_row_at(row_index) for row_index in range(table.row_count)]
+
+    assert rows[0][3] == ""
+    assert rows[1][3] == "Taxes > Income Taxes"
+    assert rows[2][3] == "Taxes > Income Taxes, ..."
+
+
+@pytest.mark.anyio
+async def test_app_displays_transaction_category_allocation_overrides() -> None:
+    transaction = _transaction(
+        "transaction_1",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [
+        CategoryAllocation(category_id="Original", amount="-7.5")
+    ]
+    transaction.user_overrides = TransactionUserOverrides(
+        category_allocations=[
+            UserCategoryAllocation(category_id="Edited", amount="-7.5"),
+        ]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        row = table.get_row_at(0)
+
+    assert row[3] == "Edited"
 
 
 @pytest.mark.anyio
@@ -151,7 +218,7 @@ async def test_app_marks_transactions_with_receipt_items() -> None:
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         row = table.get_row_at(0)
 
-    assert row[4] == "Y"
+    assert row[5] == "Y"
 
 
 @pytest.mark.anyio
@@ -183,7 +250,7 @@ async def test_app_collapses_linked_bst_and_rbt_with_receipt_indicator() -> None
 
     assert table.row_count == 1
     assert row[1] == "Payee statement"
-    assert row[4] == "Y"
+    assert row[5] == "Y"
 
 
 @pytest.mark.anyio
@@ -228,7 +295,7 @@ async def test_app_links_selected_bst_and_rbt_then_refreshes() -> None:
         mock_link.assert_called_once_with("statement", "receipt")
 
     assert table.row_count == 1
-    assert table.get_row_at(0)[4] == "Y"
+    assert table.get_row_at(0)[5] == "Y"
 
 
 @pytest.mark.anyio
@@ -380,7 +447,7 @@ async def test_app_displays_transactions_sorted_by_date_then_amount() -> None:
 
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         displayed_dates_and_amounts = [
-            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[5])
+            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[6])
             for row_index in range(table.row_count)
         ]
 
@@ -481,7 +548,7 @@ async def test_receipt_item_cells_update_item_overrides() -> None:
     assert transaction.receipt is not None
     assert transaction.receipt.items[0].user_overrides is not None
     assert transaction.receipt.items[0].user_overrides.amount == "8.25"
-    assert row[5] == "-8.25 USD"
+    assert row[6] == "-8.25 USD"
 
 
 @pytest.mark.anyio

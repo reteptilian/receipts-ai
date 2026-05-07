@@ -42,6 +42,7 @@ TRANSACTION_TABLE_COLUMNS = (
     TransactionTableColumn(key="date", label="Date"),
     TransactionTableColumn(key="payee", label="Payee"),
     TransactionTableColumn(key="description", label="Description"),
+    TransactionTableColumn(key="category", label="Category"),
     TransactionTableColumn(key="ingestion_filename", label="Ingestion file"),
     TransactionTableColumn(key="receipt", label="Receipt?"),
     TransactionTableColumn(key="amount", label="Amount"),
@@ -56,6 +57,7 @@ TRANSACTION_TABLE_FIXED_WIDTHS = {
 TRANSACTION_TABLE_FLEX_COLUMNS = (
     TransactionTableFlexColumn(key="payee", min_width=16, max_width=40, weight=2),
     TransactionTableFlexColumn(key="description", min_width=20, max_width=80, weight=5),
+    TransactionTableFlexColumn(key="category", min_width=16, max_width=40, weight=2),
     TransactionTableFlexColumn(key="ingestion_filename", min_width=14, max_width=30, weight=1),
 )
 
@@ -230,6 +232,21 @@ def _format_receipt_indicator(transaction: Transaction, *, selected: bool = Fals
     if selected:
         return f"{indicator}*" if indicator else "*"
     return indicator
+
+
+def _format_transaction_category(transaction: Transaction) -> str:
+    allocations = _effective_category_allocations(transaction)
+    if not allocations:
+        return ""
+
+    if len(allocations) == 1:
+        return allocations[0].category_id
+
+    largest_allocation = max(
+        allocations,
+        key=lambda allocation: abs(_decimal_amount(allocation.amount, "Category allocation amount")),
+    )
+    return f"{largest_allocation.category_id}, ..."
 
 
 def _has_receipt_items(transaction: Transaction) -> bool:
