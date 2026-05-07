@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -51,6 +52,14 @@ def main() -> None:
         help="Download files from nested folders too.",
     )
     parser.add_argument(
+        "--skip-existing-by-hash",
+        action="store_true",
+        help=(
+            "Skip regular Drive files when a file with the same MD5 content hash already "
+            "exists under the destination folder."
+        ),
+    )
+    parser.add_argument(
         "--google-oauth-credentials",
         type=Path,
         help="Path to OAuth client credentials JSON. Defaults to gspread's config path.",
@@ -73,6 +82,7 @@ def main() -> None:
         source_folder=args.source_folder,
         destination=args.destination,
         recursive=args.recursive,
+        skip_existing_by_hash=args.skip_existing_by_hash,
         oauth_credentials_path=args.google_oauth_credentials,
         oauth_authorized_user_path=args.google_oauth_authorized_user,
     )
@@ -83,6 +93,7 @@ def download_google_drive_folder(
     source_folder: str,
     destination: Path,
     recursive: bool = False,
+    skip_existing_by_hash: bool = False,
     oauth_credentials_path: Path | None = None,
     oauth_authorized_user_path: Path | None = None,
     drive_service: Any | None = None,
@@ -98,6 +109,7 @@ def download_google_drive_folder(
         folder_id=folder_id,
         destination=destination,
         recursive=recursive,
+        existing_md5_hashes=_local_md5_hashes(destination) if skip_existing_by_hash else None,
     )
     LOGGER.info(
         "Downloaded %d Google Drive file(s) from folder %s to %s",
@@ -160,6 +172,7 @@ def _download_drive_folder_files(
     folder_id: str,
     destination: Path,
     recursive: bool,
+    existing_md5_hashes: dict[str, Path] | None,
 ) -> list[DownloadedDriveFile]:
     downloaded: list[DownloadedDriveFile] = []
     used_paths: set[Path] = set()
@@ -168,6 +181,7 @@ def _download_drive_folder_files(
         folder_id=folder_id,
         destination=destination,
         recursive=recursive,
+        existing_md5_hashes=existing_md5_hashes,
         used_paths=used_paths,
         downloaded=downloaded,
     )
@@ -180,6 +194,7 @@ def _download_drive_folder_files_into(
     folder_id: str,
     destination: Path,
     recursive: bool,
+    existing_md5_hashes: dict[str, Path] | None,
     used_paths: set[Path],
     downloaded: list[DownloadedDriveFile],
 ) -> None:
@@ -199,6 +214,7 @@ def _download_drive_folder_files_into(
                     folder_id=drive_id,
                     destination=subfolder_destination,
                     recursive=recursive,
+                    existing_md5_hashes=existing_md5_hashes,
                     used_paths=used_paths,
                     downloaded=downloaded,
                 )
@@ -211,9 +227,13 @@ def _download_drive_folder_files_into(
             drive_id=drive_id,
             drive_name=drive_name,
             mime_type=mime_type,
+            md5_checksum=drive_file.get("md5Checksum"),
             destination=destination,
+            existing_md5_hashes=existing_md5_hashes,
             used_paths=used_paths,
         )
+        if output_path is None:
+            continue
         downloaded.append(
             DownloadedDriveFile(
                 drive_id=drive_id,
@@ -231,7 +251,7 @@ def _list_drive_folder_children(service: Any, *, folder_id: str) -> list[dict[st
             service.files()
             .list(
                 q=f"'{folder_id}' in parents and trashed = false",
-                fields="nextPageToken, files(id, name, mimeType)",
+                fields="nextPageToken, files(id, name, mimeType, md5Checksum)",
                 pageSize=1000,
                 pageToken=page_token,
                 supportsAllDrives=True,
@@ -251,11 +271,23 @@ def _download_drive_file(
     drive_id: str,
     drive_name: str,
     mime_type: str | None,
+    md5_checksum: str | None,
     destination: Path,
+    existing_md5_hashes: dict[str, Path] | None,
     used_paths: set[Path],
-) -> Path:
+) -> Path | None:
     export = GOOGLE_WORKSPACE_EXPORTS.get(mime_type or "")
     if export is None:
+        if md5_checksum and existing_md5_hashes is not None:
+            existing_path = existing_md5_hashes.get(md5_checksum)
+            if existing_path is not None:
+                LOGGER.info(
+                    "Skipping Google Drive file %s because %s has the same MD5 hash",
+                    drive_name,
+                    existing_path,
+                )
+                return None
+
         request = service.files().get_media(fileId=drive_id, supportsAllDrives=True)
         output_path = _unique_output_path(
             destination / _safe_filename(drive_name),
@@ -271,8 +303,26 @@ def _download_drive_file(
 
     content = request.execute()
     output_path.write_bytes(content)
+    if md5_checksum and existing_md5_hashes is not None:
+        existing_md5_hashes[md5_checksum] = output_path
     LOGGER.info("Downloaded Google Drive file %s to %s", drive_name, output_path)
     return output_path
+
+
+def _local_md5_hashes(destination: Path) -> dict[str, Path]:
+    hashes: dict[str, Path] = {}
+    for path in destination.rglob("*"):
+        if path.is_file():
+            hashes.setdefault(_md5_hash(path), path)
+    return hashes
+
+
+def _md5_hash(path: Path) -> str:
+    digest = hashlib.md5(usedforsecurity=False)
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _safe_filename(filename: str) -> str:

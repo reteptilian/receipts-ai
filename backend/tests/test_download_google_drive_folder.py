@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,7 @@ def test_download_google_drive_folder_downloads_paginated_folder_files(tmp_path:
                         "id": "file-1",
                         "name": "receipt.pdf",
                         "mimeType": "application/pdf",
+                        "md5Checksum": "8b04d5e3775d298e78455efc5ca404d5",
                     }
                 ],
                 [
@@ -100,6 +102,7 @@ def test_download_google_drive_folder_downloads_paginated_folder_files(tmp_path:
                         "id": "file-2",
                         "name": "receipt.pdf",
                         "mimeType": "application/pdf",
+                        "md5Checksum": "a9f0e61a137d86aa9db53465e0801612",
                     }
                 ],
             ]
@@ -120,6 +123,75 @@ def test_download_google_drive_folder_downloads_paginated_folder_files(tmp_path:
     assert (tmp_path / "receipt (2).pdf").read_bytes() == b"second"
 
 
+def test_download_google_drive_folder_skips_regular_file_with_existing_hash(tmp_path: Path):
+    existing_path = tmp_path / "already-here.pdf"
+    existing_path.write_bytes(b"same content")
+    service = FakeDriveService(
+        folder_pages={
+            "source-folder": [
+                [
+                    {
+                        "id": "file-1",
+                        "name": "receipt.pdf",
+                        "mimeType": "application/pdf",
+                        "md5Checksum": _md5_hex(b"same content"),
+                    }
+                ]
+            ]
+        },
+        file_content={"file-1": b"same content"},
+    )
+
+    downloaded = download_google_drive_folder.download_google_drive_folder(
+        source_folder="source-folder",
+        destination=tmp_path,
+        skip_existing_by_hash=True,
+        drive_service=service,
+    )
+
+    assert downloaded == []
+    assert service.download_calls == []
+    assert not (tmp_path / "receipt.pdf").exists()
+
+
+def test_download_google_drive_folder_uses_downloaded_hash_for_later_source_files(
+    tmp_path: Path,
+):
+    service = FakeDriveService(
+        folder_pages={
+            "source-folder": [
+                [
+                    {
+                        "id": "file-1",
+                        "name": "receipt.pdf",
+                        "mimeType": "application/pdf",
+                        "md5Checksum": _md5_hex(b"same content"),
+                    },
+                    {
+                        "id": "file-2",
+                        "name": "renamed.pdf",
+                        "mimeType": "application/pdf",
+                        "md5Checksum": _md5_hex(b"same content"),
+                    },
+                ]
+            ]
+        },
+        file_content={"file-1": b"same content", "file-2": b"same content"},
+    )
+
+    downloaded = download_google_drive_folder.download_google_drive_folder(
+        source_folder="source-folder",
+        destination=tmp_path,
+        skip_existing_by_hash=True,
+        drive_service=service,
+    )
+
+    assert service.download_calls == ["file-1"]
+    assert [file.output_path.name for file in downloaded] == ["receipt.pdf"]
+    assert (tmp_path / "receipt.pdf").read_bytes() == b"same content"
+    assert not (tmp_path / "renamed.pdf").exists()
+
+
 def test_download_google_drive_folder_exports_google_workspace_files(tmp_path: Path):
     service = FakeDriveService(
         folder_pages={
@@ -129,6 +201,7 @@ def test_download_google_drive_folder_exports_google_workspace_files(tmp_path: P
                         "id": "sheet-1",
                         "name": "Budget",
                         "mimeType": "application/vnd.google-apps.spreadsheet",
+                        "md5Checksum": _md5_hex(b"xlsx bytes"),
                     }
                 ]
             ]
@@ -206,6 +279,7 @@ def test_download_google_drive_folder_main_passes_oauth_paths(
             "source-folder",
             str(tmp_path),
             "--recursive",
+            "--skip-existing-by-hash",
             "--google-oauth-credentials",
             "/tmp/credentials.json",
             "--google-oauth-authorized-user",
@@ -225,7 +299,12 @@ def test_download_google_drive_folder_main_passes_oauth_paths(
             "source_folder": "source-folder",
             "destination": tmp_path,
             "recursive": True,
+            "skip_existing_by_hash": True,
             "oauth_credentials_path": Path("/tmp/credentials.json"),
             "oauth_authorized_user_path": Path("/tmp/authorized_user.json"),
         }
     ]
+
+
+def _md5_hex(content: bytes) -> str:
+    return hashlib.md5(content, usedforsecurity=False).hexdigest()
