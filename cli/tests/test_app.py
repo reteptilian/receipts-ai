@@ -14,6 +14,7 @@ from receipts_ai.models.transaction import (
     UserCategoryAllocation,
 )
 from textual import events
+from textual.coordinate import Coordinate
 from textual.geometry import Size
 from textual.widgets import DataTable, Input, OptionList, Static
 
@@ -374,14 +375,21 @@ async def test_enter_on_transaction_with_receipt_items_opens_items_screen() -> N
         await pilot.pause(0.1)
 
         screen = app.screen
+        allocations_title = screen.query_one("#category-allocations-title", Static)
+        allocations = cast(DataTable[str], screen.query_one("#category-allocations", DataTable))
         table = cast(DataTable[str], screen.query_one("#receipt-items", DataTable))
         date_input = screen.query_one("#receipt-date", Input)
         payee_input = screen.query_one("#receipt-payee", Input)
         description_input = screen.query_one("#receipt-description", Input)
         amount_input = screen.query_one("#receipt-amount", Input)
+        controls = screen.query_one("#review-controls", Static)
         row = table.get_row_at(0)
 
     assert isinstance(screen, ReceiptItemsScreen)
+    assert allocations_title.has_class("hidden")
+    assert allocations.has_class("hidden")
+    assert "Add allocation" not in str(controls.content)
+    assert "Delete allocation" not in str(controls.content)
     assert date_input.value == "2026-05-06"
     assert amount_input.value == "-7.5"
     assert payee_input.value == "Payee receipt"
@@ -531,7 +539,6 @@ async def test_receipt_item_cells_update_item_overrides() -> None:
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause(0.1)
-            await pilot.press("tab")
             await pilot.press("right", "right", "right", "enter")
             editor_input = app.screen.query_one("#cell-edit-input", Input)
             editor_input.value = "8.25"
@@ -572,7 +579,6 @@ async def test_receipt_item_description_update() -> None:
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause(0.1)
-            await pilot.press("tab")
             # First column is Description
             await pilot.press("enter")
             editor_input = app.screen.query_one("#cell-edit-input", Input)
@@ -646,7 +652,92 @@ async def test_category_allocation_category_id_uses_budget_category_picker() -> 
 
 
 @pytest.mark.anyio
-async def test_save_refuses_mismatched_category_allocations() -> None:
+async def test_receipt_item_category_id_uses_budget_category_picker() -> None:
+    item = ReceiptItem(
+        description="Latte",
+        amount="7.5",
+        net_amount="7.5",
+        category_id="Coffee",
+    )
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
+    transaction.receipt = Receipt(items=[item])
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with (
+        patch(
+            "receipts_ai_cli.app.load_budget_category_choices",
+            return_value=(
+                "Coffee",
+                "Miscellaneous > Uncategorized",
+            ),
+        ),
+        patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save,
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            receipt_items = cast(DataTable[str], app.screen.query_one("#receipt-items", DataTable))
+            receipt_items.cursor_coordinate = Coordinate(0, 8)
+            cast(TransactionReviewScreen, app.screen).action_edit_cell()
+            await pilot.pause(0.1)
+
+            choice_list = app.screen.query_one("#category-choice-list", OptionList)
+            assert choice_list.option_count == 2
+
+            await pilot.press("down", "enter")
+            await pilot.pause(0.1)
+
+            receipt_items = cast(DataTable[str], app.screen.query_one("#receipt-items", DataTable))
+            row = receipt_items.get_row_at(0)
+
+            await pilot.press("s")
+            await pilot.pause(0.1)
+
+            assert mock_save.called
+
+    assert row[8] == "Miscellaneous > Uncategorized"
+    assert transaction.receipt is not None
+    assert transaction.receipt.items[0].user_overrides is not None
+    assert transaction.receipt.items[0].user_overrides.category_id == (
+        "Miscellaneous > Uncategorized"
+    )
+
+
+@pytest.mark.anyio
+async def test_save_refuses_mismatched_category_allocations_without_receipt_items() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-6.00")]
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            cast(TransactionReviewScreen, app.screen).action_save_and_exit()
+            await pilot.pause(0.1)
+
+            status = app.screen.query_one("#receipt-edit-status", Static)
+
+        mock_save.assert_not_called()
+
+    assert "Save blocked: category allocations must add up" in str(status.content)
+
+
+@pytest.mark.anyio
+async def test_save_uses_receipt_items_instead_of_category_allocations() -> None:
     transaction = _transaction(
         "receipt",
         transaction_date=date(2026, 5, 6),
@@ -667,11 +758,7 @@ async def test_save_refuses_mismatched_category_allocations() -> None:
             cast(TransactionReviewScreen, app.screen).action_save_and_exit()
             await pilot.pause(0.1)
 
-            status = app.screen.query_one("#receipt-edit-status", Static)
-
-        mock_save.assert_not_called()
-
-    assert "Save blocked: category allocations must add up" in str(status.content)
+        assert mock_save.called
 
 
 @pytest.mark.anyio

@@ -116,11 +116,13 @@ class TransactionReviewScreen(Screen[None]):
         yield DataTable(id="category-allocations")
         yield Static("Receipt Items", id="receipt-items-title")
         yield DataTable(id="receipt-items")
-        yield Static(
-            "s Save and Exit | a Add allocation | d Delete allocation | "
-            "e Edit cell | Esc/q Exit Without Saving",
-            id="review-controls",
-        )
+        controls = "s Save and Exit | e Edit cell | Esc/q Exit Without Saving"
+        if not self._has_receipt_items():
+            controls = (
+                "s Save and Exit | a Add allocation | d Delete allocation | "
+                "e Edit cell | Esc/q Exit Without Saving"
+            )
+        yield Static(controls, id="review-controls")
 
     def on_mount(self) -> None:
         allocations_table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
@@ -128,6 +130,9 @@ class TransactionReviewScreen(Screen[None]):
         allocations_table.zebra_stripes = True
         allocations_table.add_columns("Category ID", "Amount")
         self._refresh_category_allocations_table()
+        if self._has_receipt_items():
+            self.query_one("#category-allocations-title", Static).add_class("hidden")
+            allocations_table.add_class("hidden")
 
         table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
         table.cursor_type = "cell"
@@ -154,7 +159,7 @@ class TransactionReviewScreen(Screen[None]):
         for item in receipt.items:
             table.add_row(*_receipt_item_row(item))
 
-        allocations_table.focus()
+        table.focus()
 
     def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
         data_table = cast(DataTable[str], event.data_table)
@@ -188,11 +193,20 @@ class TransactionReviewScreen(Screen[None]):
         )
         value = table.get_cell_at(coordinate)
 
-        if table.id == "category-allocations" and coordinate.column == 0:
+        if (
+            (table.id == "category-allocations" and coordinate.column == 0)
+            or (
+                table.id == "receipt-items"
+                and RECEIPT_ITEM_COLUMNS[coordinate.column].field_name == "category_id"
+            )
+        ):
 
             def check_category_choice(new_value: str | None) -> None:
                 if new_value is not None:
-                    self._commit_category_allocation_cell_edit(coordinate, new_value)
+                    if table.id == "category-allocations":
+                        self._commit_category_allocation_cell_edit(coordinate, new_value)
+                    else:
+                        self._commit_receipt_item_cell_edit(coordinate, new_value)
 
             self.app.push_screen(
                 CategoryChoiceScreen(str(value), self._category_choices),
@@ -210,6 +224,8 @@ class TransactionReviewScreen(Screen[None]):
         self.app.push_screen(CellEditScreen(column_label, str(value)), check_edit)
 
     def action_add_category_allocation(self) -> None:
+        if self._has_receipt_items():
+            return
         allocations = _effective_category_allocations(self._transaction)
         category_id = (
             "Miscellaneous > Uncategorized"
@@ -222,6 +238,8 @@ class TransactionReviewScreen(Screen[None]):
         self._mark_dirty("Added category allocation")
 
     def action_delete_category_allocation(self) -> None:
+        if self._has_receipt_items():
+            return
         table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
         coordinate = table.cursor_coordinate
         if not table.is_valid_coordinate(coordinate):
@@ -391,20 +409,21 @@ class TransactionReviewScreen(Screen[None]):
         transaction_amount = _decimal_amount(
             _effective_transaction_amount(self._transaction), "Transaction amount"
         )
-        allocations = _effective_category_allocations(self._transaction)
-        allocation_total = sum(
-            (
-                _decimal_amount(allocation.amount, "Category allocation amount")
-                for allocation in allocations
-            ),
-            Decimal("0"),
-        )
-        if allocation_total != transaction_amount:
-            raise ValueError(
-                "Save blocked: category allocations must add up to the transaction amount. "
-                f"The allocations total {allocation_total}, but the transaction amount is "
-                f"{transaction_amount}."
+        if not self._has_receipt_items():
+            allocations = _effective_category_allocations(self._transaction)
+            allocation_total = sum(
+                (
+                    _decimal_amount(allocation.amount, "Category allocation amount")
+                    for allocation in allocations
+                ),
+                Decimal("0"),
             )
+            if allocation_total != transaction_amount:
+                raise ValueError(
+                    "Save blocked: category allocations must add up to the transaction amount. "
+                    f"The allocations total {allocation_total}, but the transaction amount is "
+                    f"{transaction_amount}."
+                )
 
         if self._receipt_transaction is None or self._receipt_transaction.receipt is None:
             return
@@ -429,12 +448,19 @@ class TransactionReviewScreen(Screen[None]):
     def _focused_edit_table(self) -> DataTable[str] | None:
         allocations_table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
         receipt_items_table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
+        if self._has_receipt_items():
+            return receipt_items_table
         focused = self.focused
         if focused is allocations_table:
             return allocations_table
         if focused is receipt_items_table:
             return receipt_items_table
         return receipt_items_table if receipt_items_table.has_focus else allocations_table
+
+    def _has_receipt_items(self) -> bool:
+        receipt_transaction = self._receipt_transaction
+        receipt = receipt_transaction.receipt if receipt_transaction is not None else None
+        return bool(receipt is not None and receipt.items)
 
     def _mark_dirty(self, message: str) -> None:
         self._dirty = True
