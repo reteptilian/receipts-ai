@@ -16,7 +16,7 @@ from receipts_ai.brave_search import (
     create_brave_search_client,
     enrich_receipt_items_with_brave_search,
 )
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 from receipts_ai.categorization import (
     CachedCategoryModelClient,
     CategoryModelClient,
@@ -179,7 +179,7 @@ def main() -> None:
     parser.add_argument(
         "--cache-file",
         type=Path,
-        help="Cache Azure Document Intelligence, OpenAI, Brave Search, and Ollama responses in this JSON file.",
+        help="Cache Azure Document Intelligence, OpenAI, Brave Search, and Ollama responses in this SQLite database.",
     )
     parser.add_argument(
         "--upsert-firestore",
@@ -204,7 +204,7 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
-    cache = JsonCallCache(args.cache_file) if args.cache_file is not None else None
+    cache = SqliteCallCache(args.cache_file) if args.cache_file is not None else None
     category_client = (
         CachedCategoryModelClient(cache=cache, client_factory=create_ollama_category_client)
         if cache is not None
@@ -333,7 +333,7 @@ def _process_receipt(
     *,
     pipeline: str,
     openai_model: str,
-    cache: JsonCallCache | None,
+    cache: SqliteCallCache | None,
 ) -> Transaction:
     if pipeline == "azure":
         result = (

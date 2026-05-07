@@ -20,7 +20,7 @@ from receipts_ai.brave_search import (
     enrich_receipt_items_with_brave_search,
     enrich_transactions_with_brave_search,
 )
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 from receipts_ai.models.transaction import LineType, Receipt, Source, Transaction
 from receipts_ai.models.transaction import ReceiptItem as GeneratedReceiptItem
 
@@ -226,31 +226,30 @@ def test_url_lib_client_gives_rate_limit_hint(monkeypatch: pytest.MonkeyPatch):
         client.search("NBSC SALTINE")
 
 
-def test_cached_brave_search_client_reuses_json_file(tmp_path: Path):
-    cache_path = tmp_path / "api-cache.json"
+def test_cached_brave_search_client_reuses_sqlite_cache(tmp_path: Path):
+    cache_path = tmp_path / "api-cache.sqlite"
     first_client = FakeBraveClient()
-    cached_client = CachedBraveSearchClient(client=first_client, cache=JsonCallCache(cache_path))
+    cached_client = CachedBraveSearchClient(client=first_client, cache=SqliteCallCache(cache_path))
 
     first_result = cached_client.search("FredMeyer NBSC SALTINE $2.25")
 
     second_client = FakeBraveClient()
     second_cached_client = CachedBraveSearchClient(
-        client=second_client, cache=JsonCallCache(cache_path)
+        client=second_client, cache=SqliteCallCache(cache_path)
     )
     second_result = second_cached_client.search("FredMeyer NBSC SALTINE $2.25")
 
     assert first_result == second_result
     assert first_client.queries == ["FredMeyer NBSC SALTINE $2.25"]
     assert second_client.queries == []
-    payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    assert payload["version"] == 1
-    assert payload["ollama"] == []
-    assert payload["brave_search"][0]["request"] == {"query": "FredMeyer NBSC SALTINE $2.25"}
+    assert SqliteCallCache(cache_path).get(
+        "brave_search", {"query": "FredMeyer NBSC SALTINE $2.25"}
+    ) == first_result
 
 
 def test_cached_brave_search_client_does_not_create_client_on_cache_hit(tmp_path: Path):
-    cache_path = tmp_path / "api-cache.json"
-    cache = JsonCallCache(cache_path)
+    cache_path = tmp_path / "api-cache.sqlite"
+    cache = SqliteCallCache(cache_path)
     cache.set("brave_search", {"query": "Coffee Shop COF $7.00"}, {"cached": True})
     factory_calls = 0
 
@@ -259,7 +258,7 @@ def test_cached_brave_search_client_does_not_create_client_on_cache_hit(tmp_path
         factory_calls += 1
         return FakeBraveClient()
 
-    client = CachedBraveSearchClient(cache=JsonCallCache(cache_path), client_factory=client_factory)
+    client = CachedBraveSearchClient(cache=SqliteCallCache(cache_path), client_factory=client_factory)
 
     result = client.search("Coffee Shop COF $7.00")
 
@@ -385,7 +384,7 @@ def test_enrich_receipt_items_with_brave_search_skips_delay_for_cached_queries(
             ]
         ),
     )
-    cache = JsonCallCache(tmp_path / "api-cache.json")
+    cache = SqliteCallCache(tmp_path / "api-cache.sqlite")
     cache.set(
         "brave_search",
         {"query": "Coffee Shop BGL $3.00"},

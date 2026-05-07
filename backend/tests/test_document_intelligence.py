@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +9,7 @@ from typing import Any
 import pytest
 
 from receipts_ai import document_intelligence
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 from receipts_ai.document_intelligence import (
     DEFAULT_RECEIPT_MODEL_ID,
     analyze_receipt_bytes,
@@ -75,7 +74,7 @@ def test_analyze_receipt_bytes_rejects_empty_document():
         analyze_receipt_bytes(b"", client=FakeClient())
 
 
-def test_analyze_receipt_bytes_reuses_json_cache(
+def test_analyze_receipt_bytes_reuses_sqlite_cache(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -84,29 +83,34 @@ def test_analyze_receipt_bytes_reuses_json_cache(
         "_new_analyze_document_request",
         _request_factory,
     )
-    cache_path = tmp_path / "api-cache.json"
+    cache_path = tmp_path / "api-cache.sqlite"
     first_client = FakeClient()
     first_result = analyze_receipt_bytes(
         b"receipt bytes",
         client=first_client,
-        cache=JsonCallCache(cache_path),
+        cache=SqliteCallCache(cache_path),
     )
 
     second_client = FakeClient()
     second_result = analyze_receipt_bytes(
         b"receipt bytes",
         client=second_client,
-        cache=JsonCallCache(cache_path),
+        cache=SqliteCallCache(cache_path),
     )
 
     assert first_result == second_result
     assert len(first_client.calls) == 1
     assert second_client.calls == []
-    payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    assert payload["azure_document_intelligence"][0]["request"] == {
-        "document_sha256": hashlib.sha256(b"receipt bytes").hexdigest(),
-        "model_id": DEFAULT_RECEIPT_MODEL_ID,
-    }
+    assert (
+        SqliteCallCache(cache_path).get(
+            "azure_document_intelligence",
+            {
+                "document_sha256": hashlib.sha256(b"receipt bytes").hexdigest(),
+                "model_id": DEFAULT_RECEIPT_MODEL_ID,
+            },
+        )
+        == first_result
+    )
 
 
 def test_create_document_intelligence_client_uses_key_credential(

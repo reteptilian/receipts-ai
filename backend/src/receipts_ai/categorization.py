@@ -13,7 +13,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Protocol, cast
 
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 from receipts_ai.config import first_config_value
 from receipts_ai.models.transaction import CategoryAllocation, ReceiptItem, Source1, Transaction
 
@@ -387,7 +387,7 @@ class CachedCategoryModelClient:
     def __init__(
         self,
         *,
-        cache: JsonCallCache,
+        cache: SqliteCallCache,
         client: CategoryModelClient | None = None,
         client_factory: Callable[[], CategoryModelClient] | None = None,
     ) -> None:

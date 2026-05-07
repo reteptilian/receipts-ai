@@ -5,17 +5,17 @@ from pathlib import Path
 
 from rich import print as rprint
 
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Delete all JSON cache entries for a namespace.",
+        description="Delete all SQLite cache entries for a namespace.",
     )
     parser.add_argument(
         "cache_file",
         type=Path,
-        help="Path to the JSON cache file to update.",
+        help="Path to the SQLite cache database to update.",
     )
     parser.add_argument(
         "namespace",
@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-create",
         action="store_true",
-        help="Create the cache file if it does not exist.",
+        help="Create the cache database if it does not exist.",
     )
     return parser
 
@@ -38,7 +38,7 @@ def invalidate_cache_namespace(
     if not allow_create and not cache_file.exists():
         raise FileNotFoundError(f"cache file does not exist: {cache_file}")
 
-    return JsonCallCache(cache_file).invalidate_namespace(namespace)
+    return SqliteCallCache(cache_file).invalidate_namespace(namespace)
 
 
 def main() -> int:

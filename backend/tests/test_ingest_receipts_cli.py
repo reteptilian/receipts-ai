@@ -740,7 +740,7 @@ def test_main_wraps_brave_search_client_when_cache_file_is_provided(
 ):
     receipt_path = tmp_path / "receipt.pdf"
     receipt_path.write_bytes(b"receipt")
-    cache_path = tmp_path / "api-cache.json"
+    cache_path = tmp_path / "api-cache.sqlite"
     receipt = Receipt(
         items=[ReceiptItem(description="Coffee", raw_description="COF", amount="7.00")]
     )
@@ -762,7 +762,7 @@ def test_main_wraps_brave_search_client_when_cache_file_is_provided(
         return transaction
 
     def fake_analyze_receipt_file(path: Path, *, cache: object) -> dict[str, Path]:
-        assert cache.__class__.__name__ == "JsonCallCache"
+        assert cache.__class__.__name__ == "SqliteCallCache"
         return {"result": path}
 
     def fake_enrich_receipt_items_with_brave_search(
@@ -825,7 +825,7 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
 ):
     receipt_path = tmp_path / "receipt.pdf"
     receipt_path.write_bytes(b"receipt")
-    cache_path = tmp_path / "api-cache.json"
+    cache_path = tmp_path / "api-cache.sqlite"
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
@@ -845,7 +845,7 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
             return "Food & Dining" if "top level" in prompt else "Fast Food & Coffee"
 
     def fake_analyze_receipt_file(path: Path, *, cache: object) -> dict[str, Path]:
-        assert cache.__class__.__name__ == "JsonCallCache"
+        assert cache.__class__.__name__ == "SqliteCallCache"
         return {"result": path}
 
     def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:

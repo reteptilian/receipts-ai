@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 from receipts_ai.config import first_config_value
 
 DEFAULT_RECEIPT_MODEL_ID = "prebuilt-receipt"
@@ -30,7 +30,7 @@ def analyze_receipt_file(
     path: str | Path,
     *,
     client: AnalyzeDocumentClient | None = None,
-    cache: JsonCallCache | None = None,
+    cache: SqliteCallCache | None = None,
 ) -> Any:
     return analyze_receipt_bytes(Path(path).read_bytes(), client=client, cache=cache)
 
@@ -39,7 +39,7 @@ def analyze_receipt_bytes(
     document: bytes,
     *,
     client: AnalyzeDocumentClient | None = None,
-    cache: JsonCallCache | None = None,
+    cache: SqliteCallCache | None = None,
 ) -> Any:
     if not document:
         raise ValueError("document must not be empty")

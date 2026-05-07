@@ -14,7 +14,7 @@ from typing import TypedDict, Unpack
 
 import pytest
 
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 from receipts_ai.categorization import (
     DEFAULT_OLLAMA_URL,
     MAX_TAXONOMY_ALIAS_CHOICES,
@@ -1330,31 +1330,29 @@ def test_url_lib_ollama_client_keeps_alias_choice_case_distinct(
     assert math.isclose(completion.probabilities[1].probability, math.exp(-2.0))
 
 
-def test_cached_category_model_client_reuses_json_file(tmp_path: Path):
-    cache_path = tmp_path / "api-cache.json"
+def test_cached_category_model_client_reuses_sqlite_cache(tmp_path: Path):
+    cache_path = tmp_path / "api-cache.sqlite"
     first_client = FakeCategoryClient(["Groceries"])
-    cached_client = CachedCategoryModelClient(client=first_client, cache=JsonCallCache(cache_path))
+    cached_client = CachedCategoryModelClient(client=first_client, cache=SqliteCallCache(cache_path))
 
     first_result = cached_client.complete("Choose one")
 
     second_client = FakeCategoryClient(["Should not be used"])
     second_cached_client = CachedCategoryModelClient(
-        client=second_client, cache=JsonCallCache(cache_path)
+        client=second_client, cache=SqliteCallCache(cache_path)
     )
     second_result = second_cached_client.complete("Choose one")
 
     assert first_result == second_result == "Groceries"
     assert first_client.prompts == ["Choose one"]
     assert second_client.prompts == []
-    payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    assert payload["ollama"][0]["request"] == {"prompt": "Choose one"}
-    assert payload["ollama"][0]["response"] == "Groceries"
+    assert SqliteCallCache(cache_path).get("ollama", {"prompt": "Choose one"}) == "Groceries"
 
 
 def test_cached_category_model_client_reuses_choice_response(tmp_path: Path):
-    cache_path = tmp_path / "api-cache.json"
+    cache_path = tmp_path / "api-cache.sqlite"
     first_client = FakeCategoryClient(["Groceries"])
-    cached_client = CachedCategoryModelClient(client=first_client, cache=JsonCallCache(cache_path))
+    cached_client = CachedCategoryModelClient(client=first_client, cache=SqliteCallCache(cache_path))
 
     first_result = cached_client.complete_choice(
         "Choose one", choices=("Groceries", "Restaurants & Dining Out")
@@ -1362,7 +1360,7 @@ def test_cached_category_model_client_reuses_choice_response(tmp_path: Path):
 
     second_client = FakeCategoryClient(["Should not be used"])
     second_cached_client = CachedCategoryModelClient(
-        client=second_client, cache=JsonCallCache(cache_path)
+        client=second_client, cache=SqliteCallCache(cache_path)
     )
     second_result = second_cached_client.complete_choice(
         "Choose one", choices=("Groceries", "Restaurants & Dining Out")
@@ -1371,18 +1369,22 @@ def test_cached_category_model_client_reuses_choice_response(tmp_path: Path):
     assert first_result == second_result == "Groceries"
     assert first_client.prompts == ["Choose one"]
     assert second_client.prompts == []
-    payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    assert payload["ollama"][0]["request"] == {
-        "prompt": "Choose one",
-        "choices": ["Groceries", "Restaurants & Dining Out"],
-        "format": "category_choice_schema_v1",
-    }
-    assert payload["ollama"][0]["response"] == "Groceries"
+    assert (
+        SqliteCallCache(cache_path).get(
+            "ollama",
+            {
+                "prompt": "Choose one",
+                "choices": ["Groceries", "Restaurants & Dining Out"],
+                "format": "category_choice_schema_v1",
+            },
+        )
+        == "Groceries"
+    )
 
 
 def test_cached_category_model_client_does_not_create_client_on_cache_hit(tmp_path: Path):
-    cache_path = tmp_path / "api-cache.json"
-    cache = JsonCallCache(cache_path)
+    cache_path = tmp_path / "api-cache.sqlite"
+    cache = SqliteCallCache(cache_path)
     cache.set("ollama", {"prompt": "Choose one"}, "Groceries")
     factory_calls = 0
 
@@ -1392,7 +1394,7 @@ def test_cached_category_model_client_does_not_create_client_on_cache_hit(tmp_pa
         return FakeCategoryClient(["Should not be used"])
 
     client = CachedCategoryModelClient(
-        cache=JsonCallCache(cache_path), client_factory=client_factory
+        cache=SqliteCallCache(cache_path), client_factory=client_factory
     )
 
     result = client.complete("Choose one")
