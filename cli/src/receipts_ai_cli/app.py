@@ -11,9 +11,11 @@ from typing import cast
 
 from pydantic import ValidationError
 from receipts_ai.firestore_transactions import (
+    link_bank_statement_transaction_to_receipt,
     set_receipt_item_user_overrides,
     set_transaction_user_overrides,
     transactions_from_firestore,
+    unlink_bank_statement_transaction_from_receipt,
 )
 from receipts_ai.models.transaction import (
     LineType,
@@ -207,9 +209,8 @@ class ReceiptItemsScreen(Screen[None]):
         table.zebra_stripes = True
         table.add_columns(*(column.label for column in RECEIPT_ITEM_COLUMNS))
 
-        if (
-            getattr(self._transaction, "ingestion_type", None) == "receipt_img"
-            and (ingestion_file_url := getattr(self._transaction, "ingestion_file_url", None))
+        if getattr(self._transaction, "ingestion_type", None) == "receipt_img" and (
+            ingestion_file_url := getattr(self._transaction, "ingestion_file_url", None)
         ):
             self.run_worker(
                 lambda: _open_file_in_external_viewer(ingestion_file_url),
@@ -306,7 +307,8 @@ class ReceiptItemsScreen(Screen[None]):
     def _persist_transaction_overrides(self) -> None:
         try:
             set_transaction_user_overrides(
-                self._transaction.id, cast(TransactionUserOverrides, self._transaction.user_overrides)
+                self._transaction.id,
+                cast(TransactionUserOverrides, self._transaction.user_overrides),
             )
             self.app.call_from_thread(self._show_edit_status, "Transaction override persisted")
         except Exception as exc:
@@ -438,6 +440,9 @@ class ReceiptsAIApp(App[None]):
 
     BINDINGS = [
         ("q", "quit", "Quit"),
+        ("space", "toggle_transaction_selection", "Select"),
+        ("l", "link_selected_transactions", "Link"),
+        ("u", "unlink_transaction", "Unlink"),
     ]
 
     def __init__(
@@ -448,6 +453,8 @@ class ReceiptsAIApp(App[None]):
         super().__init__()
         self._transaction_loader = transaction_loader
         self._transactions_by_id: dict[str, Transaction] = {}
+        self._receipt_transactions_by_display_id: dict[str, Transaction] = {}
+        self._selected_transaction_ids: set[str] = set()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -491,16 +498,24 @@ class ReceiptsAIApp(App[None]):
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
         table.clear()
         sorted_transactions = sorted(transactions, key=_transaction_sort_key)
+        display_transactions = _display_transactions(sorted_transactions)
         self._transactions_by_id = {
             transaction.id: transaction for transaction in sorted_transactions
         }
-        for transaction in sorted_transactions:
+        self._receipt_transactions_by_display_id = _receipt_transactions_by_display_id(
+            display_transactions, self._transactions_by_id
+        )
+        self._selected_transaction_ids.intersection_update(self._transactions_by_id)
+        for transaction in display_transactions:
             table.add_row(
                 _effective_transaction_date(transaction).isoformat(),
                 _effective_transaction_payee(transaction),
                 transaction.description or "",
                 transaction.ingestion_filename or "",
-                _format_receipt_indicator(transaction),
+                _format_receipt_indicator(
+                    self._receipt_transactions_by_display_id.get(transaction.id, transaction),
+                    selected=transaction.id in self._selected_transaction_ids,
+                ),
                 _format_amount(_effective_transaction_amount(transaction), transaction.currency),
                 key=transaction.id,
             )
@@ -513,9 +528,14 @@ class ReceiptsAIApp(App[None]):
 
         status = self.query_one("#status", Static)
         status.remove_class("error")
-        transaction_count = len(transactions)
+        transaction_count = len(display_transactions)
+        record_count = len(transactions)
+        selected_count = len(self._selected_transaction_ids)
+        selected_status = f" | {selected_count} selected" if selected_count else ""
+        record_status = f" ({record_count} records)" if record_count != transaction_count else ""
         status.update(
             f"{transaction_count} transaction{'s' if transaction_count != 1 else ''}"
+            f"{record_status}{selected_status}"
             if transaction_count
             else "No transactions found"
         )
@@ -534,7 +554,7 @@ class ReceiptsAIApp(App[None]):
         if transaction_id is None:
             return
 
-        transaction = self._transactions_by_id.get(transaction_id)
+        transaction = self._receipt_transactions_by_display_id.get(transaction_id)
         if transaction is None or not _has_receipt_items(transaction):
             return
 
@@ -542,6 +562,116 @@ class ReceiptsAIApp(App[None]):
             self.run_worker(self._load_transactions, thread=True, name="load-transactions")
 
         self.push_screen(ReceiptItemsScreen(transaction), on_return)
+
+    def action_toggle_transaction_selection(self) -> None:
+        transaction_id = self._current_transaction_id()
+        if transaction_id is None:
+            return
+        if transaction_id in self._selected_transaction_ids:
+            self._selected_transaction_ids.remove(transaction_id)
+        else:
+            self._selected_transaction_ids.add(transaction_id)
+        self._refresh_visible_transactions()
+
+    def action_link_selected_transactions(self) -> None:
+        if len(self._selected_transaction_ids) != 2:
+            self._show_status("Select exactly one BST and one RBT, then press l")
+            return
+
+        selected = [
+            self._transactions_by_id[transaction_id]
+            for transaction_id in self._selected_transaction_ids
+            if transaction_id in self._transactions_by_id
+        ]
+        bank_statement = next(
+            (
+                transaction
+                for transaction in selected
+                if _is_bank_statement_transaction(transaction)
+            ),
+            None,
+        )
+        receipt_based = next(
+            (transaction for transaction in selected if _is_receipt_based_transaction(transaction)),
+            None,
+        )
+        if bank_statement is None or receipt_based is None:
+            self._show_status("Selection must contain one BST and one RBT", error=True)
+            return
+
+        self._show_status("Linking transactions...")
+        self.run_worker(
+            lambda: self._persist_transaction_link(bank_statement.id, receipt_based.id),
+            thread=True,
+            name="link-transactions",
+        )
+
+    def action_unlink_transaction(self) -> None:
+        transaction_id = self._current_transaction_id()
+        if transaction_id is None:
+            return
+        transaction = self._transactions_by_id.get(transaction_id)
+        if transaction is None:
+            return
+        if not _is_bank_statement_transaction(transaction):
+            self._show_status("Move to the linked BST row and press u", error=True)
+            return
+        if transaction.linked_receipt_based_transaction_id is None:
+            self._show_status("Current BST is not linked", error=True)
+            return
+
+        self._show_status("Unlinking transaction...")
+        self.run_worker(
+            lambda: self._persist_transaction_unlink(transaction.id),
+            thread=True,
+            name="unlink-transaction",
+        )
+
+    def _persist_transaction_link(self, bank_statement_id: str, receipt_based_id: str) -> None:
+        try:
+            link_bank_statement_transaction_to_receipt(bank_statement_id, receipt_based_id)
+            self._selected_transaction_ids.clear()
+            self.call_from_thread(self._show_status, "Transactions linked")
+            self.call_from_thread(
+                lambda: self.run_worker(
+                    self._load_transactions, thread=True, name="load-transactions"
+                )
+            )
+        except Exception as exc:
+            self.call_from_thread(self._show_status, f"Failed to link: {exc}", True)
+
+    def _persist_transaction_unlink(self, bank_statement_id: str) -> None:
+        try:
+            unlink_bank_statement_transaction_from_receipt(bank_statement_id)
+            self._selected_transaction_ids.clear()
+            self.call_from_thread(self._show_status, "Transaction unlinked")
+            self.call_from_thread(
+                lambda: self.run_worker(
+                    self._load_transactions, thread=True, name="load-transactions"
+                )
+            )
+        except Exception as exc:
+            self.call_from_thread(self._show_status, f"Failed to unlink: {exc}", True)
+
+    def _current_transaction_id(self) -> str | None:
+        table = cast(DataTable[str], self.query_one("#transactions", DataTable))
+        coordinate = table.cursor_coordinate
+        if not table.is_valid_coordinate(coordinate):
+            return None
+        row_key = table.coordinate_to_cell_key(coordinate).row_key
+        value = row_key.value
+        return value if isinstance(value, str) else None
+
+    def _refresh_visible_transactions(self) -> None:
+        self._show_transactions(list(self._transactions_by_id.values()))
+
+    def _show_status(self, message: str, error: bool = False) -> None:
+        status = self.query_one("#status", Static)
+        if error:
+            status.add_class("error")
+        else:
+            status.remove_class("error")
+        status.update(escape(message))
 
 
 def _transaction_sort_key(transaction: Transaction) -> tuple[object, ...]:
@@ -568,13 +698,50 @@ def _format_amount(amount: str, currency: str) -> str:
     return f"{formatted_amount} {currency}"
 
 
-def _format_receipt_indicator(transaction: Transaction) -> str:
-    return "Y" if _has_receipt_items(transaction) else ""
+def _display_transactions(transactions: Sequence[Transaction]) -> list[Transaction]:
+    linked_receipt_ids = {
+        transaction.linked_receipt_based_transaction_id
+        for transaction in transactions
+        if _is_bank_statement_transaction(transaction)
+        and transaction.linked_receipt_based_transaction_id is not None
+    }
+    return [transaction for transaction in transactions if transaction.id not in linked_receipt_ids]
+
+
+def _receipt_transactions_by_display_id(
+    display_transactions: Sequence[Transaction],
+    transactions_by_id: dict[str, Transaction],
+) -> dict[str, Transaction]:
+    receipt_transactions: dict[str, Transaction] = {}
+    for transaction in display_transactions:
+        linked_receipt_id = transaction.linked_receipt_based_transaction_id
+        if linked_receipt_id is not None and linked_receipt_id in transactions_by_id:
+            receipt_transactions[transaction.id] = transactions_by_id[linked_receipt_id]
+        elif _has_receipt_items(transaction):
+            receipt_transactions[transaction.id] = transaction
+    return receipt_transactions
+
+
+def _format_receipt_indicator(transaction: Transaction, *, selected: bool = False) -> str:
+    indicator = "Y" if _has_receipt_items(transaction) else ""
+    if selected:
+        return f"{indicator}*" if indicator else "*"
+    return indicator
 
 
 def _has_receipt_items(transaction: Transaction) -> bool:
     receipt = transaction.receipt
     return receipt is not None and bool(receipt.items)
+
+
+def _is_bank_statement_transaction(transaction: Transaction) -> bool:
+    record_type = getattr(transaction, "record_type", None)
+    return record_type == "bank_statement" or transaction.source == "bank_statement"
+
+
+def _is_receipt_based_transaction(transaction: Transaction) -> bool:
+    record_type = getattr(transaction, "record_type", None)
+    return record_type == "receipt_based" or transaction.source == "receipt"
 
 
 def _receipt_item_row(item: ReceiptItem) -> list[str]:
@@ -659,4 +826,3 @@ def _parse_optional_line_type(value: str) -> LineType | None:
 
 def main() -> None:
     ReceiptsAIApp().run()
-

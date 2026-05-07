@@ -6,6 +6,7 @@ import pytest
 from receipts_ai.models.transaction import (
     Receipt,
     ReceiptItem,
+    RecordType,
     Source,
     Transaction,
     TransactionUserOverrides,
@@ -122,6 +123,127 @@ async def test_app_marks_transactions_with_receipt_items() -> None:
         row = table.get_row_at(0)
 
     assert row[4] == "Y"
+
+
+@pytest.mark.anyio
+async def test_app_collapses_linked_bst_and_rbt_with_receipt_indicator() -> None:
+    bst = _transaction(
+        "statement",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    bst.record_type = RecordType.bank_statement
+    bst.linked_receipt_based_transaction_id = "receipt"
+    rbt = Transaction(
+        id="receipt",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        transaction_date=date(2026, 5, 6),
+        payee="Coffee Shop",
+        amount="-7.5",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Latte", amount="7.5", net_amount="7.5")]),
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [bst, rbt])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        row = table.get_row_at(0)
+
+    assert table.row_count == 1
+    assert row[1] == "Payee statement"
+    assert row[4] == "Y"
+
+
+@pytest.mark.anyio
+async def test_app_links_selected_bst_and_rbt_then_refreshes() -> None:
+    bst = _transaction(
+        "statement",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    bst.record_type = RecordType.bank_statement
+    rbt = Transaction(
+        id="receipt",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        transaction_date=date(2026, 5, 6),
+        payee="Coffee Shop",
+        amount="-7.5",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Latte", amount="7.5", net_amount="7.5")]),
+    )
+    transactions = [bst, rbt]
+
+    def link_transactions(bank_statement_id: str, receipt_based_id: str) -> None:
+        assert bank_statement_id == "statement"
+        assert receipt_based_id == "receipt"
+        bst.linked_receipt_based_transaction_id = receipt_based_id
+        rbt.linked_transaction_ids = [bank_statement_id]
+
+    app = ReceiptsAIApp(transaction_loader=lambda: list(transactions))
+
+    with patch(
+        "receipts_ai_cli.app.link_bank_statement_transaction_to_receipt",
+        side_effect=link_transactions,
+    ) as mock_link:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("space", "down", "space", "l")
+            await pilot.pause(0.5)
+
+            table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+
+        mock_link.assert_called_once_with("statement", "receipt")
+
+    assert table.row_count == 1
+    assert table.get_row_at(0)[4] == "Y"
+
+
+@pytest.mark.anyio
+async def test_app_unlinks_current_linked_bst_then_refreshes() -> None:
+    bst = _transaction(
+        "statement",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    bst.record_type = RecordType.bank_statement
+    bst.linked_receipt_based_transaction_id = "receipt"
+    rbt = Transaction(
+        id="receipt",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        linked_transaction_ids=["statement"],
+        transaction_date=date(2026, 5, 6),
+        payee="Coffee Shop",
+        amount="-7.5",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Latte", amount="7.5", net_amount="7.5")]),
+    )
+
+    def unlink_transaction(bank_statement_id: str) -> None:
+        assert bank_statement_id == "statement"
+        bst.linked_receipt_based_transaction_id = None
+        rbt.linked_transaction_ids = []
+
+    app = ReceiptsAIApp(transaction_loader=lambda: [bst, rbt])
+
+    with patch(
+        "receipts_ai_cli.app.unlink_bank_statement_transaction_from_receipt",
+        side_effect=unlink_transaction,
+    ) as mock_unlink:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("u")
+            await pilot.pause(0.5)
+
+            table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+
+        mock_unlink.assert_called_once_with("statement")
+
+    assert table.row_count == 2
 
 
 @pytest.mark.anyio

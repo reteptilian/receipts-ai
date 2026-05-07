@@ -33,7 +33,7 @@ from receipts_ai.firestore_client import (
     FirestoreClient,
     create_firestore_client,
 )
-from receipts_ai.models.transaction import IngestionType, Receipt, Transaction
+from receipts_ai.models.transaction import IngestionType, Receipt, RecordType, Transaction
 from receipts_ai.openai_receipt_extraction import (
     DEFAULT_OPENAI_MODEL,
     OPENAI_MODEL_ENV_VAR,
@@ -419,6 +419,8 @@ def populate_transaction_ingestion_metadata(
     transaction.ingestion_file_url = ingestion_file_url
     transaction.ingestion_file_sha256_hex = ingestion_file_sha256_hex
     transaction.ingestion_type = ingestion_type
+    if ingestion_type == IngestionType.receipt_img:
+        transaction.record_type = RecordType.receipt_based
     return transaction
 
 

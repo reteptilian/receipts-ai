@@ -30,6 +30,7 @@ from receipts_ai.models.transaction import (
     IngestionType,
     LineType,
     Receipt,
+    RecordType,
     Source,
     Transaction,
 )
@@ -196,6 +197,7 @@ def test_writes_transaction_fields_on_each_csv_receipt_item_row():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
+        record_type=RecordType.receipt_based,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
         ingestion_file_url="file:///tmp/receipt.pdf",
@@ -261,6 +263,7 @@ def test_transaction_json_output_wraps_nested_receipt_struct():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
+        record_type=RecordType.receipt_based,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
         ingestion_file_url="file:///tmp/receipt.pdf",
@@ -320,6 +323,7 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
     transaction = Transaction(
         id="receipt_1",
         source=Source.receipt,
+        record_type=RecordType.receipt_based,
         ingestion_datetime=datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC),
         ingestion_filename="receipt.pdf",
         ingestion_file_url="file:///tmp/receipt.pdf",
@@ -339,6 +343,7 @@ def test_transaction_firestore_document_uses_json_safe_aliases():
 
     assert document["transactionDate"] == "2026-04-27"
     assert document["source"] == "receipt"
+    assert document["recordType"] == "receipt_based"
     assert document["ingestionDatetime"] == "2026-05-06T07:08:09Z"
     assert document["ingestionFilename"] == "receipt.pdf"
     assert document["ingestionFileUrl"] == "file:///tmp/receipt.pdf"

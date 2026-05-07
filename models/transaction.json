@@ -16,6 +16,15 @@
       "enum": ["bank_statement", "receipt", "amazon_order", "manual"],
       "description": "How this transaction entered the system."
     },
+    "recordType": {
+      "type": "string",
+      "enum": ["receipt_based", "bank_statement"],
+      "description": "Transaction record type for receipt matching workflows. Receipt-based transactions (RBTs) are created by ingesting receipt images; bank statement transactions (BSTs) are created by ingesting bank statement files."
+    },
+    "linkedReceiptBasedTransactionId": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "For a bank statement transaction (BST), the receipt-based transaction (RBT) linked to this statement row."
+    },
     "ingestionDatetime": {
       "$ref": "#/$defs/isoDateTime",
       "description": "ISO 8601 date-time when this transaction was ingested into the system."

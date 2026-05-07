@@ -67,6 +67,7 @@ def test_parses_sgml_ofx_bank_transactions():
     assert len(transactions) == 1
     transaction = transactions[0]
     assert transaction.source == Source.bank_statement
+    assert transaction.record_type == "bank_statement"
     assert transaction.external_id == "2026042701"
     assert transaction.account_id == "123456789:987654321:CHECKING"
     assert transaction.transaction_date == date(2026, 4, 27)

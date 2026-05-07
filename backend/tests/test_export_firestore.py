@@ -13,10 +13,12 @@ import receipts_ai
 from receipts_ai import export_firestore
 from receipts_ai.export_firestore import export_firestore_receipt_items_csv
 from receipts_ai.firestore_transactions import (
+    link_bank_statement_transaction_to_receipt,
     set_receipt_item_user_overrides,
     set_transaction_user_overrides,
     stream_transactions_from_firestore,
     transactions_from_firestore,
+    unlink_bank_statement_transaction_from_receipt,
 )
 from receipts_ai.ingest_receipts import transaction_firestore_document
 from receipts_ai.models.transaction import (
@@ -25,6 +27,7 @@ from receipts_ai.models.transaction import (
     LineType,
     Receipt,
     ReceiptItemUserOverrides,
+    RecordType,
     Source,
     Transaction,
 )
@@ -293,6 +296,132 @@ def test_sets_transaction_user_overrides_in_firestore():
             },
             True,
         )
+    ]
+
+
+def test_links_bank_statement_transaction_to_receipt_in_firestore():
+    updated_at = datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC)
+    bst = Transaction(
+        id="statement_1",
+        source=Source.bank_statement,
+        record_type=RecordType.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+    )
+    rbt = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+    )
+    client = FakeFirestoreClient(
+        [
+            FakeDocumentSnapshot("statement_1", transaction_firestore_document(bst)),
+            FakeDocumentSnapshot("receipt_1", transaction_firestore_document(rbt)),
+        ]
+    )
+
+    link_bank_statement_transaction_to_receipt(
+        "statement_1",
+        "receipt_1",
+        client=client,
+        collection="test-transactions",
+        updated_at=updated_at,
+    )
+
+    collection = client.collection_references["test-transactions"]
+    assert collection.set_calls == [
+        (
+            "statement_1",
+            {
+                "recordType": "bank_statement",
+                "linkedReceiptBasedTransactionId": "receipt_1",
+                "linkedTransactionIds": ["receipt_1"],
+                "matchStatus": "confirmed",
+                "matchSource": "user",
+                "updatedAt": "2026-05-06T07:08:09Z",
+            },
+            True,
+        ),
+        (
+            "receipt_1",
+            {
+                "recordType": "receipt_based",
+                "linkedTransactionIds": ["statement_1"],
+                "matchStatus": "confirmed",
+                "matchSource": "user",
+                "updatedAt": "2026-05-06T07:08:09Z",
+            },
+            True,
+        ),
+    ]
+
+
+def test_unlinks_bank_statement_transaction_from_receipt_in_firestore():
+    updated_at = datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC)
+    bst = Transaction(
+        id="statement_1",
+        source=Source.bank_statement,
+        record_type=RecordType.bank_statement,
+        linked_receipt_based_transaction_id="receipt_1",
+        linked_transaction_ids=["receipt_1"],
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+    )
+    rbt = Transaction(
+        id="receipt_1",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        linked_transaction_ids=["statement_1"],
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        amount="-7.00",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+    )
+    client = FakeFirestoreClient(
+        [
+            FakeDocumentSnapshot("statement_1", transaction_firestore_document(bst)),
+            FakeDocumentSnapshot("receipt_1", transaction_firestore_document(rbt)),
+        ]
+    )
+
+    unlink_bank_statement_transaction_from_receipt(
+        "statement_1",
+        client=client,
+        collection="test-transactions",
+        updated_at=updated_at,
+    )
+
+    collection = client.collection_references["test-transactions"]
+    assert collection.set_calls == [
+        (
+            "statement_1",
+            {
+                "linkedReceiptBasedTransactionId": None,
+                "linkedTransactionIds": [],
+                "matchStatus": "unmatched",
+                "updatedAt": "2026-05-06T07:08:09Z",
+            },
+            True,
+        ),
+        (
+            "receipt_1",
+            {
+                "linkedTransactionIds": [],
+                "matchStatus": "unmatched",
+                "updatedAt": "2026-05-06T07:08:09Z",
+            },
+            True,
+        ),
     ]
 
 

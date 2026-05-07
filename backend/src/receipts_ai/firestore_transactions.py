@@ -7,17 +7,23 @@ from typing import Any, Protocol, cast
 
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION, create_firestore_client
 from receipts_ai.models.transaction import (
+    MatchSource,
+    MatchStatus,
     ReceiptItemUserOverrides,
+    RecordType,
+    Source,
     Transaction,
     TransactionUserOverrides,
 )
 
 __all__ = (
     "FirestoreTransactionClient",
+    "link_bank_statement_transaction_to_receipt",
     "set_receipt_item_user_overrides",
     "set_transaction_user_overrides",
     "stream_transactions_from_firestore",
     "transactions_from_firestore",
+    "unlink_bank_statement_transaction_from_receipt",
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -178,6 +184,112 @@ def set_receipt_item_user_overrides(
     )
 
 
+def link_bank_statement_transaction_to_receipt(
+    bank_statement_transaction_id: str,
+    receipt_based_transaction_id: str,
+    *,
+    client: FirestoreTransactionClient | None = None,
+    collection: str = DEFAULT_FIRESTORE_COLLECTION,
+    updated_at: datetime | None = None,
+) -> None:
+    """Link a bank statement transaction (BST) to a receipt-based transaction (RBT)."""
+    if not collection:
+        raise ValueError("collection must not be empty")
+    if not bank_statement_transaction_id:
+        raise ValueError("bank_statement_transaction_id must not be empty")
+    if not receipt_based_transaction_id:
+        raise ValueError("receipt_based_transaction_id must not be empty")
+    if bank_statement_transaction_id == receipt_based_transaction_id:
+        raise ValueError("BST and RBT transaction ids must be different")
+
+    firestore_client = _firestore_transaction_client(client)
+    bst_ref = firestore_client.collection(collection).document(bank_statement_transaction_id)
+    rbt_ref = firestore_client.collection(collection).document(receipt_based_transaction_id)
+    bst = _transaction_from_reference(bst_ref, collection=collection)
+    rbt = _transaction_from_reference(rbt_ref, collection=collection)
+
+    if not _is_bank_statement_transaction(bst):
+        raise ValueError(f"transaction {bank_statement_transaction_id} is not a BST")
+    if not _is_receipt_based_transaction(rbt):
+        raise ValueError(f"transaction {receipt_based_transaction_id} is not an RBT")
+
+    timestamp = _json_datetime(updated_at or datetime.now(UTC))
+    bst_ref.set(
+        {
+            "recordType": RecordType.bank_statement.value,
+            "linkedReceiptBasedTransactionId": receipt_based_transaction_id,
+            "linkedTransactionIds": _linked_transaction_ids(bst, receipt_based_transaction_id),
+            "matchStatus": MatchStatus.confirmed.value,
+            "matchSource": MatchSource.user.value,
+            "updatedAt": timestamp,
+        },
+        merge=True,
+    )
+    rbt_ref.set(
+        {
+            "recordType": RecordType.receipt_based.value,
+            "linkedTransactionIds": _linked_transaction_ids(rbt, bank_statement_transaction_id),
+            "matchStatus": MatchStatus.confirmed.value,
+            "matchSource": MatchSource.user.value,
+            "updatedAt": timestamp,
+        },
+        merge=True,
+    )
+
+
+def unlink_bank_statement_transaction_from_receipt(
+    bank_statement_transaction_id: str,
+    *,
+    client: FirestoreTransactionClient | None = None,
+    collection: str = DEFAULT_FIRESTORE_COLLECTION,
+    updated_at: datetime | None = None,
+) -> None:
+    """Remove the RBT link from a bank statement transaction."""
+    if not collection:
+        raise ValueError("collection must not be empty")
+    if not bank_statement_transaction_id:
+        raise ValueError("bank_statement_transaction_id must not be empty")
+
+    firestore_client = _firestore_transaction_client(client)
+    bst_ref = firestore_client.collection(collection).document(bank_statement_transaction_id)
+    bst = _transaction_from_reference(bst_ref, collection=collection)
+    if not _is_bank_statement_transaction(bst):
+        raise ValueError(f"transaction {bank_statement_transaction_id} is not a BST")
+
+    receipt_based_transaction_id = bst.linked_receipt_based_transaction_id
+    timestamp = _json_datetime(updated_at or datetime.now(UTC))
+    bst_ref.set(
+        {
+            "linkedReceiptBasedTransactionId": None,
+            "linkedTransactionIds": _linked_transaction_ids_without(
+                bst, receipt_based_transaction_id
+            ),
+            "matchStatus": MatchStatus.unmatched.value,
+            "updatedAt": timestamp,
+        },
+        merge=True,
+    )
+    if receipt_based_transaction_id is None:
+        return
+
+    rbt_ref = firestore_client.collection(collection).document(receipt_based_transaction_id)
+    rbt_snapshot = rbt_ref.get()
+    rbt_document = rbt_snapshot.to_dict()
+    if rbt_document is None:
+        return
+    rbt = Transaction.model_validate(rbt_document)
+    rbt_ref.set(
+        {
+            "linkedTransactionIds": _linked_transaction_ids_without(
+                rbt, bank_statement_transaction_id
+            ),
+            "matchStatus": MatchStatus.unmatched.value,
+            "updatedAt": timestamp,
+        },
+        merge=True,
+    )
+
+
 def _firestore_transaction_client(
     client: FirestoreTransactionClient | None,
 ) -> FirestoreTransactionClient:
@@ -186,6 +298,45 @@ def _firestore_transaction_client(
         if client is not None
         else cast(FirestoreTransactionClient, cast(object, create_firestore_client()))
     )
+
+
+def _transaction_from_reference(
+    document_reference: FirestoreDocumentReference, *, collection: str
+) -> Transaction:
+    snapshot = document_reference.get()
+    document = snapshot.to_dict()
+    if document is None:
+        raise ValueError(f"transaction {snapshot.id} does not exist in collection {collection}")
+    return Transaction.model_validate(document)
+
+
+def _is_bank_statement_transaction(transaction: Transaction) -> bool:
+    return (
+        transaction.record_type == RecordType.bank_statement
+        or transaction.source == Source.bank_statement
+    )
+
+
+def _is_receipt_based_transaction(transaction: Transaction) -> bool:
+    return (
+        transaction.record_type == RecordType.receipt_based or transaction.source == Source.receipt
+    )
+
+
+def _linked_transaction_ids(transaction: Transaction, linked_transaction_id: str) -> list[str]:
+    return sorted({*(transaction.linked_transaction_ids or []), linked_transaction_id})
+
+
+def _linked_transaction_ids_without(
+    transaction: Transaction, linked_transaction_id: str | None
+) -> list[str]:
+    if linked_transaction_id is None:
+        return list(transaction.linked_transaction_ids or [])
+    return [
+        transaction_id
+        for transaction_id in transaction.linked_transaction_ids or []
+        if transaction_id != linked_transaction_id
+    ]
 
 
 def _transaction_user_overrides_document(

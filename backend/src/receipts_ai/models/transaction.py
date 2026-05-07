@@ -22,6 +22,15 @@ class Source(StrEnum):
     manual = "manual"
 
 
+class RecordType(StrEnum):
+    """
+    Transaction record type for receipt matching workflows. Receipt-based transactions (RBTs) are created by ingesting receipt images; bank statement transactions (BSTs) are created by ingesting bank statement files.
+    """
+
+    receipt_based = "receipt_based"
+    bank_statement = "bank_statement"
+
+
 class IngestionType(StrEnum):
     """
     Input format or importer used to ingest this transaction.
@@ -476,6 +485,21 @@ class Transaction(BaseModel):
         ),
     ]
     source: Annotated[Source, Field(description="How this transaction entered the system.")]
+    record_type: Annotated[
+        RecordType | None,
+        Field(
+            alias="recordType",
+            description="Transaction record type for receipt matching workflows. Receipt-based transactions (RBTs) are created by ingesting receipt images; bank statement transactions (BSTs) are created by ingesting bank statement files.",
+        ),
+    ] = None
+    linked_receipt_based_transaction_id: Annotated[
+        str | None,
+        Field(
+            alias="linkedReceiptBasedTransactionId",
+            description="For a bank statement transaction (BST), the receipt-based transaction (RBT) linked to this statement row.",
+            min_length=1,
+        ),
+    ] = None
     ingestion_datetime: Annotated[
         AwareDatetime | None,
         Field(

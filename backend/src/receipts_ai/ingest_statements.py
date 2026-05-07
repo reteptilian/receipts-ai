@@ -35,7 +35,14 @@ from receipts_ai.ingest_receipts import (
     sha256_hex,
     upsert_transaction_to_firestore,
 )
-from receipts_ai.models.transaction import IngestionType, Kind, Source, Status, Transaction
+from receipts_ai.models.transaction import (
+    IngestionType,
+    Kind,
+    RecordType,
+    Source,
+    Status,
+    Transaction,
+)
 
 CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
@@ -447,6 +454,7 @@ def _transaction_from_block(
     return Transaction(
         id=_transaction_id(account_id=account_id, fitid=fitid, transaction_block=transaction_block),
         source=Source.bank_statement,
+        record_type=RecordType.bank_statement,
         external_id=fitid,
         account_id=account_id,
         transaction_date=transaction_date,
@@ -478,6 +486,7 @@ def _transaction_from_fidelity_row(row: dict[str, str], *, row_index: int) -> Tr
             transaction_block="|".join(row.get(fieldname, "") for fieldname in row),
         ),
         source=Source.bank_statement,
+        record_type=RecordType.bank_statement,
         external_id=external_id,
         transaction_date=transaction_date,
         description=description,
