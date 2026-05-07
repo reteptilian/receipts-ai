@@ -784,9 +784,9 @@ class ReceiptsAIApp(App[None]):
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
         table.cursor_type = "row"
         table.zebra_stripes = True
+        column_widths = _transaction_table_column_widths(self.size.width)
         for column_key, label in TRANSACTION_TABLE_COLUMNS:
-            table.add_column(label, key=column_key)
-        self._resize_transaction_columns()
+            table.add_column(label, key=column_key, width=column_widths[column_key])
         table.focus()
         self.run_worker(self._load_transactions, thread=True, name="load-transactions")
 
@@ -996,8 +996,9 @@ class ReceiptsAIApp(App[None]):
         for column, (column_key, _) in zip(
             table.ordered_columns, TRANSACTION_TABLE_COLUMNS, strict=True
         ):
+            column.auto_width = False
             column.width = column_widths[column_key]
-        table.refresh()
+        table.refresh(layout=True)
 
     def _show_status(self, message: str, error: bool = False) -> None:
         status = self.query_one("#status", Static)

@@ -12,6 +12,8 @@ from receipts_ai.models.transaction import (
     Transaction,
     TransactionUserOverrides,
 )
+from textual import events
+from textual.geometry import Size
 from textual.widgets import DataTable, Input, OptionList, Static
 
 from receipts_ai_cli.app import ReceiptItemsScreen, ReceiptsAIApp, TransactionReviewScreen
@@ -72,6 +74,32 @@ async def test_app_displays_transactions_in_table() -> None:
         "",
         "-7.50 USD",
     ]
+
+
+@pytest.mark.anyio
+async def test_transaction_table_description_column_has_capped_fixed_width() -> None:
+    transaction = Transaction(
+        id="transaction_1",
+        source=Source.bank_statement,
+        account_id="checking",
+        transaction_date=date(2026, 5, 6),
+        payee="Coffee Shop",
+        description="X" * 200,
+        amount="-7.5",
+        currency="USD",
+        ingestion_filename="checking.ofx",
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        app.on_resize(events.Resize(Size(200, 24), Size(200, 24)))
+        description_column = table.ordered_columns[2]
+
+    assert description_column.auto_width is False
+    assert description_column.width == 80
 
 
 @pytest.mark.anyio
