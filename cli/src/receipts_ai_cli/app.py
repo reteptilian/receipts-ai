@@ -229,7 +229,11 @@ class TransactionReviewScreen(Screen[None]):
         yield DataTable(id="category-allocations")
         yield Static("Receipt Items", id="receipt-items-title")
         yield DataTable(id="receipt-items")
-        yield Footer()
+        yield Static(
+            "s Save and Exit | a Add allocation | d Delete allocation | "
+            "e Edit cell | Esc/q Exit Without Saving",
+            id="review-controls",
+        )
 
     def on_mount(self) -> None:
         allocations_table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
@@ -633,6 +637,13 @@ class ReceiptsAIApp(App[None]):
 
     #receipt-edit-status.error {
         color: $error;
+    }
+
+    #review-controls {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        color: $text-muted;
     }
 
     .hidden {

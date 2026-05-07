@@ -329,9 +329,12 @@ async def test_enter_on_transaction_without_receipt_items_opens_review_screen() 
 
         screen = app.screen
         receipt_items = cast(DataTable[str], screen.query_one("#receipt-items", DataTable))
+        controls = screen.query_one("#review-controls", Static)
 
     assert isinstance(screen, TransactionReviewScreen)
     assert receipt_items.row_count == 0
+    assert "Save and Exit" in str(controls.content)
+    assert "Exit Without Saving" in str(controls.content)
 
 
 @pytest.mark.anyio
