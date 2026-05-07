@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import cast
+from typing import NamedTuple, cast
 
 from pydantic import ValidationError
 from receipts_ai.categorization import load_budget_category_choices
@@ -41,13 +41,26 @@ TransactionLoader = Callable[[], Sequence[Transaction]]
 ReceiptItemParser = Callable[[str], object | None]
 ReceiptItemFormatter = Callable[[ReceiptItem], str]
 
+
+class TransactionTableColumn(NamedTuple):
+    key: str
+    label: str
+
+
+class TransactionTableFlexColumn(NamedTuple):
+    key: str
+    min_width: int
+    max_width: int
+    weight: int
+
+
 TRANSACTION_TABLE_COLUMNS = (
-    ("date", "Date"),
-    ("payee", "Payee"),
-    ("description", "Description"),
-    ("ingestion_filename", "Ingestion file"),
-    ("receipt", "Receipt?"),
-    ("amount", "Amount"),
+    TransactionTableColumn(key="date", label="Date"),
+    TransactionTableColumn(key="payee", label="Payee"),
+    TransactionTableColumn(key="description", label="Description"),
+    TransactionTableColumn(key="ingestion_filename", label="Ingestion file"),
+    TransactionTableColumn(key="receipt", label="Receipt?"),
+    TransactionTableColumn(key="amount", label="Amount"),
 )
 
 TRANSACTION_TABLE_FIXED_WIDTHS = {
@@ -57,9 +70,9 @@ TRANSACTION_TABLE_FIXED_WIDTHS = {
 }
 
 TRANSACTION_TABLE_FLEX_COLUMNS = (
-    ("payee", 16, 32, 2),
-    ("description", 20, 80, 5),
-    ("ingestion_filename", 14, 48, 2),
+    TransactionTableFlexColumn(key="payee", min_width=16, max_width=40, weight=2),
+    TransactionTableFlexColumn(key="description", min_width=20, max_width=80, weight=5),
+    TransactionTableFlexColumn(key="ingestion_filename", min_width=14, max_width=30, weight=1),
 )
 
 
@@ -369,6 +382,7 @@ class TransactionReviewScreen(Screen[None]):
         value = table.get_cell_at(coordinate)
 
         if table.id == "category-allocations" and coordinate.column == 0:
+
             def check_category_choice(new_value: str | None) -> None:
                 if new_value is not None:
                     self._commit_category_allocation_cell_edit(coordinate, new_value)
@@ -785,8 +799,12 @@ class ReceiptsAIApp(App[None]):
         table.cursor_type = "row"
         table.zebra_stripes = True
         column_widths = _transaction_table_column_widths(self.size.width)
-        for column_key, label in TRANSACTION_TABLE_COLUMNS:
-            table.add_column(label, key=column_key, width=column_widths[column_key])
+        for column in TRANSACTION_TABLE_COLUMNS:
+            table.add_column(
+                column.label,
+                key=column.key,
+                width=column_widths[column.key],
+            )
         table.focus()
         self.run_worker(self._load_transactions, thread=True, name="load-transactions")
 
@@ -993,11 +1011,11 @@ class ReceiptsAIApp(App[None]):
             return
         width = terminal_width or table.size.width or self.size.width
         column_widths = _transaction_table_column_widths(width)
-        for column, (column_key, _) in zip(
+        for table_column, column_config in zip(
             table.ordered_columns, TRANSACTION_TABLE_COLUMNS, strict=True
         ):
-            column.auto_width = False
-            column.width = column_widths[column_key]
+            table_column.auto_width = False
+            table_column.width = column_widths[column_config.key]
         table.refresh(layout=True)
 
     def _show_status(self, message: str, error: bool = False) -> None:
@@ -1026,22 +1044,22 @@ def _transaction_table_column_widths(terminal_width: int) -> dict[str, int]:
     available_width = max(0, terminal_width - len(TRANSACTION_TABLE_COLUMNS) - 1)
     fixed_width = sum(TRANSACTION_TABLE_FIXED_WIDTHS.values())
     flexible_width = max(0, available_width - fixed_width)
-    flex_min_width = sum(min_width for _, min_width, _, _ in TRANSACTION_TABLE_FLEX_COLUMNS)
+    flex_min_width = sum(column.min_width for column in TRANSACTION_TABLE_FLEX_COLUMNS)
     extra_width = max(0, flexible_width - flex_min_width)
-    total_weight = sum(weight for *_, weight in TRANSACTION_TABLE_FLEX_COLUMNS)
+    total_weight = sum(column.weight for column in TRANSACTION_TABLE_FLEX_COLUMNS)
 
     column_widths = dict(TRANSACTION_TABLE_FIXED_WIDTHS)
     remaining_extra_width = extra_width
     remaining_weight = total_weight
-    for column_key, min_width, max_width, weight in TRANSACTION_TABLE_FLEX_COLUMNS:
+    for column in TRANSACTION_TABLE_FLEX_COLUMNS:
         if remaining_weight <= 0:
-            column_width = min_width
+            column_width = column.min_width
         else:
-            weighted_extra_width = remaining_extra_width * weight // remaining_weight
-            column_width = min(max_width, min_width + weighted_extra_width)
-        column_widths[column_key] = column_width
-        remaining_extra_width -= column_width - min_width
-        remaining_weight -= weight
+            weighted_extra_width = remaining_extra_width * column.weight // remaining_weight
+            column_width = min(column.max_width, column.min_width + weighted_extra_width)
+        column_widths[column.key] = column_width
+        remaining_extra_width -= column_width - column.min_width
+        remaining_weight -= column.weight
 
     return column_widths
 
