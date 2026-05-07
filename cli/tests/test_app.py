@@ -12,7 +12,7 @@ from receipts_ai.models.transaction import (
     Transaction,
     TransactionUserOverrides,
 )
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import DataTable, Input, OptionList, Static
 
 from receipts_ai_cli.app import ReceiptItemsScreen, ReceiptsAIApp, TransactionReviewScreen
 
@@ -496,6 +496,58 @@ async def test_receipt_item_description_update() -> None:
     assert transaction.receipt.items[0].user_overrides is not None
     assert transaction.receipt.items[0].user_overrides.description == "New Latte Name"
     assert row[0] == "2026-05-06"
+
+
+@pytest.mark.anyio
+async def test_category_allocation_category_id_uses_budget_category_picker() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with (
+        patch(
+            "receipts_ai_cli.app.load_budget_category_choices",
+            return_value=(
+                "Taxes > Income Taxes",
+                "Miscellaneous > Uncategorized",
+            ),
+        ),
+        patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save,
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+            await pilot.press("enter")
+
+            choice_list = app.screen.query_one("#category-choice-list", OptionList)
+            assert choice_list.option_count == 2
+            await pilot.pause(0.1)
+
+            await pilot.press("down", "enter")
+            await pilot.pause(0.1)
+
+            allocations_table = cast(
+                DataTable[str],
+                app.screen.query_one("#category-allocations", DataTable),
+            )
+            row = allocations_table.get_row_at(0)
+
+            await pilot.press("s")
+            await pilot.pause(0.1)
+
+            assert mock_save.called
+
+    assert row[0] == "Miscellaneous > Uncategorized"
+    assert transaction.user_overrides is not None
+    assert transaction.user_overrides.category_allocations is not None
+    assert transaction.user_overrides.category_allocations[0].category_id == (
+        "Miscellaneous > Uncategorized"
+    )
 
 
 @pytest.mark.anyio

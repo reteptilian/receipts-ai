@@ -681,6 +681,11 @@ def load_budget_categories() -> dict[str, object]:
     return cast(dict[str, object], payload)
 
 
+def load_budget_category_choices(categories: dict[str, object] | None = None) -> tuple[str, ...]:
+    active_categories = categories if categories is not None else load_budget_categories()
+    return tuple(category.path_text for category in _flatten_budget_categories(active_categories))
+
+
 def load_product_taxonomy(path: Path | None = None) -> dict[str, object]:
     taxonomy_path = path if path is not None else _default_product_taxonomy_path()
     taxonomy: dict[str, object] = {}

@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import cast
 
 from pydantic import ValidationError
+from receipts_ai.categorization import load_budget_category_choices
 from receipts_ai.firestore_transactions import (
     link_bank_statement_transaction_to_receipt,
     save_transaction_review_edits,
@@ -26,17 +27,40 @@ from receipts_ai.models.transaction import (
     UserCategoryAllocation,
 )
 from rich.markup import escape
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Center, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import ModalScreen, Screen
-from textual.widgets import DataTable, Footer, Header, Input, Label, Static
+from textual.widgets import DataTable, Footer, Header, Input, Label, OptionList, Static
 from textual.widgets.data_table import RowKey
+from textual.widgets.option_list import Option
 
 TransactionLoader = Callable[[], Sequence[Transaction]]
 
 ReceiptItemParser = Callable[[str], object | None]
 ReceiptItemFormatter = Callable[[ReceiptItem], str]
+
+TRANSACTION_TABLE_COLUMNS = (
+    ("date", "Date"),
+    ("payee", "Payee"),
+    ("description", "Description"),
+    ("ingestion_filename", "Ingestion file"),
+    ("receipt", "Receipt?"),
+    ("amount", "Amount"),
+)
+
+TRANSACTION_TABLE_FIXED_WIDTHS = {
+    "date": 10,
+    "receipt": 8,
+    "amount": 12,
+}
+
+TRANSACTION_TABLE_FLEX_COLUMNS = (
+    ("payee", 16, 32, 2),
+    ("description", 20, 80, 5),
+    ("ingestion_filename", 14, 48, 2),
+)
 
 
 @dataclass(frozen=True)
@@ -164,6 +188,43 @@ class CellEditScreen(ModalScreen[str]):
     ]
 
 
+class CategoryChoiceScreen(ModalScreen[str]):
+    """Screen for choosing a budget category."""
+
+    def __init__(self, value: str, choices: Sequence[str]) -> None:
+        super().__init__()
+        self._value = value
+        self._choices = tuple(choices)
+
+    def compose(self) -> ComposeResult:
+        with Center():
+            with Vertical(id="category-choice-dialog"):
+                yield Label("Choose Category ID")
+                yield OptionList(
+                    *(Option(choice) for choice in self._choices),
+                    id="category-choice-list",
+                )
+                with Horizontal(id="category-choice-buttons"):
+                    yield Static("Enter to Choose / Esc to Cancel", id="category-choice-help")
+
+    def on_mount(self) -> None:
+        choice_list = self.query_one("#category-choice-list", OptionList)
+        if self._value in self._choices:
+            choice_list.highlighted = self._choices.index(self._value)
+        choice_list.focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_index < len(self._choices):
+            self.dismiss(self._choices[event.option_index])
+
+    def action_cancel(self) -> None:
+        self.dismiss()
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+    ]
+
+
 class TransactionReviewScreen(Screen[None]):
     """Screen for drafting and saving transaction review edits."""
 
@@ -183,6 +244,7 @@ class TransactionReviewScreen(Screen[None]):
         transaction: Transaction,
         *,
         receipt_transaction: Transaction | None = None,
+        category_choices: Sequence[str] | None = None,
     ) -> None:
         super().__init__()
         self._source_transaction = transaction
@@ -196,6 +258,11 @@ class TransactionReviewScreen(Screen[None]):
             else None
         )
         self._dirty = False
+        self._category_choices = (
+            tuple(category_choices)
+            if category_choices is not None
+            else load_budget_category_choices()
+        )
 
     def action_exit_without_saving(self) -> None:
         self.dismiss()
@@ -301,6 +368,17 @@ class TransactionReviewScreen(Screen[None]):
         )
         value = table.get_cell_at(coordinate)
 
+        if table.id == "category-allocations" and coordinate.column == 0:
+            def check_category_choice(new_value: str | None) -> None:
+                if new_value is not None:
+                    self._commit_category_allocation_cell_edit(coordinate, new_value)
+
+            self.app.push_screen(
+                CategoryChoiceScreen(str(value), self._category_choices),
+                check_category_choice,
+            )
+            return
+
         def check_edit(new_value: str | None) -> None:
             if new_value is not None:
                 if table.id == "category-allocations":
@@ -312,7 +390,12 @@ class TransactionReviewScreen(Screen[None]):
 
     def action_add_category_allocation(self) -> None:
         allocations = _effective_category_allocations(self._transaction)
-        allocations.append(UserCategoryAllocation(category_id="New Category", amount="0.00"))
+        category_id = (
+            "Miscellaneous > Uncategorized"
+            if "Miscellaneous > Uncategorized" in self._category_choices
+            else self._category_choices[0]
+        )
+        allocations.append(UserCategoryAllocation(category_id=category_id, amount="0.00"))
         self._set_category_allocation_overrides(allocations)
         self._refresh_category_allocations_table()
         self._mark_dirty("Added category allocation")
@@ -369,7 +452,10 @@ class TransactionReviewScreen(Screen[None]):
         if coordinate.row >= len(allocations):
             return
         allocation = allocations[coordinate.row]
-        update = allocation.model_dump()
+        update = {
+            "category_id": allocation.category_id,
+            "amount": allocation.amount,
+        }
         try:
             match coordinate.column:
                 case 0:
@@ -630,6 +716,25 @@ class ReceiptsAIApp(App[None]):
         width: 1fr;
     }
 
+    #category-choice-dialog {
+        padding: 1 2;
+        width: 72;
+        height: 24;
+        border: thick $primary;
+        background: $surface;
+    }
+
+    #category-choice-list {
+        height: 1fr;
+        margin: 1 0;
+    }
+
+    #category-choice-help {
+        color: $text-muted;
+        text-align: center;
+        width: 1fr;
+    }
+
     #receipt-edit-status {
         height: 1;
         padding: 0 1;
@@ -679,16 +784,14 @@ class ReceiptsAIApp(App[None]):
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
         table.cursor_type = "row"
         table.zebra_stripes = True
-        table.add_columns(
-            "Date",
-            "Payee",
-            "Description",
-            "Ingestion file",
-            "Receipt?",
-            "Amount",
-        )
+        for column_key, label in TRANSACTION_TABLE_COLUMNS:
+            table.add_column(label, key=column_key)
+        self._resize_transaction_columns()
         table.focus()
         self.run_worker(self._load_transactions, thread=True, name="load-transactions")
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._resize_transaction_columns(event.size.width)
 
     def _load_transactions(self) -> None:
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
@@ -884,6 +987,18 @@ class ReceiptsAIApp(App[None]):
     def _refresh_visible_transactions(self) -> None:
         self._show_transactions(list(self._transactions_by_id.values()))
 
+    def _resize_transaction_columns(self, terminal_width: int | None = None) -> None:
+        table = cast(DataTable[str], self.query_one("#transactions", DataTable))
+        if len(table.ordered_columns) != len(TRANSACTION_TABLE_COLUMNS):
+            return
+        width = terminal_width or table.size.width or self.size.width
+        column_widths = _transaction_table_column_widths(width)
+        for column, (column_key, _) in zip(
+            table.ordered_columns, TRANSACTION_TABLE_COLUMNS, strict=True
+        ):
+            column.width = column_widths[column_key]
+        table.refresh()
+
     def _show_status(self, message: str, error: bool = False) -> None:
         status = self.query_one("#status", Static)
         if error:
@@ -904,6 +1019,30 @@ def _transaction_sort_key(transaction: Transaction) -> tuple[object, ...]:
         )
 
     return (_effective_transaction_date(transaction), 0, amount)
+
+
+def _transaction_table_column_widths(terminal_width: int) -> dict[str, int]:
+    available_width = max(0, terminal_width - len(TRANSACTION_TABLE_COLUMNS) - 1)
+    fixed_width = sum(TRANSACTION_TABLE_FIXED_WIDTHS.values())
+    flexible_width = max(0, available_width - fixed_width)
+    flex_min_width = sum(min_width for _, min_width, _, _ in TRANSACTION_TABLE_FLEX_COLUMNS)
+    extra_width = max(0, flexible_width - flex_min_width)
+    total_weight = sum(weight for *_, weight in TRANSACTION_TABLE_FLEX_COLUMNS)
+
+    column_widths = dict(TRANSACTION_TABLE_FIXED_WIDTHS)
+    remaining_extra_width = extra_width
+    remaining_weight = total_weight
+    for column_key, min_width, max_width, weight in TRANSACTION_TABLE_FLEX_COLUMNS:
+        if remaining_weight <= 0:
+            column_width = min_width
+        else:
+            weighted_extra_width = remaining_extra_width * weight // remaining_weight
+            column_width = min(max_width, min_width + weighted_extra_width)
+        column_widths[column_key] = column_width
+        remaining_extra_width -= column_width - min_width
+        remaining_weight -= weight
+
+    return column_widths
 
 
 def _format_amount(amount: str, currency: str) -> str:
