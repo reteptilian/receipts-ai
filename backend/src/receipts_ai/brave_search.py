@@ -10,7 +10,7 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Any, Protocol, cast
 
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 from receipts_ai.config import first_config_value
 from receipts_ai.models.transaction import ReceiptItem, Transaction
 
@@ -73,7 +73,7 @@ class CachedBraveSearchClient:
     def __init__(
         self,
         *,
-        cache: JsonCallCache,
+        cache: SqliteCallCache,
         client: BraveSearchClient | None = None,
         client_factory: Callable[[], BraveSearchClient] | None = None,
     ) -> None:

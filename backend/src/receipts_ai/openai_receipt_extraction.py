@@ -12,7 +12,7 @@ from typing import Any, Protocol, cast
 
 from pydantic import ValidationError
 
-from receipts_ai.cache import JsonCallCache
+from receipts_ai.cache import SqliteCallCache
 from receipts_ai.config import config_value
 from receipts_ai.models.transaction import ExtractionMetadata, Source, Transaction
 
@@ -118,7 +118,7 @@ class CachedOpenAIReceiptClient:
     def __init__(
         self,
         *,
-        cache: JsonCallCache,
+        cache: SqliteCallCache,
         client_factory: type[ResponsesAPIReceiptClient] | None = None,
     ) -> None:
         self.cache = cache
@@ -156,7 +156,7 @@ def transaction_from_openai_receipt(
     *,
     model: str | None = None,
     client: OpenAIReceiptClient | None = None,
-    cache: JsonCallCache | None = None,
+    cache: SqliteCallCache | None = None,
 ) -> Transaction:
     selected_model = (
         model
