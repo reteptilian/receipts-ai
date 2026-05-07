@@ -15,6 +15,7 @@ __all__ = (  # noqa: F405
     "enrich_receipt_items_with_brave_search",
     "enrich_transactions_with_brave_search",
     "load_product_taxonomy_embeddings",
+    "load_budget_category_choices",
     "main",
     "receipt_from_document_intelligence_result",
     "search_product_taxonomy_embeddings",

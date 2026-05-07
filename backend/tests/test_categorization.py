@@ -32,6 +32,7 @@ from receipts_ai.categorization import (
     clean_receipt_item_descriptions,
     create_ollama_category_client,
     load_budget_categories,
+    load_budget_category_choices,
     load_product_taxonomy,
     load_product_taxonomy_embeddings,
     search_product_taxonomy_embeddings,
@@ -129,6 +130,26 @@ def test_load_budget_categories_exposes_nested_categories():
     food_categories = categories["Food & Dining"]
     assert isinstance(food_categories, dict)
     assert "Groceries" in food_categories
+
+
+def test_load_budget_category_choices_flattens_leaf_paths():
+    choices = load_budget_category_choices(
+        {
+            "Taxes": {
+                "Income Taxes": {},
+                "Sales Taxes": {},
+            },
+            "Miscellaneous": {
+                "Uncategorized": {},
+            },
+        }
+    )
+
+    assert choices == (
+        "Taxes > Income Taxes",
+        "Taxes > Sales Taxes",
+        "Miscellaneous > Uncategorized",
+    )
 
 
 def test_load_product_taxonomy_parses_greater_than_levels(tmp_path: Path):
