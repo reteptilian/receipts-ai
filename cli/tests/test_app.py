@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from receipts_ai.models.transaction import (
+    CategoryAllocation,
     Receipt,
     ReceiptItem,
     RecordType,
@@ -11,9 +12,9 @@ from receipts_ai.models.transaction import (
     Transaction,
     TransactionUserOverrides,
 )
-from textual.widgets import DataTable, Input
+from textual.widgets import DataTable, Input, Static
 
-from receipts_ai_cli.app import ReceiptItemsScreen, ReceiptsAIApp
+from receipts_ai_cli.app import ReceiptItemsScreen, ReceiptsAIApp, TransactionReviewScreen
 
 
 def _transaction(
@@ -281,13 +282,15 @@ async def test_enter_on_transaction_with_receipt_items_opens_items_screen() -> N
         table = cast(DataTable[str], screen.query_one("#receipt-items", DataTable))
         date_input = screen.query_one("#receipt-date", Input)
         payee_input = screen.query_one("#receipt-payee", Input)
+        description_input = screen.query_one("#receipt-description", Input)
         amount_input = screen.query_one("#receipt-amount", Input)
         row = table.get_row_at(0)
 
     assert isinstance(screen, ReceiptItemsScreen)
     assert date_input.value == "2026-05-06"
-    assert payee_input.value == "Payee receipt"
     assert amount_input.value == "-7.5"
+    assert payee_input.value == "Payee receipt"
+    assert description_input.value == "Description receipt"
     assert row == [
         "Latte",
         "2.0",
@@ -311,7 +314,7 @@ async def test_enter_on_transaction_with_receipt_items_opens_items_screen() -> N
 
 
 @pytest.mark.anyio
-async def test_enter_on_transaction_without_receipt_items_stays_on_transactions() -> None:
+async def test_enter_on_transaction_without_receipt_items_opens_review_screen() -> None:
     transaction = _transaction(
         "no_receipt",
         transaction_date=date(2026, 5, 6),
@@ -324,9 +327,11 @@ async def test_enter_on_transaction_without_receipt_items_stays_on_transactions(
         await pilot.press("enter")
         await pilot.pause()
 
-        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        screen = app.screen
+        receipt_items = cast(DataTable[str], screen.query_one("#receipt-items", DataTable))
 
-    assert table.row_count == 1
+    assert isinstance(screen, TransactionReviewScreen)
+    assert receipt_items.row_count == 0
 
 
 @pytest.mark.anyio
@@ -363,6 +368,7 @@ async def test_receipt_header_inputs_update_transaction_overrides() -> None:
         transaction_date=date(2026, 5, 6),
         amount="-7.5",
     )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
     transaction.receipt = Receipt(
         items=[
             ReceiptItem(
@@ -374,7 +380,7 @@ async def test_receipt_header_inputs_update_transaction_overrides() -> None:
     )
     app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
 
-    with patch("receipts_ai_cli.app.set_transaction_user_overrides") as mock_set:
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
         async with app.run_test() as pilot:
             await pilot.pause()
             await pilot.press("enter")
@@ -388,18 +394,20 @@ async def test_receipt_header_inputs_update_transaction_overrides() -> None:
             payee_input.focus()
             payee_input.value = "Edited Payee"
             await pilot.press("enter")
-            amount_input = app.screen.query_one("#receipt-amount", Input)
-            amount_input.focus()
-            amount_input.value = "-8.25"
+            description_input = app.screen.query_one("#receipt-description", Input)
+            description_input.focus()
+            description_input.value = "Edited Description"
             await pilot.press("enter")
+            assert transaction.user_overrides is None
+            cast(TransactionReviewScreen, app.screen).action_save_and_exit()
             await pilot.pause(0.1)
 
-        assert mock_set.called
+        assert mock_save.called
 
     assert transaction.user_overrides is not None
     assert transaction.user_overrides.transaction_date == date(2026, 5, 7)
     assert transaction.user_overrides.payee == "Edited Payee"
-    assert transaction.user_overrides.amount == "-8.25"
+    assert transaction.user_overrides.description == "Edited Description"
 
 
 @pytest.mark.anyio
@@ -414,30 +422,35 @@ async def test_receipt_item_cells_update_item_overrides() -> None:
     transaction = _transaction(
         "receipt",
         transaction_date=date(2026, 5, 6),
-        amount="-7.5",
+        amount="-8.25",
     )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-8.25")]
     transaction.receipt = Receipt(items=[item])
     app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
 
-    with patch("receipts_ai_cli.app.set_receipt_item_user_overrides") as mock_set:
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
         async with app.run_test() as pilot:
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause(0.1)
+            await pilot.press("tab")
             await pilot.press("right", "right", "right", "enter")
             editor_input = app.screen.query_one("#cell-edit-input", Input)
             editor_input.value = "8.25"
             await pilot.press("enter")
+            assert item.user_overrides is None
+            await pilot.press("s")
             await pilot.pause(0.1)
 
-            table = cast(DataTable[str], app.screen.query_one("#receipt-items", DataTable))
+            table = cast(DataTable[str], app.query_one("#transactions", DataTable))
             row = table.get_row_at(0)
 
-        assert mock_set.called
+        assert mock_save.called
 
-    assert item.user_overrides is not None
-    assert item.user_overrides.amount == "8.25"
-    assert row[3] == "8.25"
+    assert transaction.receipt is not None
+    assert transaction.receipt.items[0].user_overrides is not None
+    assert transaction.receipt.items[0].user_overrides.amount == "8.25"
+    assert row[5] == "-8.25 USD"
 
 
 @pytest.mark.anyio
@@ -452,29 +465,134 @@ async def test_receipt_item_description_update() -> None:
         transaction_date=date(2026, 5, 6),
         amount="-7.5",
     )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
     transaction.receipt = Receipt(items=[item])
     app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
 
-    with patch("receipts_ai_cli.app.set_receipt_item_user_overrides") as mock_set:
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
         async with app.run_test() as pilot:
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause(0.1)
+            await pilot.press("tab")
             # First column is Description
             await pilot.press("enter")
             editor_input = app.screen.query_one("#cell-edit-input", Input)
             editor_input.value = "New Latte Name"
             await pilot.press("enter")
+            assert item.user_overrides is None
+            await pilot.press("s")
             await pilot.pause(0.1)
 
-            table = cast(DataTable[str], app.screen.query_one("#receipt-items", DataTable))
+            table = cast(DataTable[str], app.query_one("#transactions", DataTable))
             row = table.get_row_at(0)
 
-        assert mock_set.called
+        assert mock_save.called
 
-    assert item.user_overrides is not None
-    assert item.user_overrides.description == "New Latte Name"
-    assert row[0] == "New Latte Name"
+    assert transaction.receipt is not None
+    assert transaction.receipt.items[0].user_overrides is not None
+    assert transaction.receipt.items[0].user_overrides.description == "New Latte Name"
+    assert row[0] == "2026-05-06"
+
+
+@pytest.mark.anyio
+async def test_save_refuses_mismatched_category_allocations() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-6.00")]
+    transaction.receipt = Receipt(
+        items=[ReceiptItem(description="Latte", amount="7.5", net_amount="7.5")]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            cast(TransactionReviewScreen, app.screen).action_save_and_exit()
+            await pilot.pause(0.1)
+
+            status = app.screen.query_one("#receipt-edit-status", Static)
+
+        mock_save.assert_not_called()
+
+    assert "Save blocked: category allocations must add up" in str(status.content)
+
+
+@pytest.mark.anyio
+async def test_invalid_header_edit_explains_the_problem() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        date_input = app.screen.query_one("#receipt-date", Input)
+        date_input.focus()
+        date_input.value = "May 6"
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        status = app.screen.query_one("#receipt-edit-status", Static)
+
+    assert "Could not update transaction date" in str(status.content)
+    assert "YYYY-MM-DD" in str(status.content)
+
+
+@pytest.mark.anyio
+async def test_linked_transaction_review_saves_bst_overrides_and_rbt_items() -> None:
+    bst = _transaction(
+        "statement",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    bst.record_type = RecordType.bank_statement
+    bst.linked_receipt_based_transaction_id = "receipt"
+    bst.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
+    rbt = Transaction(
+        id="receipt",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        transaction_date=date(2026, 5, 6),
+        payee="Receipt Payee",
+        amount="-7.5",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Latte", amount="7.5", net_amount="7.5")]),
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [bst, rbt])
+
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            payee_input = app.screen.query_one("#receipt-payee", Input)
+            receipt_items = cast(DataTable[str], app.screen.query_one("#receipt-items", DataTable))
+            assert payee_input.value == "Payee statement"
+            assert receipt_items.get_row_at(0)[0] == "Latte"
+
+            cast(TransactionReviewScreen, app.screen).action_save_and_exit()
+            await pilot.pause(0.1)
+
+        mock_save.assert_called_once()
+
+    args, kwargs = mock_save.call_args
+    assert args[0] == "statement"
+    assert kwargs["receipt_transaction_id"] == "receipt"
+    assert kwargs["receipt_items"][0].description == "Latte"
 
 
 @pytest.mark.anyio

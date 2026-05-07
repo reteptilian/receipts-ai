@@ -12,17 +12,18 @@ from typing import cast
 from pydantic import ValidationError
 from receipts_ai.firestore_transactions import (
     link_bank_statement_transaction_to_receipt,
-    set_receipt_item_user_overrides,
-    set_transaction_user_overrides,
+    save_transaction_review_edits,
     transactions_from_firestore,
     unlink_bank_statement_transaction_from_receipt,
 )
 from receipts_ai.models.transaction import (
+    CategoryAllocation,
     LineType,
     ReceiptItem,
     ReceiptItemUserOverrides,
     Transaction,
     TransactionUserOverrides,
+    UserCategoryAllocation,
 )
 from rich.markup import escape
 from textual.app import App, ComposeResult
@@ -163,22 +164,40 @@ class CellEditScreen(ModalScreen[str]):
     ]
 
 
-class ReceiptItemsScreen(Screen[None]):
-    """Screen showing the receipt items for one transaction."""
+class TransactionReviewScreen(Screen[None]):
+    """Screen for drafting and saving transaction review edits."""
 
     app: ReceiptsAIApp
 
     BINDINGS = [
         ("e", "edit_cell", "Edit cell"),
-        ("escape", "back", "Back"),
-        ("q", "back", "Back"),
+        ("a", "add_category_allocation", "Add allocation"),
+        ("d", "delete_category_allocation", "Delete allocation"),
+        ("s", "save_and_exit", "Save and Exit"),
+        ("escape", "exit_without_saving", "Exit Without Saving"),
+        ("q", "exit_without_saving", "Exit Without Saving"),
     ]
 
-    def __init__(self, transaction: Transaction) -> None:
+    def __init__(
+        self,
+        transaction: Transaction,
+        *,
+        receipt_transaction: Transaction | None = None,
+    ) -> None:
         super().__init__()
-        self._transaction = transaction
+        self._source_transaction = transaction
+        self._source_receipt_transaction = receipt_transaction
+        self._transaction = transaction.model_copy(deep=True)
+        self._receipt_transaction = (
+            receipt_transaction.model_copy(deep=True)
+            if receipt_transaction is not None
+            else self._transaction
+            if _has_receipt_items(transaction)
+            else None
+        )
+        self._dirty = False
 
-    def action_back(self) -> None:
+    def action_exit_without_saving(self) -> None:
         self.dismiss()
 
     def compose(self) -> ComposeResult:
@@ -190,69 +209,136 @@ class ReceiptItemsScreen(Screen[None]):
                 id="receipt-date",
                 compact=True,
             )
-            yield Label("Payee", classes="receipt-header-label")
-            yield Input(
-                _effective_transaction_payee(self._transaction), id="receipt-payee", compact=True
-            )
             yield Label("Amount", classes="receipt-header-label")
             yield Input(
                 _effective_transaction_amount(self._transaction), id="receipt-amount", compact=True
             )
             yield Static(self._transaction.currency, id="receipt-currency")
-        yield DataTable(id="receipt-items")
+            yield Label("Payee", classes="receipt-header-label")
+            yield Input(
+                _effective_transaction_payee(self._transaction), id="receipt-payee", compact=True
+            )
+            yield Label("Description", classes="receipt-header-label")
+            yield Input(
+                _effective_transaction_description(self._transaction),
+                id="receipt-description",
+                compact=True,
+            )
         yield Static("", id="receipt-edit-status")
+        yield Static("Category Allocations", id="category-allocations-title")
+        yield DataTable(id="category-allocations")
+        yield Static("Receipt Items", id="receipt-items-title")
+        yield DataTable(id="receipt-items")
         yield Footer()
 
     def on_mount(self) -> None:
+        allocations_table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
+        allocations_table.cursor_type = "cell"
+        allocations_table.zebra_stripes = True
+        allocations_table.add_columns("Category ID", "Amount")
+        self._refresh_category_allocations_table()
+
         table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
         table.cursor_type = "cell"
         table.zebra_stripes = True
         table.add_columns(*(column.label for column in RECEIPT_ITEM_COLUMNS))
 
-        if getattr(self._transaction, "ingestion_type", None) == "receipt_img" and (
-            ingestion_file_url := getattr(self._transaction, "ingestion_file_url", None)
+        receipt_transaction = self._receipt_transaction
+        if (
+            receipt_transaction is not None
+            and getattr(receipt_transaction, "ingestion_type", None) == "receipt_img"
+            and (ingestion_file_url := getattr(receipt_transaction, "ingestion_file_url", None))
         ):
             self.run_worker(
                 lambda: _open_file_in_external_viewer(ingestion_file_url),
                 thread=True,
-                name=f"open-viewer-{self._transaction.id}",
+                name=f"open-viewer-{receipt_transaction.id}",
             )
 
-        receipt = self._transaction.receipt
+        receipt = receipt_transaction.receipt if receipt_transaction is not None else None
         if receipt is None:
+            allocations_table.focus()
             return
 
         for item in receipt.items:
             table.add_row(*_receipt_item_row(item))
 
-        table.focus()
+        allocations_table.focus()
 
     def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
         data_table = cast(DataTable[str], event.data_table)
-        if data_table.id == "receipt-items":
+        if data_table.id in {"category-allocations", "receipt-items"}:
             self.action_edit_cell()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self._commit_header_input(event.input)
 
     def on_input_blurred(self, event: Input.Blurred) -> None:
-        if event.input.id in {"receipt-date", "receipt-payee", "receipt-amount"}:
+        if event.input.id in {
+            "receipt-date",
+            "receipt-payee",
+            "receipt-description",
+            "receipt-amount",
+        }:
             self._commit_header_input(event.input)
 
     def action_edit_cell(self) -> None:
-        table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
+        table = self._focused_edit_table()
+        if table is None:
+            return
         coordinate = table.cursor_coordinate
         if not table.is_valid_coordinate(coordinate):
             return
 
-        column = RECEIPT_ITEM_COLUMNS[coordinate.column]
+        column_label = (
+            ("Category ID", "Amount")[coordinate.column]
+            if table.id == "category-allocations"
+            else RECEIPT_ITEM_COLUMNS[coordinate.column].label
+        )
         value = table.get_cell_at(coordinate)
 
         def check_edit(new_value: str | None) -> None:
             if new_value is not None:
-                self._commit_cell_edit(coordinate, new_value)
+                if table.id == "category-allocations":
+                    self._commit_category_allocation_cell_edit(coordinate, new_value)
+                else:
+                    self._commit_receipt_item_cell_edit(coordinate, new_value)
 
-        self.app.push_screen(CellEditScreen(column.label, str(value)), check_edit)
+        self.app.push_screen(CellEditScreen(column_label, str(value)), check_edit)
+
+    def action_add_category_allocation(self) -> None:
+        allocations = _effective_category_allocations(self._transaction)
+        allocations.append(UserCategoryAllocation(category_id="New Category", amount="0.00"))
+        self._set_category_allocation_overrides(allocations)
+        self._refresh_category_allocations_table()
+        self._mark_dirty("Added category allocation")
+
+    def action_delete_category_allocation(self) -> None:
+        table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
+        coordinate = table.cursor_coordinate
+        if not table.is_valid_coordinate(coordinate):
+            return
+        allocations = _effective_category_allocations(self._transaction)
+        if coordinate.row >= len(allocations):
+            return
+        del allocations[coordinate.row]
+        self._set_category_allocation_overrides(allocations)
+        self._refresh_category_allocations_table()
+        self._mark_dirty("Deleted category allocation")
+
+    def action_save_and_exit(self) -> None:
+        try:
+            self._validate_save()
+        except ValueError as exc:
+            self._show_edit_error(str(exc))
+            return
+
+        self._show_edit_status("Saving review edits...")
+        self.run_worker(
+            self._persist_review_edits,
+            thread=True,
+            name=f"persist-review-{self._source_transaction.id}",
+        )
 
     def _commit_header_input(self, input_widget: Input) -> None:
         value = input_widget.value.strip()
@@ -262,23 +348,49 @@ class ReceiptItemsScreen(Screen[None]):
                     self._set_transaction_override("transaction_date", _parse_optional_date(value))
                 case "receipt-payee":
                     self._set_transaction_override("payee", _parse_optional_text(value))
+                case "receipt-description":
+                    self._set_transaction_override("description", _parse_optional_text(value))
                 case "receipt-amount":
                     self._set_transaction_override("amount", _parse_optional_text(value))
                 case _:
                     return
         except (ValueError, ValidationError) as exc:
-            self._show_edit_error(str(exc))
+            self._show_edit_error(_field_edit_error_message(_header_input_label(input_widget), exc))
             return
 
-        self._show_edit_status("Saving transaction override...")
-        self.run_worker(
-            self._persist_transaction_overrides,
-            thread=True,
-            name=f"persist-tx-{self._transaction.id}",
-        )
+        self._mark_dirty("Draft transaction edit")
 
-    def _commit_cell_edit(self, coordinate: Coordinate, raw_value: str) -> None:
-        receipt = self._transaction.receipt
+    def _commit_category_allocation_cell_edit(self, coordinate: Coordinate, raw_value: str) -> None:
+        allocations = _effective_category_allocations(self._transaction)
+        if coordinate.row >= len(allocations):
+            return
+        allocation = allocations[coordinate.row]
+        update = allocation.model_dump()
+        try:
+            match coordinate.column:
+                case 0:
+                    update["category_id"] = _parse_required_text(raw_value.strip(), "Category ID")
+                case 1:
+                    update["amount"] = _parse_required_decimal_text(raw_value.strip(), "Amount")
+                case _:
+                    return
+            allocations[coordinate.row] = UserCategoryAllocation.model_validate(update)
+        except (ValueError, ValidationError) as exc:
+            self._show_edit_error(
+                _field_edit_error_message(
+                    ("Category ID", "Category allocation amount")[coordinate.column], exc
+                )
+            )
+            return
+
+        self._set_category_allocation_overrides(allocations)
+        self._refresh_category_allocations_table()
+        self._mark_dirty("Draft category allocation edit")
+
+    def _commit_receipt_item_cell_edit(self, coordinate: Coordinate, raw_value: str) -> None:
+        if self._receipt_transaction is None:
+            return
+        receipt = self._receipt_transaction.receipt
         if receipt is None:
             return
 
@@ -288,7 +400,7 @@ class ReceiptItemsScreen(Screen[None]):
             parsed_value = column.parser(raw_value.strip())
             self._set_receipt_item_override(item, column.field_name, parsed_value)
         except (ValueError, ValidationError) as exc:
-            self._show_edit_error(str(exc))
+            self._show_edit_error(_field_edit_error_message(column.label, exc))
             return
 
         table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
@@ -297,34 +409,35 @@ class ReceiptItemsScreen(Screen[None]):
             column.formatter(item),
             update_width=True,
         )
-        self._show_edit_status(f"Saving {column.label}...")
-        self.run_worker(
-            lambda: self._persist_receipt_item_overrides(item, coordinate.row),
-            thread=True,
-            name=f"persist-item-{item.id or coordinate.row}",
-        )
+        self._mark_dirty(f"Draft {column.label} edit")
 
-    def _persist_transaction_overrides(self) -> None:
+    def _persist_review_edits(self) -> None:
         try:
-            set_transaction_user_overrides(
-                self._transaction.id,
-                cast(TransactionUserOverrides, self._transaction.user_overrides),
+            receipt_items = None
+            receipt_transaction_id = None
+            if self._receipt_transaction is not None and self._receipt_transaction.receipt:
+                receipt_items = self._receipt_transaction.receipt.items
+                receipt_transaction_id = (
+                    self._source_receipt_transaction.id
+                    if (self._source_receipt_transaction is not None)
+                    else self._source_transaction.id
+                )
+
+            save_transaction_review_edits(
+                self._source_transaction.id,
+                self._transaction.user_overrides or TransactionUserOverrides(),
+                receipt_transaction_id=receipt_transaction_id,
+                receipt_items=receipt_items,
             )
-            self.app.call_from_thread(self._show_edit_status, "Transaction override persisted")
+            self._source_transaction.user_overrides = self._transaction.user_overrides
+            if self._source_receipt_transaction is not None and self._receipt_transaction:
+                self._source_receipt_transaction.receipt = self._receipt_transaction.receipt
+            elif self._receipt_transaction is not None:
+                self._source_transaction.receipt = self._receipt_transaction.receipt
+            self._dirty = False
+            self.app.call_from_thread(self.dismiss)
         except Exception as exc:
             self.app.call_from_thread(self._show_edit_error, f"Failed to persist: {exc}")
-
-    def _persist_receipt_item_overrides(self, item: ReceiptItem, index: int) -> None:
-        try:
-            set_receipt_item_user_overrides(
-                self._transaction.id,
-                cast(ReceiptItemUserOverrides, item.user_overrides),
-                receipt_item_id=item.id,
-                item_index=None if item.id else index,
-            )
-            self.app.call_from_thread(self._show_edit_status, "Item override persisted")
-        except Exception as exc:
-            self.app.call_from_thread(self._show_edit_error, f"Failed to persist item: {exc}")
 
     def _set_transaction_override(self, field_name: str, value: object | None) -> None:
         overrides = self._transaction.user_overrides or TransactionUserOverrides()
@@ -343,6 +456,79 @@ class ReceiptItemsScreen(Screen[None]):
         update[field_name] = value
         item.user_overrides = ReceiptItemUserOverrides.model_validate(update)
 
+    def _set_category_allocation_overrides(
+        self, allocations: Sequence[CategoryAllocation | UserCategoryAllocation]
+    ) -> None:
+        overrides = self._transaction.user_overrides or TransactionUserOverrides()
+        update = overrides.model_dump()
+        update["category_allocations"] = [
+            UserCategoryAllocation(
+                category_id=allocation.category_id,
+                amount=allocation.amount,
+            )
+            for allocation in allocations
+        ]
+        self._transaction.user_overrides = TransactionUserOverrides.model_validate(update)
+
+    def _refresh_category_allocations_table(self) -> None:
+        table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
+        table.clear(columns=False)
+        for allocation in _effective_category_allocations(self._transaction):
+            table.add_row(allocation.category_id, allocation.amount)
+
+    def _validate_save(self) -> None:
+        transaction_amount = _decimal_amount(
+            _effective_transaction_amount(self._transaction), "Transaction amount"
+        )
+        allocations = _effective_category_allocations(self._transaction)
+        allocation_total = sum(
+            (
+                _decimal_amount(allocation.amount, "Category allocation amount")
+                for allocation in allocations
+            ),
+            Decimal("0"),
+        )
+        if allocation_total != transaction_amount:
+            raise ValueError(
+                "Save blocked: category allocations must add up to the transaction amount. "
+                f"The allocations total {allocation_total}, but the transaction amount is "
+                f"{transaction_amount}."
+            )
+
+        if self._receipt_transaction is None or self._receipt_transaction.receipt is None:
+            return
+
+        receipt_item_total = sum(
+            (
+                _decimal_amount(
+                    str(_effective_receipt_item_value(item, "amount")), "Receipt item amount"
+                )
+                for item in self._receipt_transaction.receipt.items
+            ),
+            Decimal("0"),
+        )
+        expected_receipt_total = -transaction_amount
+        if receipt_item_total != expected_receipt_total:
+            raise ValueError(
+                "Save blocked: receipt item amounts must add up to the sign-flipped "
+                f"transaction amount. The receipt items total {receipt_item_total}, but the "
+                f"expected total is {expected_receipt_total}."
+            )
+
+    def _focused_edit_table(self) -> DataTable[str] | None:
+        allocations_table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
+        receipt_items_table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
+        focused = self.focused
+        if focused is allocations_table:
+            return allocations_table
+        if focused is receipt_items_table:
+            return receipt_items_table
+        return receipt_items_table if receipt_items_table.has_focus else allocations_table
+
+    def _mark_dirty(self, message: str) -> None:
+        self._dirty = True
+        self._show_edit_status(f"{message} (unsaved)")
+
     def _show_edit_status(self, message: str) -> None:
         status = self.query_one("#receipt-edit-status", Static)
         status.remove_class("error")
@@ -352,6 +538,9 @@ class ReceiptItemsScreen(Screen[None]):
         status = self.query_one("#receipt-edit-status", Static)
         status.add_class("error")
         status.update(escape(message))
+
+
+ReceiptItemsScreen = TransactionReviewScreen
 
 
 class ReceiptsAIApp(App[None]):
@@ -376,9 +565,19 @@ class ReceiptsAIApp(App[None]):
         height: 1fr;
     }
 
+    #category-allocations {
+        height: 6;
+    }
+
+    #category-allocations-title,
+    #receipt-items-title {
+        height: 1;
+        padding: 0 1;
+        text-style: bold;
+    }
+
     #receipt-header {
-        dock: top;
-        height: auto;
+        height: 1;
         padding: 0 1;
         align-vertical: middle;
     }
@@ -393,6 +592,10 @@ class ReceiptsAIApp(App[None]):
     }
 
     #receipt-payee {
+        width: 1fr;
+    }
+
+    #receipt-description {
         width: 1fr;
     }
 
@@ -424,7 +627,6 @@ class ReceiptsAIApp(App[None]):
     }
 
     #receipt-edit-status {
-        dock: bottom;
         height: 1;
         padding: 0 1;
     }
@@ -554,14 +756,20 @@ class ReceiptsAIApp(App[None]):
         if transaction_id is None:
             return
 
-        transaction = self._receipt_transactions_by_display_id.get(transaction_id)
-        if transaction is None or not _has_receipt_items(transaction):
+        transaction = self._transactions_by_id.get(transaction_id)
+        if transaction is None:
             return
+        receipt_transaction = self._receipt_transactions_by_display_id.get(transaction_id)
+        if receipt_transaction is transaction:
+            receipt_transaction = None
 
         def on_return(_: None) -> None:
             self.run_worker(self._load_transactions, thread=True, name="load-transactions")
 
-        self.push_screen(ReceiptItemsScreen(transaction), on_return)
+        self.push_screen(
+            TransactionReviewScreen(transaction, receipt_transaction=receipt_transaction),
+            on_return,
+        )
 
     def action_toggle_transaction_selection(self) -> None:
         transaction_id = self._current_transaction_id()
@@ -774,12 +982,30 @@ def _effective_transaction_payee(transaction: Transaction) -> str:
     return transaction.payee or ""
 
 
+def _effective_transaction_description(transaction: Transaction) -> str:
+    overrides = transaction.user_overrides
+    if overrides is not None and overrides.description is not None:
+        return overrides.description
+
+    return transaction.description or ""
+
+
 def _effective_transaction_amount(transaction: Transaction) -> str:
     overrides = transaction.user_overrides
     if overrides is not None and overrides.amount is not None:
         return overrides.amount
 
     return transaction.amount
+
+
+def _effective_category_allocations(
+    transaction: Transaction,
+) -> list[CategoryAllocation | UserCategoryAllocation]:
+    overrides = transaction.user_overrides
+    if overrides is not None and overrides.category_allocations is not None:
+        return list(overrides.category_allocations)
+
+    return list(transaction.category_allocations or [])
 
 
 def _effective_receipt_item_value(item: ReceiptItem, field_name: str) -> object | None:
@@ -796,6 +1022,13 @@ def _parse_required_text(value: str, label: str) -> str:
     if not value:
         raise ValueError(f"{label} must not be empty")
 
+    return value
+
+
+def _parse_required_decimal_text(value: str, label: str) -> str:
+    if not value:
+        raise ValueError(f"{label} must not be empty")
+    _decimal_amount(value, label)
     return value
 
 
@@ -822,6 +1055,61 @@ def _parse_optional_line_type(value: str) -> LineType | None:
         return None
 
     return LineType(value)
+
+
+def _decimal_amount(value: str, label: str) -> Decimal:
+    try:
+        return Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError(f"{label} must be a decimal amount") from exc
+
+
+def _header_input_label(input_widget: Input) -> str:
+    match input_widget.id:
+        case "receipt-date":
+            return "transaction date"
+        case "receipt-amount":
+            return "transaction amount"
+        case "receipt-payee":
+            return "payee"
+        case "receipt-description":
+            return "description"
+        case _:
+            return "field"
+
+
+def _field_edit_error_message(label: str, exc: ValueError | ValidationError) -> str:
+    return f"Could not update {label}: {_validation_error_explanation(exc)}"
+
+
+def _validation_error_explanation(exc: ValueError | ValidationError) -> str:
+    if isinstance(exc, ValidationError):
+        for error in exc.errors():
+            error_type = str(error.get("type", ""))
+            location = ".".join(str(part) for part in error.get("loc", ()))
+            if error_type == "string_pattern_mismatch" and (
+                location.endswith("amount")
+                or location.endswith("unit_price")
+                or location.endswith("discount_amount")
+                or location.endswith("net_amount")
+            ):
+                return "enter a decimal amount like -12.34, with up to 4 decimal places."
+            if error_type == "string_too_short":
+                return "this value cannot be blank."
+            if error_type == "greater_than":
+                return "enter a number greater than zero."
+            if error_type == "enum":
+                return "enter one of the supported values for this field."
+        return "the value does not match the expected format."
+
+    message = str(exc)
+    if "Invalid isoformat string" in message:
+        return "enter a date as YYYY-MM-DD, or leave it blank to clear the override."
+    if "must be a decimal amount" in message:
+        return "enter a decimal amount like -12.34, with up to 4 decimal places."
+    if message:
+        return message
+    return "the value does not match the expected format."
 
 
 def main() -> None:

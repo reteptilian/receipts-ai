@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
@@ -9,6 +9,7 @@ from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION, create_fi
 from receipts_ai.models.transaction import (
     MatchSource,
     MatchStatus,
+    ReceiptItem,
     ReceiptItemUserOverrides,
     RecordType,
     Source,
@@ -19,6 +20,7 @@ from receipts_ai.models.transaction import (
 __all__ = (
     "FirestoreTransactionClient",
     "link_bank_statement_transaction_to_receipt",
+    "save_transaction_review_edits",
     "set_receipt_item_user_overrides",
     "set_transaction_user_overrides",
     "stream_transactions_from_firestore",
@@ -41,6 +43,18 @@ class FirestoreDocumentReference(Protocol):
     def set(self, document_data: dict[str, Any], *, merge: bool = False) -> object: ...
 
 
+class FirestoreWriteBatch(Protocol):
+    def set(
+        self,
+        reference: FirestoreDocumentReference,
+        document_data: dict[str, Any],
+        *,
+        merge: bool = False,
+    ) -> object: ...
+
+    def commit(self) -> object: ...
+
+
 class FirestoreCollectionReference(Protocol):
     def document(self, document_id: str) -> FirestoreDocumentReference: ...
 
@@ -49,6 +63,8 @@ class FirestoreCollectionReference(Protocol):
 
 class FirestoreTransactionClient(Protocol):
     def collection(self, collection_path: str) -> FirestoreCollectionReference: ...
+
+    def batch(self) -> FirestoreWriteBatch: ...
 
 
 def transactions_from_firestore(
@@ -182,6 +198,67 @@ def set_receipt_item_user_overrides(
         },
         merge=True,
     )
+
+
+def save_transaction_review_edits(
+    transaction_id: str,
+    transaction_user_overrides: TransactionUserOverrides | Mapping[str, Any],
+    *,
+    receipt_transaction_id: str | None = None,
+    receipt_items: Sequence[ReceiptItem] | None = None,
+    client: FirestoreTransactionClient | None = None,
+    collection: str = DEFAULT_FIRESTORE_COLLECTION,
+    updated_at: datetime | None = None,
+) -> None:
+    """Persist a complete transaction review draft.
+
+    The transaction-level edits are written to the selected/display transaction.
+    Receipt item edits may belong to a linked receipt transaction, so they are
+    addressed separately and committed in the same Firestore batch.
+    """
+    if not transaction_id:
+        raise ValueError("transaction_id must not be empty")
+    if not collection:
+        raise ValueError("collection must not be empty")
+    if receipt_transaction_id == "":
+        raise ValueError("receipt_transaction_id must not be empty")
+    if receipt_items is not None and receipt_transaction_id is None:
+        raise ValueError("receipt_transaction_id is required when receipt_items are provided")
+
+    firestore_client = _firestore_transaction_client(client)
+    collection_reference = firestore_client.collection(collection)
+    timestamp = _json_datetime(updated_at or datetime.now(UTC))
+    transaction_ref = collection_reference.document(transaction_id)
+    batch = firestore_client.batch()
+    batch.set(
+        transaction_ref,
+        {
+            "userOverrides": _transaction_user_overrides_document(transaction_user_overrides),
+            "updatedAt": timestamp,
+        },
+        merge=True,
+    )
+
+    if receipt_items is not None:
+        receipt_ref = collection_reference.document(cast(str, receipt_transaction_id))
+        items_document = [
+            item.model_dump(mode="json", by_alias=True, exclude_none=True) for item in receipt_items
+        ]
+        batch.set(
+            receipt_ref,
+            {
+                "receipt": {"items": items_document},
+                "updatedAt": timestamp,
+            },
+            merge=True,
+        )
+
+    LOGGER.info(
+        "Persisting transaction review edits for %s in collection %s",
+        transaction_id,
+        collection,
+    )
+    batch.commit()
 
 
 def link_bank_statement_transaction_to_receipt(

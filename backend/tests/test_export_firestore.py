@@ -14,6 +14,7 @@ from receipts_ai import export_firestore
 from receipts_ai.export_firestore import export_firestore_receipt_items_csv
 from receipts_ai.firestore_transactions import (
     link_bank_statement_transaction_to_receipt,
+    save_transaction_review_edits,
     set_receipt_item_user_overrides,
     set_transaction_user_overrides,
     stream_transactions_from_firestore,
@@ -30,6 +31,8 @@ from receipts_ai.models.transaction import (
     RecordType,
     Source,
     Transaction,
+    TransactionUserOverrides,
+    UserCategoryAllocation,
 )
 from receipts_ai.models.transaction import (
     ReceiptItem as GeneratedReceiptItem,
@@ -88,6 +91,24 @@ class FakeDocumentReference:
         self.collection.set_calls.append((self.document_id, document_data, merge))
 
 
+class FakeWriteBatch:
+    def __init__(self) -> None:
+        self.set_calls: list[tuple[str, dict[str, Any], bool]] = []
+        self.commit_calls = 0
+
+    def set(
+        self,
+        reference: Any,
+        document_data: dict[str, Any],
+        *,
+        merge: bool = False,
+    ) -> None:
+        self.set_calls.append((reference.document_id, document_data, merge))
+
+    def commit(self) -> None:
+        self.commit_calls += 1
+
+
 class FakeCollection:
     def __init__(self, snapshots: list[FakeDocumentSnapshot]) -> None:
         self.snapshots = snapshots
@@ -106,12 +127,16 @@ class FakeFirestoreClient:
         self.snapshots = snapshots
         self.collections: list[str] = []
         self.collection_references: dict[str, FakeCollection] = {}
+        self.write_batch = FakeWriteBatch()
 
     def collection(self, collection_path: str) -> FakeCollection:
         self.collections.append(collection_path)
         if collection_path not in self.collection_references:
             self.collection_references[collection_path] = FakeCollection(self.snapshots)
         return self.collection_references[collection_path]
+
+    def batch(self) -> FakeWriteBatch:
+        return self.write_batch
 
 
 class FakeWorksheet:
@@ -296,6 +321,73 @@ def test_sets_transaction_user_overrides_in_firestore():
             },
             True,
         )
+    ]
+
+
+def test_saves_transaction_review_edits_in_firestore_batch():
+    updated_at = datetime(2026, 5, 6, 7, 8, 9, tzinfo=UTC)
+    client = FakeFirestoreClient([])
+    item = ReceiptItem(
+        id="item_1",
+        description="Latte",
+        amount="7.00",
+    )
+    item.user_overrides = ReceiptItemUserOverrides(amount="7.50")
+
+    save_transaction_review_edits(
+        "statement_1",
+        TransactionUserOverrides(
+            payee="Coffee Shop",
+            category_allocations=[
+                UserCategoryAllocation(category_id="Food & Dining > Coffee", amount="-7.50")
+            ],
+        ),
+        receipt_transaction_id="receipt_1",
+        receipt_items=[item],
+        client=client,
+        collection="test-transactions",
+        updated_at=updated_at,
+    )
+
+    assert client.collections == ["test-transactions"]
+    assert client.write_batch.commit_calls == 1
+    assert client.write_batch.set_calls == [
+        (
+            "statement_1",
+            {
+                "userOverrides": {
+                    "payee": "Coffee Shop",
+                    "categoryAllocations": [
+                        {
+                            "categoryId": "Food & Dining > Coffee",
+                            "amount": "-7.50",
+                            "source": "user",
+                        }
+                    ],
+                },
+                "updatedAt": "2026-05-06T07:08:09Z",
+            },
+            True,
+        ),
+        (
+            "receipt_1",
+            {
+                "receipt": {
+                    "items": [
+                        {
+                            "id": "item_1",
+                            "description": "Latte",
+                            "amount": "7.00",
+                            "netAmount": "7.00",
+                            "lineType": "item",
+                            "userOverrides": {"amount": "7.50"},
+                        }
+                    ]
+                },
+                "updatedAt": "2026-05-06T07:08:09Z",
+            },
+            True,
+        ),
     ]
 
 
