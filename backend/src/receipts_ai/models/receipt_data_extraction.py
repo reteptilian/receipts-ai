@@ -60,6 +60,14 @@ class ExtractedReceiptItem(BaseModel):
         str,
         Field(description="Total amount for this receipt line, as shown on the receipt."),
     ]
+    discount_amount: Annotated[
+        str | None,
+        Field(alias="discountAmount", description="Discount amount applied to this item."),
+    ] = None
+    discount_description: Annotated[
+        str | None,
+        Field(alias="discountDescription", description="Receipt text that describes the item discount."),
+    ] = None
     line_type: Annotated[
         LineType,
         Field(alias="lineType", description="Receipt line type."),

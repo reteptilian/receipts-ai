@@ -259,6 +259,74 @@ def test_merges_costco_coupon_discounts_into_preceding_item():
     assert receipt.items[1].net_amount == "2.49"
 
 
+def test_costco_discount_merge_is_reflected_in_pipeline_neutral_receipt_data():
+    payload = {
+        "content": "COSTCO\nSPARKLING WATER 11.99\n/1779212 -3.00\nBANANAS 2.49",
+        "modelId": "prebuilt-receipt",
+        "documents": [
+            {
+                "confidence": 0.9,
+                "fields": {
+                    "MerchantName": {"valueString": "COSTCO"},
+                    "TransactionDate": {"valueDate": "2026-04-27"},
+                    "Total": {
+                        "type": "currency",
+                        "valueCurrency": {"amount": 11.48, "currencyCode": "USD"},
+                    },
+                    "Items": {
+                        "type": "array",
+                        "valueArray": [
+                            {
+                                "confidence": 0.98,
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "SPARKLING WATER"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": 11.99},
+                                    },
+                                },
+                            },
+                            {
+                                "confidence": 0.97,
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "/1779212"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": -3.0},
+                                    },
+                                },
+                            },
+                            {
+                                "confidence": 0.99,
+                                "type": "object",
+                                "valueObject": {
+                                    "Description": {"valueString": "BANANAS"},
+                                    "TotalPrice": {
+                                        "type": "currency",
+                                        "valueCurrency": {"amount": 2.49},
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    receipt_data = receipt_data_from_document_intelligence_result(payload)
+
+    assert [
+        (item.description, item.amount, item.discount_amount, item.discount_description)
+        for item in receipt_data.items
+    ] == [
+        ("SPARKLING WATER", "11.99", "-3.0", "/1779212"),
+        ("BANANAS", "2.49", None, None),
+    ]
+
+
 def test_does_not_merge_coupon_shaped_discount_for_other_payees():
     payload = {
         "content": "OTHER STORE\nSPARKLING WATER 11.99\n/1779212 -3.00",

@@ -63,7 +63,10 @@ def receipt_data_from_document_intelligence_result(result: Any) -> ReceiptDataEx
     if total is None:
         raise ValueError("document intelligence result does not contain a receipt total")
 
-    items = _receipt_items_from_document_intelligence_field(fields.get("Items"))
+    items = _merge_vendor_discount_items(
+        _receipt_items_from_document_intelligence_field(fields.get("Items")),
+        payee=payee,
+    )
     tax_amount = _currency_amount(fields.get("TotalTax"))
     if tax_amount is not None and Decimal(tax_amount) != 0:
         items.append(
@@ -94,27 +97,25 @@ def receipt_data_from_document_intelligence_result(result: Any) -> ReceiptDataEx
 
 
 def receipt_from_receipt_data(receipt_data: ReceiptDataExtraction) -> Receipt:
-    items = _merge_vendor_discount_items(
-        [
+    receipt = Receipt(
+        receipt_number=receipt_data.receipt_number,
+        subtotal=receipt_data.subtotal,
+        total=receipt_data.total,
+        items=[
             ReceiptItem(
                 description=item.description,
                 raw_description=item.description,
                 quantity=item.quantity,
                 unit_price=item.unit_price,
                 amount=item.amount,
-                net_amount=item.amount,
+                discount_amount=item.discount_amount,
+                discount_description=item.discount_description,
+                net_amount=_net_amount_from_extracted_item(item),
                 line_type=item.line_type,
                 confidence=item.confidence,
             )
             for item in receipt_data.items
         ],
-        payee=receipt_data.merchant_name,
-    )
-    receipt = Receipt(
-        receipt_number=receipt_data.receipt_number,
-        subtotal=receipt_data.subtotal,
-        total=receipt_data.total,
-        items=items,
         extraction=ExtractionMetadata(
             model=receipt_data.extraction.model,
             confidence=receipt_data.extraction.confidence,
@@ -168,11 +169,13 @@ def _receipt_items_from_document_intelligence_field(items_field: Any) -> list[Ex
     return items
 
 
-def _merge_vendor_discount_items(items: list[ReceiptItem], *, payee: str) -> list[ReceiptItem]:
+def _merge_vendor_discount_items(
+    items: list[ExtractedReceiptItem], *, payee: str
+) -> list[ExtractedReceiptItem]:
     if payee.strip().upper() != "COSTCO":
         return items
 
-    merged_items: list[ReceiptItem] = []
+    merged_items: list[ExtractedReceiptItem] = []
     for item in items:
         if _is_costco_coupon_discount(item) and merged_items:
             _apply_discount(merged_items[-1], item)
@@ -181,7 +184,7 @@ def _merge_vendor_discount_items(items: list[ReceiptItem], *, payee: str) -> lis
     return merged_items
 
 
-def _is_costco_coupon_discount(item: ReceiptItem) -> bool:
+def _is_costco_coupon_discount(item: ExtractedReceiptItem) -> bool:
     if re.fullmatch(r"/\d+", item.description.strip()) is None:
         return False
 
@@ -191,7 +194,7 @@ def _is_costco_coupon_discount(item: ReceiptItem) -> bool:
         return False
 
 
-def _apply_discount(item: ReceiptItem, discount: ReceiptItem) -> None:
+def _apply_discount(item: ExtractedReceiptItem, discount: ExtractedReceiptItem) -> None:
     discount_amount = Decimal(discount.amount)
     if item.discount_amount is not None:
         discount_amount += Decimal(item.discount_amount)
@@ -199,9 +202,18 @@ def _apply_discount(item: ReceiptItem, discount: ReceiptItem) -> None:
     item.discount_amount = format(discount_amount, "f")
     item.discount_description = _combined_discount_description(
         item.discount_description,
-        discount.raw_description or discount.description,
+        discount.description,
     )
-    item.net_amount = format(Decimal(item.amount) + discount_amount, "f")
+
+
+def _net_amount_from_extracted_item(item: ExtractedReceiptItem) -> str:
+    if item.discount_amount is None:
+        return item.amount
+
+    try:
+        return format(Decimal(item.amount) + Decimal(item.discount_amount), "f")
+    except InvalidOperation:
+        return item.amount
 
 
 def _combined_discount_description(existing: str | None, new: str) -> str:
