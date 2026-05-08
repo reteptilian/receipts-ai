@@ -24,7 +24,6 @@ __all__ = (  # noqa: F405
     "set_transaction_user_overrides",
     "stream_transactions_from_firestore",
     "transaction_combined_description",
-    "transaction_from_openai_receipt",
     "transaction_firestore_document",
     "transactions_from_firestore",
     "upsert_transaction_to_firestore",
@@ -36,6 +35,5 @@ from .document_intelligence import *  # noqa: F403
 from .firestore_client import *  # noqa: F403
 from .firestore_transactions import *  # noqa: F403
 from .ingest_receipts import *  # noqa: F403
-from .openai_receipt_extraction import *  # noqa: F403
 from .receipt_extraction import *  # noqa: F403
 from .transactions import *  # noqa: F403

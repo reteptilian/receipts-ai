@@ -26,7 +26,6 @@ from receipts_ai.categorization import (
     clean_receipt_item_descriptions,
     create_ollama_category_client,
 )
-from receipts_ai.config import config_value
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.firestore_client import (
     DEFAULT_FIRESTORE_COLLECTION,
@@ -34,14 +33,10 @@ from receipts_ai.firestore_client import (
     create_firestore_client,
 )
 from receipts_ai.models.transaction import IngestionType, Receipt, RecordType, Transaction
-from receipts_ai.openai_receipt_extraction import (
-    DEFAULT_OPENAI_MODEL,
-    OPENAI_MODEL_ENV_VAR,
-    transaction_from_openai_receipt,
-)
 from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
 from receipts_ai.transactions import transaction_combined_description
 
+RECEIPT_PIPELINES: tuple[str, ...] = ("azure",)
 CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
     "transaction_date",
@@ -100,7 +95,7 @@ LOGGER = logging.getLogger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze one or more receipts with Azure Document Intelligence."
+        description="Analyze one or more receipts."
     )
     parser.add_argument(
         "receipts",
@@ -111,20 +106,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--pipeline",
-        choices=("azure", "openai"),
+        choices=RECEIPT_PIPELINES,
         default="azure",
-        help=(
-            "Receipt extraction pipeline to use. 'azure' keeps the existing Azure Document "
-            "Intelligence pipeline; 'openai' sends the receipt directly to OpenAI."
-        ),
-    )
-    parser.add_argument(
-        "--openai-model",
-        default=config_value(OPENAI_MODEL_ENV_VAR, DEFAULT_OPENAI_MODEL),
-        help=(
-            "OpenAI model for --pipeline openai. Can also be set with "
-            f"{OPENAI_MODEL_ENV_VAR}. Defaults to {DEFAULT_OPENAI_MODEL}."
-        ),
+        help="Receipt extraction pipeline to use. Defaults to azure.",
     )
     parser.add_argument(
         "--format",
@@ -179,7 +163,7 @@ def main() -> None:
     parser.add_argument(
         "--cache-file",
         type=Path,
-        help="Cache Azure Document Intelligence, OpenAI, Brave Search, and Ollama responses in this SQLite database.",
+        help="Cache Azure Document Intelligence, Brave Search, and Ollama responses in this SQLite database.",
     )
     parser.add_argument(
         "--upsert-firestore",
@@ -213,9 +197,7 @@ def main() -> None:
 
     transactions: list[Transaction] = []
     for receipt_path in args.receipts:
-        transaction = _process_receipt(
-            receipt_path, pipeline=args.pipeline, openai_model=args.openai_model, cache=cache
-        )
+        transaction = _process_receipt(receipt_path, pipeline=args.pipeline, cache=cache)
         if transaction.receipt is None:
             raise ValueError(f"transaction from {receipt_path} does not contain a receipt")
         if not transaction_is_on_or_after(transaction, args.after):
@@ -332,26 +314,11 @@ def _process_receipt(
     receipt_path: Path,
     *,
     pipeline: str,
-    openai_model: str,
     cache: SqliteCallCache | None,
 ) -> Transaction:
     if pipeline == "azure":
-        result = (
-            analyze_receipt_file(receipt_path, cache=cache)
-            if cache is not None
-            else analyze_receipt_file(receipt_path)
-        )
         return populate_transaction_ingestion_metadata(
-            transaction_from_document_intelligence_result(result),
-            ingestion_filename=receipt_path.name,
-            ingestion_file_url=file_url_from_path(receipt_path),
-            ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
-            ingestion_type=IngestionType.receipt_img,
-        )
-
-    if pipeline == "openai":
-        return populate_transaction_ingestion_metadata(
-            transaction_from_openai_receipt(receipt_path, model=openai_model, cache=cache),
+            _transaction_from_azure_receipt(receipt_path, cache=cache),
             ingestion_filename=receipt_path.name,
             ingestion_file_url=file_url_from_path(receipt_path),
             ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
@@ -359,6 +326,19 @@ def _process_receipt(
         )
 
     raise ValueError(f"unsupported receipt pipeline: {pipeline}")
+
+
+def _transaction_from_azure_receipt(
+    receipt_path: Path,
+    *,
+    cache: SqliteCallCache | None,
+) -> Transaction:
+    result = (
+        analyze_receipt_file(receipt_path, cache=cache)
+        if cache is not None
+        else analyze_receipt_file(receipt_path)
+    )
+    return transaction_from_document_intelligence_result(result)
 
 
 def upsert_transaction_to_firestore(
