@@ -7,6 +7,12 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, cast
 
 from receipts_ai.document_intelligence import to_jsonable
+from receipts_ai.models.receipt_data_extraction import (
+    ExtractedReceiptItem,
+    ReceiptDataExtraction,
+    ReceiptDataExtractionMetadata,
+    ReceiptExtractionPipeline,
+)
 from receipts_ai.models.transaction import (
     ExtractionMetadata,
     LineType,
@@ -17,7 +23,10 @@ from receipts_ai.models.transaction import (
 )
 
 __all__ = (
+    "receipt_data_from_document_intelligence_result",
+    "receipt_from_receipt_data",
     "receipt_from_document_intelligence_result",
+    "transaction_from_receipt_data",
     "transaction_from_document_intelligence_result",
 )
 
@@ -30,6 +39,10 @@ def receipt_from_document_intelligence_result(result: Any) -> Receipt:
 
 
 def transaction_from_document_intelligence_result(result: Any) -> Transaction:
+    return transaction_from_receipt_data(receipt_data_from_document_intelligence_result(result))
+
+
+def receipt_data_from_document_intelligence_result(result: Any) -> ReceiptDataExtraction:
     payload = cast(dict[str, Any], to_jsonable(result))
     documents = _list_value(payload.get("documents"))
     if not documents:
@@ -50,42 +63,87 @@ def transaction_from_document_intelligence_result(result: Any) -> Transaction:
     if total is None:
         raise ValueError("document intelligence result does not contain a receipt total")
 
-    items = _receipt_items(fields.get("Items"), payee=payee)
+    items = _receipt_items_from_document_intelligence_field(fields.get("Items"))
     tax_amount = _currency_amount(fields.get("TotalTax"))
     if tax_amount is not None and Decimal(tax_amount) != 0:
         items.append(
-            ReceiptItem(
+            ExtractedReceiptItem(
                 description="Sales tax",
                 amount=tax_amount,
-                net_amount=tax_amount,
                 line_type=LineType.tax,
             )
         )
     currency = _currency_code(total_field) or "USD"
 
-    receipt = Receipt(
+    return ReceiptDataExtraction(
+        merchant_name=payee,
+        transaction_date=transaction_date,
+        currency=currency,
+        receipt_number=_field_text(fields.get("ReceiptNumber")),
         subtotal=_currency_amount(fields.get("Subtotal")),
+        total_tax=tax_amount,
         total=total,
         items=items,
-        extraction=ExtractionMetadata(
+        extraction=ReceiptDataExtractionMetadata(
+            pipeline=ReceiptExtractionPipeline.azure,
             model=_string_value(payload.get("modelId")) or _string_value(payload.get("model_id")),
             confidence=_float_value(document.get("confidence")),
             raw_text=_string_value(payload.get("content")),
         ),
     )
+
+
+def receipt_from_receipt_data(receipt_data: ReceiptDataExtraction) -> Receipt:
+    items = _merge_vendor_discount_items(
+        [
+            ReceiptItem(
+                description=item.description,
+                raw_description=item.description,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                amount=item.amount,
+                net_amount=item.amount,
+                line_type=item.line_type,
+                confidence=item.confidence,
+            )
+            for item in receipt_data.items
+        ],
+        payee=receipt_data.merchant_name,
+    )
+    receipt = Receipt(
+        receipt_number=receipt_data.receipt_number,
+        subtotal=receipt_data.subtotal,
+        total=receipt_data.total,
+        items=items,
+        extraction=ExtractionMetadata(
+            model=receipt_data.extraction.model,
+            confidence=receipt_data.extraction.confidence,
+            raw_text=receipt_data.extraction.raw_text,
+        ),
+    )
+    return receipt
+
+
+def transaction_from_receipt_data(receipt_data: ReceiptDataExtraction) -> Transaction:
+    receipt = receipt_from_receipt_data(receipt_data)
     return Transaction(
-        id=_transaction_id(payee, transaction_date, total, _string_value(payload.get("content"))),
+        id=_transaction_id(
+            receipt_data.merchant_name,
+            receipt_data.transaction_date,
+            receipt_data.total,
+            receipt_data.extraction.raw_text,
+        ),
         source=Source.receipt,
-        transaction_date=transaction_date,
-        payee=payee,
-        amount=_expense_amount(total),
-        currency=currency,
+        transaction_date=receipt_data.transaction_date,
+        payee=receipt_data.merchant_name,
+        amount=_expense_amount(receipt_data.total),
+        currency=receipt_data.currency,
         receipt=receipt,
     )
 
 
-def _receipt_items(items_field: Any, *, payee: str) -> list[ReceiptItem]:
-    items: list[ReceiptItem] = []
+def _receipt_items_from_document_intelligence_field(items_field: Any) -> list[ExtractedReceiptItem]:
+    items: list[ExtractedReceiptItem] = []
     for item_field in _list_value(_dict_value(items_field).get("valueArray")):
         item = _dict_value(item_field)
         item_object = _dict_value(item.get("valueObject"))
@@ -96,20 +154,18 @@ def _receipt_items(items_field: Any, *, payee: str) -> list[ReceiptItem]:
             continue
 
         items.append(
-            ReceiptItem(
+            ExtractedReceiptItem(
                 description=description,
-                raw_description=description,
                 quantity=_float_value(_nested_field(item_object, "Quantity", "valueNumber")),
                 unit_price=_currency_amount(item_object.get("Price")),
                 amount=amount,
-                net_amount=amount,
                 confidence=_float_value(item.get("confidence")),
             )
         )
 
     if not items:
         raise ValueError("document intelligence result does not contain receipt line items")
-    return _merge_vendor_discount_items(items, payee=payee)
+    return items
 
 
 def _merge_vendor_discount_items(items: list[ReceiptItem], *, payee: str) -> list[ReceiptItem]:

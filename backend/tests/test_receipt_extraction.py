@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 
 from receipts_ai.receipt_extraction import (
+    receipt_data_from_document_intelligence_result,
     receipt_from_document_intelligence_result,
     transaction_from_document_intelligence_result,
+    transaction_from_receipt_data,
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "azure"
@@ -45,6 +47,43 @@ def test_extracts_receipt_items_from_azure_receipt_result():
         "PARSLEY",
         "SILK CASHEW",
     ]
+
+
+def test_extracts_pipeline_neutral_receipt_data_from_azure_result():
+    payload = json.loads((FIXTURE_DIR / "fred_meyer_receipt.json").read_text())
+
+    receipt_data = receipt_data_from_document_intelligence_result(payload)
+
+    assert receipt_data.extraction.pipeline == "azure"
+    assert receipt_data.extraction.model == "prebuilt-receipt"
+    assert receipt_data.extraction.confidence == 0.971
+    assert receipt_data.merchant_name == "FredMeyer"
+    assert receipt_data.transaction_date.isoformat() == "2025-10-14"
+    assert receipt_data.currency == "USD"
+    assert receipt_data.subtotal is None
+    assert receipt_data.total_tax == "0.00"
+    assert receipt_data.total == "17.46"
+    assert receipt_data.model_dump(by_alias=True, mode="json", exclude_none=True)["items"][0] == {
+        "description": "NBSC SALTINE",
+        "amount": "4.49",
+        "lineType": "item",
+        "confidence": 0.979,
+    }
+
+
+def test_converts_pipeline_neutral_receipt_data_to_transaction():
+    payload = json.loads((FIXTURE_DIR / "fred_meyer_receipt.json").read_text())
+    receipt_data = receipt_data_from_document_intelligence_result(payload)
+
+    transaction = transaction_from_receipt_data(receipt_data)
+
+    assert transaction.payee == "FredMeyer"
+    assert transaction.transaction_date.isoformat() == "2025-10-14"
+    assert transaction.amount == "-17.46"
+    assert transaction.currency == "USD"
+    assert transaction.receipt is not None
+    assert transaction.receipt.total == "17.46"
+    assert transaction.receipt.items[0].description == "NBSC SALTINE"
 
 
 def test_extracts_optional_item_quantity_and_unit_price():
