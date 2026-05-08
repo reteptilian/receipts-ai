@@ -431,7 +431,8 @@ class TransactionReviewScreen(Screen[None]):
         receipt_item_total = sum(
             (
                 _decimal_amount(
-                    str(_effective_receipt_item_value(item, "amount")), "Receipt item amount"
+                    str(_effective_receipt_item_value(item, "net_amount")),
+                    "Receipt item net amount",
                 )
                 for item in self._receipt_transaction.receipt.items
             ),
@@ -440,7 +441,7 @@ class TransactionReviewScreen(Screen[None]):
         expected_receipt_total = -transaction_amount
         if receipt_item_total != expected_receipt_total:
             raise ValueError(
-                "Save blocked: receipt item amounts must add up to the sign-flipped "
+                "Save blocked: receipt item net amounts must add up to the sign-flipped "
                 f"transaction amount. The receipt items total {receipt_item_total}, but the "
                 f"expected total is {expected_receipt_total}."
             )

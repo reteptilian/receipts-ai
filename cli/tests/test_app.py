@@ -528,9 +528,9 @@ async def test_receipt_item_cells_update_item_overrides() -> None:
     transaction = _transaction(
         "receipt",
         transaction_date=date(2026, 5, 6),
-        amount="-8.25",
+        amount="-7.5",
     )
-    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-8.25")]
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
     transaction.receipt = Receipt(items=[item])
     app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
 
@@ -555,7 +555,7 @@ async def test_receipt_item_cells_update_item_overrides() -> None:
     assert transaction.receipt is not None
     assert transaction.receipt.items[0].user_overrides is not None
     assert transaction.receipt.items[0].user_overrides.amount == "8.25"
-    assert row[6] == "-8.25 USD"
+    assert row[6] == "-7.50 USD"
 
 
 @pytest.mark.anyio
@@ -759,6 +759,58 @@ async def test_save_uses_receipt_items_instead_of_category_allocations() -> None
             await pilot.pause(0.1)
 
         assert mock_save.called
+
+
+@pytest.mark.anyio
+async def test_save_validates_receipt_item_net_amounts() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.receipt = Receipt(
+        items=[ReceiptItem(description="Latte", amount="8.5", net_amount="7.5")]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            cast(TransactionReviewScreen, app.screen).action_save_and_exit()
+            await pilot.pause(0.1)
+
+        assert mock_save.called
+
+
+@pytest.mark.anyio
+async def test_save_refuses_mismatched_receipt_item_net_amounts() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.receipt = Receipt(
+        items=[ReceiptItem(description="Latte", amount="7.5", net_amount="6.5")]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            cast(TransactionReviewScreen, app.screen).action_save_and_exit()
+            await pilot.pause(0.1)
+
+            status = app.screen.query_one("#receipt-edit-status", Static)
+
+        mock_save.assert_not_called()
+
+    assert "Save blocked: receipt item net amounts must add up" in str(status.content)
 
 
 @pytest.mark.anyio
