@@ -139,6 +139,34 @@ class ReceiptsAIApp(App[None]):
         width: 1fr;
     }
 
+    #taxonomy-choice-dialog {
+        padding: 1 2;
+        width: 96;
+        height: 28;
+        border: thick $primary;
+        background: $surface;
+    }
+
+    #taxonomy-choice-input {
+        margin: 1 0 0 0;
+    }
+
+    #taxonomy-choice-status {
+        height: 1;
+        color: $text-muted;
+    }
+
+    #taxonomy-choice-list {
+        height: 1fr;
+        margin: 1 0;
+    }
+
+    #taxonomy-choice-help {
+        color: $text-muted;
+        text-align: center;
+        width: 1fr;
+    }
+
     #receipt-edit-status {
         height: 1;
         padding: 0 1;

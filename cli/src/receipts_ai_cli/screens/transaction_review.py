@@ -22,7 +22,11 @@ from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.widgets import DataTable, Header, Input, Label, Static
 
-from receipts_ai_cli.screens.modals import CategoryChoiceScreen, CellEditScreen
+from receipts_ai_cli.screens.modals import (
+    CategoryChoiceScreen,
+    CellEditScreen,
+    TaxonomyChoiceScreen,
+)
 from receipts_ai_cli.transaction_helpers import (
     RECEIPT_ITEM_COLUMNS,
     _decimal_amount,
@@ -197,6 +201,15 @@ class TransactionReviewScreen(Screen[None]):
             else RECEIPT_ITEM_COLUMNS[coordinate.column].label
         )
         value = table.get_cell_at(coordinate)
+
+        if table.id == "receipt-items" and RECEIPT_ITEM_COLUMNS[coordinate.column].field_name == "taxonomy":
+
+            def check_taxonomy_choice(new_value: str | None) -> None:
+                if new_value is not None:
+                    self._commit_receipt_item_cell_edit(coordinate, new_value)
+
+            self.app.push_screen(TaxonomyChoiceScreen(str(value)), check_taxonomy_choice)
+            return
 
         if (table.id == "category-allocations" and coordinate.column == 0) or (
             table.id == "receipt-items"

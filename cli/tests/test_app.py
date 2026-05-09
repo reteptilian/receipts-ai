@@ -29,6 +29,7 @@ from receipts_ai_cli.app import (
     _log_firestore_configuration,
     main,
 )
+from receipts_ai_cli.taxonomy_selection import TaxonomySearcher
 
 
 def _transaction(
@@ -137,6 +138,38 @@ def test_main_configures_logging_then_runs_app(monkeypatch: pytest.MonkeyPatch) 
     assert configure_calls == [("INFO", None)]
     assert firestore_calls == 1
     assert run_calls == 1
+
+
+def test_taxonomy_searcher_combines_exact_matches_before_semantic_matches() -> None:
+    searcher = TaxonomySearcher.__new__(TaxonomySearcher)
+    searcher._choices = (
+        "Sony",
+        "Sony > Cameras",
+        "Electronics > Video Game Accessories > Monitors",
+        "Home > Decor",
+    )
+    searcher._semantic_error = None
+    searcher._embedding_client = None
+
+    assert searcher.exact_matches("Sony") == (
+        "Sony",
+        "Sony > Cameras",
+    )
+    assert searcher.combine_matches(
+        "gaming screen",
+        semantic_matches=("Electronics > Video Game Accessories > Monitors",),
+    ) == ("Electronics > Video Game Accessories > Monitors",)
+    assert searcher.combine_matches(
+        "Sony",
+        semantic_matches=(
+            "Electronics > Video Game Accessories > Monitors",
+            "Sony > Cameras",
+        ),
+    ) == (
+        "Sony",
+        "Sony > Cameras",
+        "Electronics > Video Game Accessories > Monitors",
+    )
 
 
 @pytest.mark.anyio
@@ -789,6 +822,104 @@ async def test_receipt_item_category_id_uses_budget_category_picker() -> None:
     assert transaction.receipt.items[0].user_overrides is not None
     assert transaction.receipt.items[0].user_overrides.category_id == (
         "Miscellaneous > Uncategorized"
+    )
+
+
+@pytest.mark.anyio
+async def test_receipt_item_taxonomy_uses_advanced_taxonomy_picker() -> None:
+    class FakeTaxonomySearcher:
+        choices = (
+            "Sony > Cameras",
+            "Electronics > Video Game Accessories > Monitors",
+            "Home > Decor",
+        )
+        semantic_error = None
+
+        def exact_matches(self, query: str) -> tuple[str, ...]:
+            folded_query = query.casefold()
+            return tuple(
+                choice for choice in self.choices if folded_query in choice.casefold()
+            )
+
+        def semantic_matches(self, query: str) -> tuple[str, ...]:
+            if query == "gaming screen":
+                return ("Electronics > Video Game Accessories > Monitors",)
+            return ()
+
+        def combine_matches(
+            self,
+            query: str,
+            *,
+            semantic_matches: tuple[str, ...] = (),
+        ) -> tuple[str, ...]:
+            if not query.strip():
+                return self.choices
+            combined: list[str] = []
+            for choice in (*self.exact_matches(query), *semantic_matches):
+                if choice not in combined:
+                    combined.append(choice)
+            return tuple(combined)
+
+    item = ReceiptItem(
+        description="Gaming Display",
+        amount="299.99",
+        net_amount="299.99",
+        taxonomy="Electronics > Displays",
+    )
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-299.99",
+    )
+    transaction.receipt = Receipt(items=[item])
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with (
+        patch(
+            "receipts_ai_cli.screens.modals.taxonomy_selector_searcher",
+            return_value=FakeTaxonomySearcher(),
+        ),
+        patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save,
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            receipt_items = cast(DataTable[str], app.screen.query_one("#receipt-items", DataTable))
+            receipt_items.cursor_coordinate = Coordinate(0, 9)
+            cast(TransactionReviewScreen, app.screen).action_edit_cell()
+            await pilot.pause(0.1)
+
+            taxonomy_input = app.screen.query_one("#taxonomy-choice-input", Input)
+            choice_list = app.screen.query_one("#taxonomy-choice-list", OptionList)
+            assert taxonomy_input.value == ""
+            assert choice_list.option_count == 3
+
+            for key in "gaming screen":
+                await pilot.press(key)
+            await pilot.pause(0.5)
+
+            assert choice_list.option_count == 1
+            assert str(choice_list.get_option_at_index(0).prompt) == (
+                "Electronics > Video Game Accessories > Monitors"
+            )
+
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            row = receipt_items.get_row_at(0)
+
+            await pilot.press("s")
+            await pilot.pause(0.1)
+
+            assert mock_save.called
+
+    assert row[9] == "Electronics > Video Game Accessories > Monitors"
+    assert transaction.receipt is not None
+    assert transaction.receipt.items[0].user_overrides is not None
+    assert transaction.receipt.items[0].user_overrides.taxonomy == (
+        "Electronics > Video Game Accessories > Monitors"
     )
 
 
