@@ -1,4 +1,7 @@
+import logging
+from argparse import Namespace
 from datetime import date
+from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
@@ -18,7 +21,14 @@ from textual.coordinate import Coordinate
 from textual.geometry import Size
 from textual.widgets import DataTable, Input, OptionList, Static
 
-from receipts_ai_cli.app import ReceiptItemsScreen, ReceiptsAIApp, TransactionReviewScreen
+from receipts_ai_cli.app import (
+    ReceiptItemsScreen,
+    ReceiptsAIApp,
+    TransactionReviewScreen,
+    _configure_logging,
+    _log_firestore_configuration,
+    main,
+)
 
 
 def _transaction(
@@ -44,6 +54,84 @@ def test_app_title_defaults_to_class_name() -> None:
     app = ReceiptsAIApp()
 
     assert app.title == "ReceiptsAIApp"
+
+
+def test_configure_logging_writes_to_file(tmp_path: Path) -> None:
+    log_path = tmp_path / "logs" / "receipts-ai.log"
+
+    _configure_logging(log_level="INFO", log_file=log_path)
+    logging.getLogger("receipts_ai_cli.test").info("hello log file")
+    root_logger = logging.getLogger()
+
+    assert log_path.read_text(encoding="utf-8") != ""
+    assert "hello log file" in log_path.read_text(encoding="utf-8")
+    assert len(root_logger.handlers) == 1
+    assert isinstance(root_logger.handlers[0], logging.FileHandler)
+
+
+def test_configure_logging_without_log_file_stays_off_terminal() -> None:
+    _configure_logging(log_level="INFO", log_file=None)
+    root_logger = logging.getLogger()
+
+    assert len(root_logger.handlers) == 1
+    assert isinstance(root_logger.handlers[0], logging.NullHandler)
+
+
+def test_log_firestore_configuration_logs_emulator(caplog: pytest.LogCaptureFixture) -> None:
+    with patch("receipts_ai_cli.app.config_value") as mock_config_value:
+        mock_config_value.side_effect = lambda key: {
+            "FIRESTORE_EMULATOR_HOST": "127.0.0.1:8080",
+            "FIREBASE_SERVICE_ACCT_KEY_FILEPATH": None,
+        }[key]
+
+        with caplog.at_level(logging.INFO):
+            _log_firestore_configuration()
+
+    assert "Configured to use Firestore emulator at 127.0.0.1:8080" in caplog.text
+
+
+def test_log_firestore_configuration_logs_service_account(caplog: pytest.LogCaptureFixture) -> None:
+    with patch("receipts_ai_cli.app.config_value") as mock_config_value:
+        mock_config_value.side_effect = lambda key: {
+            "FIRESTORE_EMULATOR_HOST": None,
+            "FIREBASE_SERVICE_ACCT_KEY_FILEPATH": "/tmp/firebase.json",
+        }[key]
+
+        with caplog.at_level(logging.INFO):
+            _log_firestore_configuration()
+
+    assert "Configured to use Cloud Firestore with service account file /tmp/firebase.json" in caplog.text
+
+
+def test_main_configures_logging_then_runs_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    parse_args_result = Namespace(log_file=None, log_level="INFO")
+    configure_calls: list[tuple[str, Path | None]] = []
+
+    monkeypatch.setattr("receipts_ai_cli.app._parse_args", lambda: parse_args_result)
+    monkeypatch.setattr(
+        "receipts_ai_cli.app._configure_logging",
+        lambda *, log_level, log_file: configure_calls.append((log_level, log_file)),
+    )
+
+    firestore_calls = 0
+    run_calls = 0
+
+    def fake_log_firestore_configuration() -> None:
+        nonlocal firestore_calls
+        firestore_calls += 1
+
+    def fake_run(self: ReceiptsAIApp) -> None:
+        nonlocal run_calls
+        run_calls += 1
+
+    monkeypatch.setattr("receipts_ai_cli.app._log_firestore_configuration", fake_log_firestore_configuration)
+    monkeypatch.setattr(ReceiptsAIApp, "run", fake_run)
+
+    main()
+
+    assert configure_calls == [("INFO", None)]
+    assert firestore_calls == 1
+    assert run_calls == 1
 
 
 @pytest.mark.anyio
