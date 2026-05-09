@@ -28,9 +28,9 @@ from receipts_ai.categorization import (
     UrlLibOllamaClient,
     categorize_receipt_items,
     categorize_transactions,
-    classify_transactions_by_product_taxonomy,
     classify_receipt_items_by_product_taxonomy,
     classify_receipt_items_by_product_taxonomy_vector_search,
+    classify_transactions_by_product_taxonomy,
     clean_receipt_item_descriptions,
     create_ollama_category_client,
     load_budget_categories,
@@ -724,12 +724,11 @@ def test_classify_transactions_by_product_taxonomy_sets_value_for_confident_prod
 
     assert result == [transaction]
     assert transaction.taxonomy == "Food, Beverages & Tobacco > Food Items > Packaged Foods"
-    assert "Raw transaction description: COSTCO WHSE POS PURCHASE COSTCO WHSE #123" in client.prompts[0]
-    assert "Search results:" in client.prompts[0]
     assert (
-        "Available product taxonomy candidates: Food, Beverages & Tobacco > Food Items > Packaged Foods, Electronics > Audio > Headphones"
+        "Raw transaction description: COSTCO WHSE POS PURCHASE COSTCO WHSE #123"
         in client.prompts[0]
     )
+    assert "Search results:" in client.prompts[0]
     assert TRANSACTION_TAXONOMY_NONE_CHOICE in client.prompts[0]
 
 
@@ -755,9 +754,7 @@ def test_classify_transactions_by_product_taxonomy_skips_non_product_choice():
     embeddings = TaxonomyEmbeddingIndex(
         embedding_model="test-model",
         embedding_dimension=2,
-        entries=(
-            TaxonomyEmbeddingEntry(path=("Home & Garden", "Lighting"), embedding=(0.9, 0.1)),
-        ),
+        entries=(TaxonomyEmbeddingEntry(path=("Home & Garden", "Lighting"), embedding=(0.9, 0.1)),),
     )
 
     classify_transactions_by_product_taxonomy(
@@ -1452,7 +1449,9 @@ def test_url_lib_ollama_client_keeps_alias_choice_case_distinct(
 def test_cached_category_model_client_reuses_sqlite_cache(tmp_path: Path):
     cache_path = tmp_path / "api-cache.sqlite"
     first_client = FakeCategoryClient(["Groceries"])
-    cached_client = CachedCategoryModelClient(client=first_client, cache=SqliteCallCache(cache_path))
+    cached_client = CachedCategoryModelClient(
+        client=first_client, cache=SqliteCallCache(cache_path)
+    )
 
     first_result = cached_client.complete("Choose one")
 
@@ -1471,7 +1470,9 @@ def test_cached_category_model_client_reuses_sqlite_cache(tmp_path: Path):
 def test_cached_category_model_client_reuses_choice_response(tmp_path: Path):
     cache_path = tmp_path / "api-cache.sqlite"
     first_client = FakeCategoryClient(["Groceries"])
-    cached_client = CachedCategoryModelClient(client=first_client, cache=SqliteCallCache(cache_path))
+    cached_client = CachedCategoryModelClient(
+        client=first_client, cache=SqliteCallCache(cache_path)
+    )
 
     first_result = cached_client.complete_choice(
         "Choose one", choices=("Groceries", "Restaurants & Dining Out")

@@ -1338,9 +1338,8 @@ def _transaction_product_taxonomy_prompt(
         "represents the purchase of a tangible consumer product.\n"
         "If the transaction is for a service, transfer, tax, fee, subscription, utility, income, "
         "cash movement, or is too ambiguous, choose "
-        f"\"{TRANSACTION_TAXONOMY_NONE_CHOICE}\".\n"
+        f'"{TRANSACTION_TAXONOMY_NONE_CHOICE}".\n'
         "Return only one exact label from the provided labels.\n\n"
-        f"Available product taxonomy candidates: {candidate_paths}\n\n"
         f"Raw transaction description: {_transaction_description_text(transaction)}\n\n"
         f"{_transaction_merchant_category_text(transaction)}"
         f"Search results:\n{_transaction_search_results_text(transaction)}\n"
