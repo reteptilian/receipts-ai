@@ -204,6 +204,7 @@ def save_transaction_review_edits(
     transaction_id: str,
     transaction_user_overrides: TransactionUserOverrides | Mapping[str, Any],
     *,
+    reviewed: bool = False,
     receipt_transaction_id: str | None = None,
     receipt_items: Sequence[ReceiptItem] | None = None,
     client: FirestoreTransactionClient | None = None,
@@ -233,23 +234,28 @@ def save_transaction_review_edits(
     batch.set(
         transaction_ref,
         {
+            "reviewed": reviewed,
             "userOverrides": _transaction_user_overrides_document(transaction_user_overrides),
             "updatedAt": timestamp,
         },
         merge=True,
     )
 
-    if receipt_items is not None:
+    if receipt_transaction_id is not None:
         receipt_ref = collection_reference.document(cast(str, receipt_transaction_id))
-        items_document = [
-            item.model_dump(mode="json", by_alias=True, exclude_none=True) for item in receipt_items
-        ]
+        receipt_document: dict[str, Any] = {
+            "reviewed": reviewed,
+            "updatedAt": timestamp,
+        }
+        if receipt_items is not None:
+            items_document = [
+                item.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for item in receipt_items
+            ]
+            receipt_document["receipt"] = {"items": items_document}
         batch.set(
             receipt_ref,
-            {
-                "receipt": {"items": items_document},
-                "updatedAt": timestamp,
-            },
+            receipt_document,
             merge=True,
         )
 

@@ -606,6 +606,9 @@ class Transaction(BaseModel):
     currency: Annotated[str, Field(description="ISO 4217 currency code.", pattern="^[A-Z]{3}$")]
     kind: Annotated[Kind | None, Field(description="User-facing transaction kind.")] = None
     status: Status | None = Status.posted
+    reviewed: Annotated[
+        bool | None, Field(description="Whether the transaction has been reviewed by the user.")
+    ] = False
     category_allocations: Annotated[
         list[CategoryAllocation] | None,
         Field(

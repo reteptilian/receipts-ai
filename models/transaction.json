@@ -101,6 +101,11 @@
       "enum": ["pending", "posted", "reconciled", "void"],
       "default": "posted"
     },
+    "reviewed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transaction has been reviewed by the user."
+    },
     "categoryAllocations": {
       "type": "array",
       "description": "Budget category splits for the transaction total.",

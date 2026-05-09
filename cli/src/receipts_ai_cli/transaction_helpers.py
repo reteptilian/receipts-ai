@@ -42,6 +42,7 @@ TRANSACTION_TABLE_COLUMNS = (
     TransactionTableColumn(key="date", label="Date"),
     TransactionTableColumn(key="payee", label="Payee"),
     TransactionTableColumn(key="description", label="Description"),
+    TransactionTableColumn(key="status", label="Status"),
     TransactionTableColumn(key="category", label="Category"),
     TransactionTableColumn(key="ingestion_filename", label="Ingestion file"),
     TransactionTableColumn(key="receipt", label="Receipt?"),
@@ -50,6 +51,7 @@ TRANSACTION_TABLE_COLUMNS = (
 
 TRANSACTION_TABLE_FIXED_WIDTHS = {
     "date": 10,
+    "status": 17,
     "receipt": 8,
     "amount": 12,
 }
@@ -141,6 +143,7 @@ RECEIPT_ITEM_COLUMNS = (
     ),
 )
 
+
 def _open_file_in_external_viewer(filepath: str) -> None:
     """Opens a file in the system's default external viewer."""
     system_platform = platform.system()
@@ -154,6 +157,7 @@ def _open_file_in_external_viewer(filepath: str) -> None:
     except Exception:
         # Ignore errors when opening external viewer to avoid crashing the app
         pass
+
 
 def _transaction_sort_key(transaction: Transaction) -> tuple[object, ...]:
     try:
@@ -244,9 +248,18 @@ def _format_transaction_category(transaction: Transaction) -> str:
 
     largest_allocation = max(
         allocations,
-        key=lambda allocation: abs(_decimal_amount(allocation.amount, "Category allocation amount")),
+        key=lambda allocation: abs(
+            _decimal_amount(allocation.amount, "Category allocation amount")
+        ),
     )
     return f"{largest_allocation.category_id}, ..."
+
+
+def _format_transaction_status(transaction: Transaction) -> str:
+    status_parts = ["Reviewed" if _effective_transaction_reviewed(transaction) else "Unreviewed"]
+    if _is_transaction_pair(transaction):
+        status_parts.append("Pair")
+    return " | ".join(status_parts)
 
 
 def _has_receipt_items(transaction: Transaction) -> bool:
@@ -262,6 +275,12 @@ def _is_bank_statement_transaction(transaction: Transaction) -> bool:
 def _is_receipt_based_transaction(transaction: Transaction) -> bool:
     record_type = getattr(transaction, "record_type", None)
     return record_type == "receipt_based" or transaction.source == "receipt"
+
+
+def _is_transaction_pair(transaction: Transaction) -> bool:
+    return transaction.linked_receipt_based_transaction_id is not None or bool(
+        transaction.linked_transaction_ids
+    )
 
 
 def _receipt_item_row(item: ReceiptItem) -> list[str]:
@@ -308,6 +327,10 @@ def _effective_transaction_amount(transaction: Transaction) -> str:
         return overrides.amount
 
     return transaction.amount
+
+
+def _effective_transaction_reviewed(transaction: Transaction) -> bool:
+    return bool(transaction.reviewed)
 
 
 def _effective_category_allocations(

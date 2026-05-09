@@ -342,6 +342,7 @@ def test_saves_transaction_review_edits_in_firestore_batch():
                 UserCategoryAllocation(category_id="Food & Dining > Coffee", amount="-7.50")
             ],
         ),
+        reviewed=True,
         receipt_transaction_id="receipt_1",
         receipt_items=[item],
         client=client,
@@ -355,6 +356,7 @@ def test_saves_transaction_review_edits_in_firestore_batch():
         (
             "statement_1",
             {
+                "reviewed": True,
                 "userOverrides": {
                     "payee": "Coffee Shop",
                     "categoryAllocations": [
@@ -372,6 +374,7 @@ def test_saves_transaction_review_edits_in_firestore_batch():
         (
             "receipt_1",
             {
+                "reviewed": True,
                 "receipt": {
                     "items": [
                         {

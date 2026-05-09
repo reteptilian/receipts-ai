@@ -100,7 +100,10 @@ def test_log_firestore_configuration_logs_service_account(caplog: pytest.LogCapt
         with caplog.at_level(logging.INFO):
             _log_firestore_configuration()
 
-    assert "Configured to use Cloud Firestore with service account file /tmp/firebase.json" in caplog.text
+    assert (
+        "Configured to use Cloud Firestore with service account file /tmp/firebase.json"
+        in caplog.text
+    )
 
 
 def test_main_configures_logging_then_runs_app(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,7 +127,9 @@ def test_main_configures_logging_then_runs_app(monkeypatch: pytest.MonkeyPatch) 
         nonlocal run_calls
         run_calls += 1
 
-    monkeypatch.setattr("receipts_ai_cli.app._log_firestore_configuration", fake_log_firestore_configuration)
+    monkeypatch.setattr(
+        "receipts_ai_cli.app._log_firestore_configuration", fake_log_firestore_configuration
+    )
     monkeypatch.setattr(ReceiptsAIApp, "run", fake_run)
 
     main()
@@ -160,6 +165,7 @@ async def test_app_displays_transactions_in_table() -> None:
         "2026-05-06",
         "Coffee Shop",
         "POS PURCHASE COFFEE",
+        "Unreviewed",
         "",
         "checking.ofx",
         "",
@@ -190,7 +196,7 @@ async def test_transaction_table_description_column_has_capped_fixed_width() -> 
         description_column = table.ordered_columns[2]
 
     assert description_column.auto_width is False
-    assert description_column.width == 80
+    assert description_column.width == 79
 
 
 @pytest.mark.anyio
@@ -215,7 +221,7 @@ async def test_app_displays_transaction_overrides_in_table() -> None:
 
     assert row[0] == "2026-05-07"
     assert row[1] == "Edited Coffee Shop"
-    assert row[6] == "-8.25 USD"
+    assert row[7] == "-8.25 USD"
 
 
 @pytest.mark.anyio
@@ -252,9 +258,9 @@ async def test_app_displays_transaction_category_allocations_in_table() -> None:
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         rows = [table.get_row_at(row_index) for row_index in range(table.row_count)]
 
-    assert rows[0][3] == ""
-    assert rows[1][3] == "Taxes > Income Taxes"
-    assert rows[2][3] == "Taxes > Income Taxes, ..."
+    assert rows[0][4] == ""
+    assert rows[1][4] == "Taxes > Income Taxes"
+    assert rows[2][4] == "Taxes > Income Taxes, ..."
 
 
 @pytest.mark.anyio
@@ -264,9 +270,7 @@ async def test_app_displays_transaction_category_allocation_overrides() -> None:
         transaction_date=date(2026, 5, 6),
         amount="-7.5",
     )
-    transaction.category_allocations = [
-        CategoryAllocation(category_id="Original", amount="-7.5")
-    ]
+    transaction.category_allocations = [CategoryAllocation(category_id="Original", amount="-7.5")]
     transaction.user_overrides = TransactionUserOverrides(
         category_allocations=[
             UserCategoryAllocation(category_id="Edited", amount="-7.5"),
@@ -280,7 +284,7 @@ async def test_app_displays_transaction_category_allocation_overrides() -> None:
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         row = table.get_row_at(0)
 
-    assert row[3] == "Edited"
+    assert row[4] == "Edited"
 
 
 @pytest.mark.anyio
@@ -307,7 +311,7 @@ async def test_app_marks_transactions_with_receipt_items() -> None:
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         row = table.get_row_at(0)
 
-    assert row[5] == "Y"
+    assert row[6] == "Y"
 
 
 @pytest.mark.anyio
@@ -339,7 +343,7 @@ async def test_app_collapses_linked_bst_and_rbt_with_receipt_indicator() -> None
 
     assert table.row_count == 1
     assert row[1] == "Payee statement"
-    assert row[5] == "Y"
+    assert row[6] == "Y"
 
 
 @pytest.mark.anyio
@@ -384,7 +388,7 @@ async def test_app_links_selected_bst_and_rbt_then_refreshes() -> None:
         mock_link.assert_called_once_with("statement", "receipt")
 
     assert table.row_count == 1
-    assert table.get_row_at(0)[5] == "Y"
+    assert table.get_row_at(0)[6] == "Y"
 
 
 @pytest.mark.anyio
@@ -543,7 +547,7 @@ async def test_app_displays_transactions_sorted_by_date_then_amount() -> None:
 
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         displayed_dates_and_amounts = [
-            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[6])
+            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[7])
             for row_index in range(table.row_count)
         ]
 
@@ -643,7 +647,7 @@ async def test_receipt_item_cells_update_item_overrides() -> None:
     assert transaction.receipt is not None
     assert transaction.receipt.items[0].user_overrides is not None
     assert transaction.receipt.items[0].user_overrides.amount == "8.25"
-    assert row[6] == "-7.50 USD"
+    assert row[7] == "-7.50 USD"
 
 
 @pytest.mark.anyio
@@ -968,8 +972,98 @@ async def test_linked_transaction_review_saves_bst_overrides_and_rbt_items() -> 
 
     args, kwargs = mock_save.call_args
     assert args[0] == "statement"
+    assert kwargs["reviewed"] is False
     assert kwargs["receipt_transaction_id"] == "receipt"
     assert kwargs["receipt_items"][0].description == "Latte"
+
+
+@pytest.mark.anyio
+async def test_transactions_table_shows_review_and_pair_status() -> None:
+    bst = _transaction(
+        "statement",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    bst.record_type = RecordType.bank_statement
+    bst.linked_receipt_based_transaction_id = "receipt"
+    bst.linked_transaction_ids = ["receipt"]
+    bst.reviewed = True
+    rbt = Transaction(
+        id="receipt",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        linked_transaction_ids=["statement"],
+        transaction_date=date(2026, 5, 6),
+        payee="Receipt Payee",
+        amount="-7.5",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Latte", amount="7.5", net_amount="7.5")]),
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [bst, rbt])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        row = table.get_row_at(0)
+
+    assert row[3] == "Reviewed | Pair"
+
+
+@pytest.mark.anyio
+async def test_review_toggle_is_drafted_until_save_and_persists_for_pair() -> None:
+    bst = _transaction(
+        "statement",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    bst.record_type = RecordType.bank_statement
+    bst.linked_receipt_based_transaction_id = "receipt"
+    bst.linked_transaction_ids = ["receipt"]
+    rbt = Transaction(
+        id="receipt",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        linked_transaction_ids=["statement"],
+        transaction_date=date(2026, 5, 6),
+        payee="Receipt Payee",
+        amount="-7.5",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Latte", amount="7.5", net_amount="7.5")]),
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [bst, rbt])
+
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            review_state = app.screen.query_one("#review-state", Static)
+            assert str(review_state.content) == "Review: Unreviewed | Type: Pair"
+            assert bst.reviewed is False
+            assert rbt.reviewed is False
+
+            await pilot.press("r")
+            await pilot.pause(0.1)
+
+            review_state = app.screen.query_one("#review-state", Static)
+            status = app.screen.query_one("#receipt-edit-status", Static)
+            assert str(review_state.content) == "Review: Reviewed | Type: Pair"
+            assert "unsaved" in str(status.content)
+            assert bst.reviewed is False
+            assert rbt.reviewed is False
+
+            await pilot.press("s")
+            await pilot.pause(0.1)
+
+        mock_save.assert_called_once()
+
+    assert bst.reviewed is True
+    assert rbt.reviewed is True
+    _, kwargs = mock_save.call_args
+    assert kwargs["reviewed"] is True
+    assert kwargs["receipt_transaction_id"] == "receipt"
 
 
 @pytest.mark.anyio

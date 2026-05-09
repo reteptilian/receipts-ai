@@ -22,6 +22,7 @@ def test_transaction_accepts_json_aliases():
             "receiptImageExtractionResults": '{"azure-doc-intelligence":{"status":"ok"},"gemini":{"status":"ok"}}',
             "amount": "-42.19",
             "currency": "USD",
+            "reviewed": True,
             "linkedTransactionIds": ["receipt_1"],
             "transactionGroupId": "rtx_1",
             "groupRole": "primary",
@@ -43,6 +44,7 @@ def test_transaction_accepts_json_aliases():
         transaction.receipt_image_extraction_results
         == '{"azure-doc-intelligence":{"status":"ok"},"gemini":{"status":"ok"}}'
     )
+    assert transaction.reviewed is True
     assert transaction.linked_transaction_ids is not None
     assert transaction.linked_transaction_ids[0] == "receipt_1"
     assert transaction.transaction_group_id == "rtx_1"
@@ -73,6 +75,7 @@ def test_transaction_accepts_python_field_names():
     assert transaction.ingestion_file_url == "file:///tmp/manual.json"
     assert transaction.receipt_data_extraction_service == "gemini-3-flash-lite"
     assert transaction.receipt_image_extraction_results == '{"gemini":{"status":"ok"}}'
+    assert transaction.reviewed is False
     assert transaction.match_status == "unmatched"
 
 

@@ -24,6 +24,7 @@ from receipts_ai_cli.transaction_helpers import (
     _format_amount,
     _format_receipt_indicator,
     _format_transaction_category,
+    _format_transaction_status,
     _is_bank_statement_transaction,
     _is_receipt_based_transaction,
     _receipt_transactions_by_display_id,
@@ -234,6 +235,7 @@ class ReceiptsAIApp(App[None]):
                 _effective_transaction_date(transaction).isoformat(),
                 _effective_transaction_payee(transaction),
                 transaction.description or "",
+                _format_transaction_status(transaction),
                 _format_transaction_category(transaction),
                 transaction.ingestion_filename or "",
                 _format_receipt_indicator(

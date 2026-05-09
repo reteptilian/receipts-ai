@@ -32,9 +32,11 @@ from receipts_ai_cli.transaction_helpers import (
     _effective_transaction_date,
     _effective_transaction_description,
     _effective_transaction_payee,
+    _effective_transaction_reviewed,
     _field_edit_error_message,
     _has_receipt_items,
     _header_input_label,
+    _is_transaction_pair,
     _parse_optional_date,
     _parse_optional_text,
     _parse_required_decimal_text,
@@ -54,6 +56,7 @@ class TransactionReviewScreen(Screen[None]):
         ("e", "edit_cell", "Edit cell"),
         ("a", "add_category_allocation", "Add allocation"),
         ("d", "delete_category_allocation", "Delete allocation"),
+        ("r", "toggle_reviewed", "Toggle reviewed"),
         ("s", "save_and_exit", "Save and Exit"),
         ("escape", "exit_without_saving", "Exit Without Saving"),
         ("q", "exit_without_saving", "Exit Without Saving"),
@@ -111,15 +114,16 @@ class TransactionReviewScreen(Screen[None]):
                 id="receipt-description",
                 compact=True,
             )
+        yield Static("", id="review-state")
         yield Static("", id="receipt-edit-status")
         yield Static("Category Allocations", id="category-allocations-title")
         yield DataTable(id="category-allocations")
         yield Static("Receipt Items", id="receipt-items-title")
         yield DataTable(id="receipt-items")
-        controls = "s Save and Exit | e Edit cell | Esc/q Exit Without Saving"
+        controls = "r Toggle reviewed | s Save and Exit | e Edit cell | Esc/q Exit Without Saving"
         if not self._has_receipt_items():
             controls = (
-                "s Save and Exit | a Add allocation | d Delete allocation | "
+                "r Toggle reviewed | s Save and Exit | a Add allocation | d Delete allocation | "
                 "e Edit cell | Esc/q Exit Without Saving"
             )
         yield Static(controls, id="review-controls")
@@ -130,6 +134,7 @@ class TransactionReviewScreen(Screen[None]):
         allocations_table.zebra_stripes = True
         allocations_table.add_columns("Category ID", "Amount")
         self._refresh_category_allocations_table()
+        self._refresh_review_state()
         if self._has_receipt_items():
             self.query_one("#category-allocations-title", Static).add_class("hidden")
             allocations_table.add_class("hidden")
@@ -193,12 +198,9 @@ class TransactionReviewScreen(Screen[None]):
         )
         value = table.get_cell_at(coordinate)
 
-        if (
-            (table.id == "category-allocations" and coordinate.column == 0)
-            or (
-                table.id == "receipt-items"
-                and RECEIPT_ITEM_COLUMNS[coordinate.column].field_name == "category_id"
-            )
+        if (table.id == "category-allocations" and coordinate.column == 0) or (
+            table.id == "receipt-items"
+            and RECEIPT_ITEM_COLUMNS[coordinate.column].field_name == "category_id"
         ):
 
             def check_category_choice(new_value: str | None) -> None:
@@ -355,18 +357,29 @@ class TransactionReviewScreen(Screen[None]):
             _app_module().save_transaction_review_edits(
                 self._source_transaction.id,
                 self._transaction.user_overrides or TransactionUserOverrides(),
+                reviewed=self._transaction.reviewed,
                 receipt_transaction_id=receipt_transaction_id,
                 receipt_items=receipt_items,
             )
             self._source_transaction.user_overrides = self._transaction.user_overrides
+            self._source_transaction.reviewed = self._transaction.reviewed
             if self._source_receipt_transaction is not None and self._receipt_transaction:
                 self._source_receipt_transaction.receipt = self._receipt_transaction.receipt
+                self._source_receipt_transaction.reviewed = self._transaction.reviewed
             elif self._receipt_transaction is not None:
                 self._source_transaction.receipt = self._receipt_transaction.receipt
             self._dirty = False
             self.app.call_from_thread(self.dismiss)
         except Exception as exc:
             self.app.call_from_thread(self._show_edit_error, f"Failed to persist: {exc}")
+
+    def action_toggle_reviewed(self) -> None:
+        self._transaction.reviewed = not _effective_transaction_reviewed(self._transaction)
+        if self._source_receipt_transaction is not None and self._receipt_transaction is not None:
+            self._receipt_transaction.reviewed = self._transaction.reviewed
+        self._refresh_review_state()
+        status = "Reviewed" if self._transaction.reviewed else "Unreviewed"
+        self._mark_dirty(f"Marked transaction as {status}")
 
     def _set_transaction_override(self, field_name: str, value: object | None) -> None:
         overrides = self._transaction.user_overrides or TransactionUserOverrides()
@@ -404,6 +417,14 @@ class TransactionReviewScreen(Screen[None]):
         table.clear(columns=False)
         for allocation in _effective_category_allocations(self._transaction):
             table.add_row(allocation.category_id, allocation.amount)
+
+    def _refresh_review_state(self) -> None:
+        review_state = self.query_one("#review-state", Static)
+        reviewed_text = (
+            "Reviewed" if _effective_transaction_reviewed(self._transaction) else "Unreviewed"
+        )
+        pair_text = "Pair" if _is_transaction_pair(self._transaction) else "Single record"
+        review_state.update(f"Review: {reviewed_text} | Type: {pair_text}")
 
     def _validate_save(self) -> None:
         transaction_amount = _decimal_amount(
