@@ -18,7 +18,7 @@ from receipts_ai.models.transaction import (
     Transaction,
     UserCategoryAllocation,
 )
-from receipts_ai.taxonomy import effective_receipt_item_taxonomy
+from receipts_ai.taxonomy import effective_receipt_item_taxonomy, effective_transaction_taxonomy
 from textual.widgets import Input
 
 TransactionLoader = Callable[[], Sequence[Transaction]]
@@ -43,6 +43,7 @@ TRANSACTION_TABLE_COLUMNS = (
     TransactionTableColumn(key="date", label="Date"),
     TransactionTableColumn(key="payee", label="Payee"),
     TransactionTableColumn(key="description", label="Description"),
+    TransactionTableColumn(key="taxonomy", label="Taxonomy"),
     TransactionTableColumn(key="status", label="Status"),
     TransactionTableColumn(key="category", label="Category"),
     TransactionTableColumn(key="ingestion_filename", label="Ingestion file"),
@@ -59,7 +60,8 @@ TRANSACTION_TABLE_FIXED_WIDTHS = {
 
 TRANSACTION_TABLE_FLEX_COLUMNS = (
     TransactionTableFlexColumn(key="payee", min_width=16, max_width=40, weight=2),
-    TransactionTableFlexColumn(key="description", min_width=20, max_width=80, weight=5),
+    TransactionTableFlexColumn(key="description", min_width=18, max_width=60, weight=4),
+    TransactionTableFlexColumn(key="taxonomy", min_width=18, max_width=52, weight=3),
     TransactionTableFlexColumn(key="category", min_width=16, max_width=40, weight=2),
     TransactionTableFlexColumn(key="ingestion_filename", min_width=14, max_width=30, weight=1),
 )
@@ -323,6 +325,10 @@ def _effective_transaction_amount(transaction: Transaction) -> str:
         return overrides.amount
 
     return transaction.amount
+
+
+def _effective_transaction_taxonomy(transaction: Transaction) -> str:
+    return _format_optional(effective_transaction_taxonomy(transaction))
 
 
 def _effective_transaction_reviewed(transaction: Transaction) -> bool:

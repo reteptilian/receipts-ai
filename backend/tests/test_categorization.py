@@ -19,6 +19,7 @@ from receipts_ai.categorization import (
     DEFAULT_OLLAMA_URL,
     MAX_TAXONOMY_ALIAS_CHOICES,
     MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES,
+    TRANSACTION_TAXONOMY_NONE_CHOICE,
     CachedCategoryModelClient,
     CategoryChoiceProbability,
     CategoryCompletion,
@@ -27,6 +28,7 @@ from receipts_ai.categorization import (
     UrlLibOllamaClient,
     categorize_receipt_items,
     categorize_transactions,
+    classify_transactions_by_product_taxonomy,
     classify_receipt_items_by_product_taxonomy,
     classify_receipt_items_by_product_taxonomy_vector_search,
     clean_receipt_item_descriptions,
@@ -669,6 +671,144 @@ def test_categorize_transactions_skips_invalid_single_character_response():
 
     assert transaction.category_allocations == []
     assert "1: Housing & Utilities > Electricity" in client.prompts[0]
+
+
+def test_classify_transactions_by_product_taxonomy_sets_value_for_confident_product_purchase():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="COSTCO WHSE",
+        description="POS PURCHASE COSTCO WHSE #123",
+        brave_search_result=json.dumps(
+            [
+                {
+                    "title": "Costco Wholesale",
+                    "description": "Warehouse store with groceries and household goods.",
+                }
+            ]
+        ),
+        amount="-42.19",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="1",
+                probabilities=(CategoryChoiceProbability("1", 0.84),),
+            )
+        ]
+    )
+    embedding_client = FakeTaxonomyEmbeddingClient((1.0, 0.0))
+    embeddings = TaxonomyEmbeddingIndex(
+        embedding_model="test-model",
+        embedding_dimension=2,
+        entries=(
+            TaxonomyEmbeddingEntry(
+                path=("Food, Beverages & Tobacco", "Food Items", "Packaged Foods"),
+                embedding=(0.95, 0.05),
+            ),
+            TaxonomyEmbeddingEntry(
+                path=("Electronics", "Audio", "Headphones"),
+                embedding=(0.1, 0.9),
+            ),
+        ),
+    )
+
+    result = classify_transactions_by_product_taxonomy(
+        [transaction],
+        client=client,
+        embedding_client=embedding_client,
+        taxonomy_embeddings=embeddings,
+    )
+
+    assert result == [transaction]
+    assert transaction.taxonomy == "Food, Beverages & Tobacco > Food Items > Packaged Foods"
+    assert "Raw transaction description: COSTCO WHSE POS PURCHASE COSTCO WHSE #123" in client.prompts[0]
+    assert "Search results:" in client.prompts[0]
+    assert (
+        "Available product taxonomy candidates: Food, Beverages & Tobacco > Food Items > Packaged Foods, Electronics > Audio > Headphones"
+        in client.prompts[0]
+    )
+    assert TRANSACTION_TAXONOMY_NONE_CHOICE in client.prompts[0]
+
+
+def test_classify_transactions_by_product_taxonomy_skips_non_product_choice():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="Electric Company",
+        description="CARD PURCHASE ELECTRIC COMPANY",
+        amount="-92.14",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="1",
+                probabilities=(CategoryChoiceProbability("1", 0.92),),
+            )
+        ]
+    )
+    embedding_client = FakeTaxonomyEmbeddingClient((1.0, 0.0))
+    embeddings = TaxonomyEmbeddingIndex(
+        embedding_model="test-model",
+        embedding_dimension=2,
+        entries=(
+            TaxonomyEmbeddingEntry(path=("Home & Garden", "Lighting"), embedding=(0.9, 0.1)),
+        ),
+    )
+
+    classify_transactions_by_product_taxonomy(
+        [transaction],
+        client=client,
+        embedding_client=embedding_client,
+        taxonomy_embeddings=embeddings,
+    )
+
+    assert transaction.taxonomy is None
+    assert client.prompts == []
+
+
+def test_classify_transactions_by_product_taxonomy_skips_low_confidence_choice():
+    transaction = Transaction(
+        id="bank_statement_1",
+        source=Source.bank_statement,
+        transaction_date=date(2026, 4, 27),
+        payee="Coffee Shop",
+        description="CARD PURCHASE COFFEE SHOP",
+        amount="-7.00",
+        currency="USD",
+    )
+    client = FakeProbabilityCategoryClient(
+        [
+            CategoryCompletion(
+                response="1",
+                probabilities=(CategoryChoiceProbability("1", 0.4),),
+            )
+        ]
+    )
+    embedding_client = FakeTaxonomyEmbeddingClient((1.0, 0.0))
+    embeddings = TaxonomyEmbeddingIndex(
+        embedding_model="test-model",
+        embedding_dimension=2,
+        entries=(
+            TaxonomyEmbeddingEntry(
+                path=("Food, Beverages & Tobacco", "Beverages", "Coffee"),
+                embedding=(0.95, 0.05),
+            ),
+        ),
+    )
+
+    classify_transactions_by_product_taxonomy(
+        [transaction],
+        client=client,
+        embedding_client=embedding_client,
+        taxonomy_embeddings=embeddings,
+    )
+
+    assert transaction.taxonomy is None
 
 
 def test_classify_receipt_items_by_product_taxonomy_walks_each_level():

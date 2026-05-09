@@ -4,6 +4,7 @@ __all__ = (  # noqa: F405
     "analyze_receipt_file",
     "categorize_receipt_items",
     "categorize_transactions",
+    "classify_transactions_by_product_taxonomy",
     "classify_receipt_items_by_product_taxonomy",
     "classify_receipt_items_by_product_taxonomy_vector_search",
     "clean_receipt_item_descriptions",

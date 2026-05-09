@@ -406,6 +406,7 @@ def test_writes_transaction_csv_rows():
             "currency": "USD",
             "kind": "expense",
             "status": "posted",
+            "taxonomy": "",
             "linked_transaction_ids": "[]",
             "category_allocations": "[]",
             "notes": "",
@@ -699,6 +700,13 @@ def test_main_can_enrich_and_categorize_transactions(
         ]
         return transactions
 
+    def fake_classify_transactions_by_product_taxonomy(
+        transactions: list[Transaction],
+    ) -> list[Transaction]:
+        calls.append("taxonomy")
+        transactions[0].taxonomy = "Food, Beverages & Tobacco > Beverages > Coffee"
+        return transactions
+
     monkeypatch.setattr(
         sys,
         "argv",
@@ -716,10 +724,15 @@ def test_main_can_enrich_and_categorize_transactions(
         fake_enrich_transactions_with_brave_search,
     )
     monkeypatch.setattr(ingest_statements, "categorize_transactions", fake_categorize_transactions)
+    monkeypatch.setattr(
+        ingest_statements,
+        "classify_transactions_by_product_taxonomy",
+        fake_classify_transactions_by_product_taxonomy,
+    )
 
     main()
 
-    assert calls == ["brave:1.1", "categorize"]
+    assert calls == ["brave:1.1", "categorize", "taxonomy"]
     rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
     allocations = json.loads(rows[0]["category_allocations"])
     assert allocations == [
@@ -730,6 +743,7 @@ def test_main_can_enrich_and_categorize_transactions(
             "source": "model",
         }
     ]
+    assert rows[0]["taxonomy"] == "Food, Beverages & Tobacco > Beverages > Coffee"
 
 
 def test_main_categorizes_transactions_with_flattened_budget_categories(
@@ -770,6 +784,13 @@ def test_main_categorizes_transactions_with_flattened_budget_categories(
         ]
         return transactions
 
+    def fake_classify_transactions_by_product_taxonomy(
+        transactions: list[Transaction],
+    ) -> list[Transaction]:
+        calls.append("taxonomy")
+        transactions[0].taxonomy = "Food, Beverages & Tobacco > Beverages > Coffee"
+        return transactions
+
     monkeypatch.setattr(
         sys,
         "argv",
@@ -785,7 +806,12 @@ def test_main_categorizes_transactions_with_flattened_budget_categories(
         fake_enrich_transactions_with_brave_search,
     )
     monkeypatch.setattr(ingest_statements, "categorize_transactions", fake_categorize_transactions)
+    monkeypatch.setattr(
+        ingest_statements,
+        "classify_transactions_by_product_taxonomy",
+        fake_classify_transactions_by_product_taxonomy,
+    )
 
     main()
 
-    assert calls == ["brave", "categorize"]
+    assert calls == ["brave", "categorize", "taxonomy"]

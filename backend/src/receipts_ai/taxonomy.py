@@ -32,12 +32,12 @@ def split_taxonomy_path(
 def effective_receipt_item_taxonomy(item: ReceiptItem) -> str | None:
     overrides = item.user_overrides
     if overrides is not None and overrides.taxonomy is not None:
-        return overrides.taxonomy
+        return overrides.taxonomy or None
     return item.taxonomy
 
 
 def effective_transaction_taxonomy(transaction: Transaction) -> str | None:
     overrides = transaction.user_overrides
     if overrides is not None and overrides.taxonomy is not None:
-        return overrides.taxonomy
+        return overrides.taxonomy or None
     return transaction.taxonomy

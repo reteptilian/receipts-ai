@@ -37,6 +37,7 @@ from receipts_ai_cli.transaction_helpers import (
     _effective_transaction_description,
     _effective_transaction_payee,
     _effective_transaction_reviewed,
+    _effective_transaction_taxonomy,
     _field_edit_error_message,
     _has_receipt_items,
     _header_input_label,
@@ -58,6 +59,7 @@ class TransactionReviewScreen(Screen[None]):
 
     BINDINGS = [
         ("e", "edit_cell", "Edit cell"),
+        ("t", "edit_transaction_taxonomy", "Edit taxonomy"),
         ("a", "add_category_allocation", "Add allocation"),
         ("d", "delete_category_allocation", "Delete allocation"),
         ("r", "toggle_reviewed", "Toggle reviewed"),
@@ -119,16 +121,20 @@ class TransactionReviewScreen(Screen[None]):
                 compact=True,
             )
         yield Static("", id="review-state")
+        yield Static("", id="transaction-taxonomy")
         yield Static("", id="receipt-edit-status")
         yield Static("Category Allocations", id="category-allocations-title")
         yield DataTable(id="category-allocations")
         yield Static("Receipt Items", id="receipt-items-title")
         yield DataTable(id="receipt-items")
-        controls = "r Toggle reviewed | s Save and Exit | e Edit cell | Esc/q Exit Without Saving"
+        controls = (
+            "r Toggle reviewed | t Edit taxonomy | s Save and Exit | "
+            "e Edit cell | Esc/q Exit Without Saving"
+        )
         if not self._has_receipt_items():
             controls = (
-                "r Toggle reviewed | s Save and Exit | a Add allocation | d Delete allocation | "
-                "e Edit cell | Esc/q Exit Without Saving"
+                "r Toggle reviewed | t Edit taxonomy | s Save and Exit | "
+                "a Add allocation | d Delete allocation | e Edit cell | Esc/q Exit Without Saving"
             )
         yield Static(controls, id="review-controls")
 
@@ -139,6 +145,7 @@ class TransactionReviewScreen(Screen[None]):
         allocations_table.add_columns("Category ID", "Amount")
         self._refresh_category_allocations_table()
         self._refresh_review_state()
+        self._refresh_transaction_taxonomy()
         if self._has_receipt_items():
             self.query_one("#category-allocations-title", Static).add_class("hidden")
             allocations_table.add_class("hidden")
@@ -205,8 +212,7 @@ class TransactionReviewScreen(Screen[None]):
         if table.id == "receipt-items" and RECEIPT_ITEM_COLUMNS[coordinate.column].field_name == "taxonomy":
 
             def check_taxonomy_choice(new_value: str | None) -> None:
-                if new_value is not None:
-                    self._commit_receipt_item_cell_edit(coordinate, new_value)
+                self._commit_receipt_item_cell_edit(coordinate, new_value or "")
 
             self.app.push_screen(TaxonomyChoiceScreen(str(value)), check_taxonomy_choice)
             return
@@ -237,6 +243,25 @@ class TransactionReviewScreen(Screen[None]):
                     self._commit_receipt_item_cell_edit(coordinate, new_value)
 
         self.app.push_screen(CellEditScreen(column_label, str(value)), check_edit)
+
+    def action_edit_transaction_taxonomy(self) -> None:
+        def check_taxonomy_choice(new_value: str | None) -> None:
+            try:
+                self._set_transaction_override(
+                    "taxonomy",
+                    "" if new_value is None else _parse_optional_text(new_value),
+                )
+            except (ValueError, ValidationError) as exc:
+                self._show_edit_error(_field_edit_error_message("Taxonomy", exc))
+                return
+
+            self._refresh_transaction_taxonomy()
+            self._mark_dirty("Draft transaction taxonomy edit")
+
+        self.app.push_screen(
+            TaxonomyChoiceScreen(_effective_transaction_taxonomy(self._transaction)),
+            check_taxonomy_choice,
+        )
 
     def action_add_category_allocation(self) -> None:
         if self._has_receipt_items():
@@ -341,7 +366,10 @@ class TransactionReviewScreen(Screen[None]):
         item = receipt.items[coordinate.row]
         column = RECEIPT_ITEM_COLUMNS[coordinate.column]
         try:
-            parsed_value = column.parser(raw_value.strip())
+            if column.field_name == "taxonomy" and not raw_value.strip():
+                parsed_value = ""
+            else:
+                parsed_value = column.parser(raw_value.strip())
             self._set_receipt_item_override(item, column.field_name, parsed_value)
         except (ValueError, ValidationError) as exc:
             self._show_edit_error(_field_edit_error_message(column.label, exc))
@@ -438,6 +466,11 @@ class TransactionReviewScreen(Screen[None]):
         )
         pair_text = "Pair" if _is_transaction_pair(self._transaction) else "Single record"
         review_state.update(f"Review: {reviewed_text} | Type: {pair_text}")
+
+    def _refresh_transaction_taxonomy(self) -> None:
+        taxonomy = self.query_one("#transaction-taxonomy", Static)
+        value = _effective_transaction_taxonomy(self._transaction) or "Unassigned"
+        taxonomy.update(f"Taxonomy: {value}")
 
     def _validate_save(self) -> None:
         transaction_amount = _decimal_amount(

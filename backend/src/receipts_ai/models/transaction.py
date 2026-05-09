@@ -193,7 +193,7 @@ class TransactionUserOverrides(BaseModel):
         ),
     ] = None
     taxonomy: Annotated[
-        NonEmptyString | None,
+        str | None,
         Field(description="User-provided correction for the flattened transaction taxonomy path."),
     ] = None
     category_allocations: Annotated[
@@ -262,7 +262,7 @@ class ReceiptItemUserOverrides(BaseModel):
     line_type: Annotated[LineType | None, Field(alias="lineType")] = None
     category_id: Annotated[NonEmptyString | None, Field(alias="categoryId")] = None
     taxonomy: Annotated[
-        NonEmptyString | None,
+        str | None,
         Field(description="User-provided correction for the flattened product taxonomy path."),
     ] = None
 

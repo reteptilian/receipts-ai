@@ -79,13 +79,14 @@ class CategoryChoiceScreen(ModalScreen[str]):
     ]
 
 
-class TaxonomyChoiceScreen(ModalScreen[str]):
-    """Screen for choosing a receipt item taxonomy override."""
+class TaxonomyChoiceScreen(ModalScreen[str | None]):
+    """Screen for choosing or clearing a taxonomy override."""
 
     SEMANTIC_SEARCH_DEBOUNCE_SECONDS = 0.25
 
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
+        ("ctrl+x", "clear", "Clear"),
         ("down", "focus_list", "Focus results"),
     ]
 
@@ -105,7 +106,7 @@ class TaxonomyChoiceScreen(ModalScreen[str]):
                 yield OptionList(id="taxonomy-choice-list")
                 with Horizontal(id="taxonomy-choice-buttons"):
                     yield Static(
-                        "Type to search, Enter to choose, Esc to cancel",
+                        "Type to search, Enter to choose, Ctrl+X to clear, Esc to cancel",
                         id="taxonomy-choice-help",
                     )
 
@@ -152,6 +153,9 @@ class TaxonomyChoiceScreen(ModalScreen[str]):
 
     def action_cancel(self) -> None:
         self.dismiss()
+
+    def action_clear(self) -> None:
+        self.dismiss(None)
 
     def action_focus_list(self) -> None:
         self.query_one("#taxonomy-choice-list", OptionList).focus()

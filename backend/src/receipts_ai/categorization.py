@@ -30,6 +30,9 @@ MAX_TAXONOMY_VECTOR_CANDIDATES = 20
 MAX_TAXONOMY_LEVELS = 9
 TAXONOMY_MIN_CHOICE_PROBABILITY = 0.35
 TAXONOMY_MIN_SEARCH_PROBABILITY = 0.15
+TRANSACTION_MIN_TAXONOMY_CONFIDENCE = 0.65
+TRANSACTION_MIN_TAXONOMY_EMBEDDING_SCORE = 0.3
+TRANSACTION_TAXONOMY_NONE_CHOICE = "None of the above / not a product purchase"
 TRANSACTION_MIN_CATEGORY_CONFIDENCE = 0.35
 TRANSACTION_CATEGORY_CHOICE_ALIASES = tuple(
     "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0!#$%&?@^_~+=/|<>[]{}"
@@ -673,6 +676,114 @@ def classify_receipt_items_by_product_taxonomy_vector_search(
     return transaction
 
 
+def classify_transactions_by_product_taxonomy(
+    transactions: list[Transaction] | tuple[Transaction, ...],
+    *,
+    client: CategoryModelClient | None = None,
+    embedding_client: TaxonomyEmbeddingClient | None = None,
+    taxonomy_embeddings: TaxonomyEmbeddingIndex | None = None,
+    candidate_count: int = MAX_TAXONOMY_VECTOR_CANDIDATES,
+    minimum_confidence: float = TRANSACTION_MIN_TAXONOMY_CONFIDENCE,
+    minimum_embedding_score: float = TRANSACTION_MIN_TAXONOMY_EMBEDDING_SCORE,
+) -> list[Transaction] | tuple[Transaction, ...]:
+    if candidate_count < 1:
+        raise ValueError("candidate_count must be at least 1")
+    if minimum_confidence < 0 or minimum_confidence > 1:
+        raise ValueError("minimum_confidence must be between 0 and 1")
+    if minimum_embedding_score < -1 or minimum_embedding_score > 1:
+        raise ValueError("minimum_embedding_score must be between -1 and 1")
+
+    active_client = client if client is not None else create_ollama_category_client()
+    active_embeddings = (
+        taxonomy_embeddings
+        if taxonomy_embeddings is not None
+        else load_product_taxonomy_embeddings()
+    )
+    active_embedding_client = (
+        embedding_client
+        if embedding_client is not None
+        else create_taxonomy_embedding_client(active_embeddings.embedding_model)
+    )
+
+    for transaction in transactions:
+        if not _is_transaction_product_taxonomy_candidate(transaction):
+            logger.info(
+                "Skipping transaction %s for product taxonomy because it does not look "
+                "like a product purchase",
+                transaction.id,
+            )
+            continue
+
+        query_text = _transaction_product_taxonomy_query_text(transaction)
+        logger.info("Classifying transaction %s by product taxonomy", transaction.id)
+        candidates = search_product_taxonomy_embeddings(
+            query_text,
+            taxonomy_embeddings=active_embeddings,
+            embedding_client=active_embedding_client,
+            candidate_count=candidate_count,
+        )
+        if not candidates:
+            logger.info(
+                "Skipping transaction %s because taxonomy vector search returned no candidates",
+                transaction.id,
+            )
+            continue
+
+        top_candidate = candidates[0]
+        if top_candidate.score < minimum_embedding_score:
+            logger.info(
+                "Skipping transaction %s because taxonomy embedding score was low: "
+                "score=%.3f best_path=%s",
+                transaction.id,
+                top_candidate.score,
+                top_candidate.path_text,
+            )
+            continue
+
+        choice_result = _choose_category_with_confidence(
+            client=active_client,
+            prompt=_transaction_product_taxonomy_prompt(transaction, candidates),
+            choices=tuple(candidate.path_text for candidate in candidates)
+            + (TRANSACTION_TAXONOMY_NONE_CHOICE,),
+        )
+        choice = choice_result.choice
+        if choice is None:
+            logger.info(
+                "Skipping transaction %s because taxonomy response was invalid: %r",
+                transaction.id,
+                choice_result.response,
+            )
+            continue
+        if choice.choice == TRANSACTION_TAXONOMY_NONE_CHOICE:
+            logger.info(
+                "Skipping transaction %s because model declined product taxonomy: "
+                "ollama_response=%r ollama_choices=%s",
+                transaction.id,
+                choice_result.response,
+                _format_category_choice_probabilities(choice_result.probabilities),
+            )
+            continue
+        if choice.probability < minimum_confidence:
+            logger.info(
+                "Skipping transaction %s because taxonomy confidence was low: "
+                "ollama_response=%r ollama_choices=%s",
+                transaction.id,
+                choice_result.response,
+                _format_category_choice_probabilities(choice_result.probabilities),
+            )
+            continue
+
+        transaction.taxonomy = choice.choice
+        logger.info(
+            "Classified transaction %s as %s with confidence %.3f",
+            transaction.id,
+            choice.choice,
+            choice.probability,
+        )
+
+    return transactions
+
+
 def load_budget_categories() -> dict[str, object]:
     categories_file = resources.files("receipts_ai.models").joinpath("budget_categories.json")
     with categories_file.open("r", encoding="utf-8") as file:
@@ -1217,6 +1328,26 @@ def _transaction_category_prompt(transaction: Transaction, categories: tuple[str
     )
 
 
+def _transaction_product_taxonomy_prompt(
+    transaction: Transaction,
+    candidates: tuple[TaxonomyEmbeddingSearchResult, ...],
+) -> str:
+    candidate_paths = ", ".join(candidate.path_text for candidate in candidates)
+    return (
+        "Choose the best Google Product Category path for this transaction only if it clearly "
+        "represents the purchase of a tangible consumer product.\n"
+        "If the transaction is for a service, transfer, tax, fee, subscription, utility, income, "
+        "cash movement, or is too ambiguous, choose "
+        f"\"{TRANSACTION_TAXONOMY_NONE_CHOICE}\".\n"
+        "Return only one exact label from the provided labels.\n\n"
+        f"Available product taxonomy candidates: {candidate_paths}\n\n"
+        f"Raw transaction description: {_transaction_description_text(transaction)}\n\n"
+        f"{_transaction_merchant_category_text(transaction)}"
+        f"Search results:\n{_transaction_search_results_text(transaction)}\n"
+        "Choice: "
+    )
+
+
 def _product_taxonomy_alias_prompt(
     item: ReceiptItem, selected_path: list[str], choice_aliases: dict[str, str]
 ) -> str:
@@ -1333,6 +1464,112 @@ def _strip_transaction_prompt_noise(description: str) -> str:
     return description
 
 
+def _transaction_product_taxonomy_query_text(transaction: Transaction) -> str:
+    parts = [_transaction_description_text(transaction)]
+    if transaction.mcc_description is not None and transaction.mcc_description.strip():
+        parts.append(transaction.mcc_description.strip())
+
+    search_results_text = _transaction_search_results_text(transaction)
+    if search_results_text != "No search results.":
+        parts.append(search_results_text)
+
+    return "\n".join(part for part in parts if part)
+
+
+def _transaction_search_results_text(transaction: Transaction) -> str:
+    if transaction.brave_search_result is None:
+        return "No search results."
+
+    try:
+        payload: object = json.loads(transaction.brave_search_result)
+    except json.JSONDecodeError:
+        return transaction.brave_search_result
+
+    if not isinstance(payload, list):
+        return "No search results."
+
+    lines: list[str] = []
+    for index, result_object in enumerate(cast(list[object], payload), start=1):
+        if not isinstance(result_object, dict):
+            continue
+        result = cast(dict[str, object], result_object)
+        title = result.get("title")
+        description = result.get("description")
+        lines.append(
+            "\n".join(
+                (
+                    f"{index}. Title: {title if isinstance(title, str) else ''}",
+                    f"Description: {description if isinstance(description, str) else ''}",
+                )
+            )
+        )
+
+    return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
+
+
+def _is_transaction_product_taxonomy_candidate(transaction: Transaction) -> bool:
+    if transaction.receipt is not None:
+        return False
+    if transaction.kind is not None and transaction.kind != "expense":
+        return False
+    if not transaction.amount.startswith("-"):
+        return False
+
+    description = _transaction_description_text(transaction).casefold()
+    if not description.strip():
+        return False
+
+    non_product_patterns = (
+        "transfer",
+        "zelle",
+        "venmo",
+        "paypal",
+        "cash app",
+        "wire",
+        "ach credit",
+        "direct dep",
+        "direct deposit",
+        "deposit",
+        "payroll",
+        "salary",
+        "dividend",
+        "interest",
+        "refund",
+        "reversal",
+        "atm",
+        "withdrawal",
+        "fee",
+        "finance charge",
+        "late fee",
+        "tax",
+        "irs",
+        "bill pay",
+        "billpay",
+        "autopay",
+        "insurance",
+        "mortgage",
+        "rent",
+        "tuition",
+        "lesson",
+        "subscription",
+        "membership",
+        "parking",
+        "toll",
+        "uber",
+        "lyft",
+        "airbnb",
+        "hotel",
+        "airlines",
+        "utility",
+        "electric",
+        "water",
+        "internet",
+        "phone",
+        "telecom",
+    )
+    return not any(pattern in description for pattern in non_product_patterns)
+
+
 def _search_results_text(item: ReceiptItem) -> str:
     if item.brave_search_result is None:
         return "No search results."
@@ -1362,37 +1599,6 @@ def _search_results_text(item: ReceiptItem) -> str:
         )
 
     return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
-
-
-# def _transaction_search_results_text(transaction: Transaction) -> str:
-#     if transaction.brave_search_result is None:
-#         return "No search results."
-
-#     try:
-#         payload: object = json.loads(transaction.brave_search_result)
-#     except json.JSONDecodeError:
-#         return transaction.brave_search_result
-
-#     if not isinstance(payload, list):
-#         return "No search results."
-
-#     lines: list[str] = []
-#     for index, result_object in enumerate(cast(list[object], payload), start=1):
-#         if not isinstance(result_object, dict):
-#             continue
-#         result = cast(dict[str, object], result_object)
-#         title = result.get("title")
-#         description = result.get("description")
-#         lines.append(
-#             "\n".join(
-#                 (
-#                     f"{index}. Title: {title if isinstance(title, str) else ''}",
-#                     f"Description: {description if isinstance(description, str) else ''}",
-#                 )
-#             )
-#         )
-
-#     return "\n".join(lines[:MAX_SEARCH_RESULTS]) if lines else "No search results."
 
 
 def _clean_description_response(response: str) -> str:

@@ -29,6 +29,7 @@ from receipts_ai_cli.app import (
     _log_firestore_configuration,
     main,
 )
+from receipts_ai_cli.screens.modals import TaxonomyChoiceScreen
 from receipts_ai_cli.taxonomy_selection import TaxonomySearcher
 
 
@@ -198,6 +199,7 @@ async def test_app_displays_transactions_in_table() -> None:
         "2026-05-06",
         "Coffee Shop",
         "POS PURCHASE COFFEE",
+        "",
         "Unreviewed",
         "",
         "checking.ofx",
@@ -229,7 +231,7 @@ async def test_transaction_table_description_column_has_capped_fixed_width() -> 
         description_column = table.ordered_columns[2]
 
     assert description_column.auto_width is False
-    assert description_column.width == 79
+    assert description_column.width == 52
 
 
 @pytest.mark.anyio
@@ -254,7 +256,26 @@ async def test_app_displays_transaction_overrides_in_table() -> None:
 
     assert row[0] == "2026-05-07"
     assert row[1] == "Edited Coffee Shop"
-    assert row[7] == "-8.25 USD"
+    assert row[8] == "-8.25 USD"
+
+
+@pytest.mark.anyio
+async def test_app_displays_transaction_taxonomy_in_table() -> None:
+    transaction = _transaction(
+        "transaction_1",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.taxonomy = "Food, Beverages & Tobacco > Beverages > Coffee"
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+        row = table.get_row_at(0)
+
+    assert row[3] == "Food, Beverages & Tobacco > Beverages > Coffee"
 
 
 @pytest.mark.anyio
@@ -291,9 +312,9 @@ async def test_app_displays_transaction_category_allocations_in_table() -> None:
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         rows = [table.get_row_at(row_index) for row_index in range(table.row_count)]
 
-    assert rows[0][4] == ""
-    assert rows[1][4] == "Taxes > Income Taxes"
-    assert rows[2][4] == "Taxes > Income Taxes, ..."
+    assert rows[0][5] == ""
+    assert rows[1][5] == "Taxes > Income Taxes"
+    assert rows[2][5] == "Taxes > Income Taxes, ..."
 
 
 @pytest.mark.anyio
@@ -317,7 +338,7 @@ async def test_app_displays_transaction_category_allocation_overrides() -> None:
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         row = table.get_row_at(0)
 
-    assert row[4] == "Edited"
+    assert row[5] == "Edited"
 
 
 @pytest.mark.anyio
@@ -344,7 +365,7 @@ async def test_app_marks_transactions_with_receipt_items() -> None:
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         row = table.get_row_at(0)
 
-    assert row[6] == "Y"
+    assert row[7] == "Y"
 
 
 @pytest.mark.anyio
@@ -376,7 +397,7 @@ async def test_app_collapses_linked_bst_and_rbt_with_receipt_indicator() -> None
 
     assert table.row_count == 1
     assert row[1] == "Payee statement"
-    assert row[6] == "Y"
+    assert row[7] == "Y"
 
 
 @pytest.mark.anyio
@@ -421,7 +442,7 @@ async def test_app_links_selected_bst_and_rbt_then_refreshes() -> None:
         mock_link.assert_called_once_with("statement", "receipt")
 
     assert table.row_count == 1
-    assert table.get_row_at(0)[6] == "Y"
+    assert table.get_row_at(0)[7] == "Y"
 
 
 @pytest.mark.anyio
@@ -570,7 +591,7 @@ async def test_app_displays_transactions_sorted_by_date_then_amount() -> None:
 
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         displayed_dates_and_amounts = [
-            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[7])
+            (table.get_row_at(row_index)[0], table.get_row_at(row_index)[8])
             for row_index in range(table.row_count)
         ]
 
@@ -670,7 +691,7 @@ async def test_receipt_item_cells_update_item_overrides() -> None:
     assert transaction.receipt is not None
     assert transaction.receipt.items[0].user_overrides is not None
     assert transaction.receipt.items[0].user_overrides.amount == "8.25"
-    assert row[7] == "-7.50 USD"
+    assert row[8] == "-7.50 USD"
 
 
 @pytest.mark.anyio
@@ -924,6 +945,103 @@ async def test_receipt_item_taxonomy_uses_advanced_taxonomy_picker() -> None:
 
 
 @pytest.mark.anyio
+async def test_transaction_taxonomy_uses_advanced_taxonomy_picker_and_can_clear() -> None:
+    class FakeTaxonomySearcher:
+        choices = (
+            "Food, Beverages & Tobacco > Beverages > Coffee",
+            "Home & Garden > Kitchen & Dining > Tableware",
+        )
+        semantic_error = None
+
+        def exact_matches(self, query: str) -> tuple[str, ...]:
+            folded_query = query.casefold()
+            return tuple(
+                choice for choice in self.choices if folded_query in choice.casefold()
+            )
+
+        def semantic_matches(self, query: str) -> tuple[str, ...]:
+            if query == "coffee beans":
+                return ("Food, Beverages & Tobacco > Beverages > Coffee",)
+            return ()
+
+        def combine_matches(
+            self,
+            query: str,
+            *,
+            semantic_matches: tuple[str, ...] = (),
+        ) -> tuple[str, ...]:
+            if not query.strip():
+                return self.choices
+            combined: list[str] = []
+            for choice in (*self.exact_matches(query), *semantic_matches):
+                if choice not in combined:
+                    combined.append(choice)
+            return tuple(combined)
+
+    transaction = _transaction(
+        "transaction_1",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
+    transaction.taxonomy = "Food, Beverages & Tobacco > Food Items"
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with (
+        patch(
+            "receipts_ai_cli.screens.modals.taxonomy_selector_searcher",
+            return_value=FakeTaxonomySearcher(),
+        ),
+        patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save,
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            taxonomy_status = app.screen.query_one("#transaction-taxonomy", Static)
+            assert str(taxonomy_status.content) == (
+                "Taxonomy: Food, Beverages & Tobacco > Food Items"
+            )
+
+            await pilot.press("t")
+            await pilot.pause(0.1)
+
+            taxonomy_input = app.screen.query_one("#taxonomy-choice-input", Input)
+            choice_list = app.screen.query_one("#taxonomy-choice-list", OptionList)
+            assert taxonomy_input.value == ""
+            assert choice_list.option_count == 2
+
+            for key in "coffee beans":
+                await pilot.press(key)
+            await pilot.pause(0.5)
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            taxonomy_status = app.screen.query_one("#transaction-taxonomy", Static)
+            assert str(taxonomy_status.content) == (
+                "Taxonomy: Food, Beverages & Tobacco > Beverages > Coffee"
+            )
+
+            await pilot.press("t")
+            await pilot.pause(0.1)
+            cast(TaxonomyChoiceScreen, app.screen).action_clear()
+            await pilot.pause(0.2)
+
+            assert isinstance(app.screen, TransactionReviewScreen)
+            taxonomy_status = app.screen.query_one("#transaction-taxonomy", Static)
+            assert str(taxonomy_status.content) == "Taxonomy: Unassigned"
+
+            await pilot.press("s")
+            await pilot.pause(0.1)
+
+            assert mock_save.called
+
+    assert transaction.user_overrides is not None
+    assert transaction.user_overrides.taxonomy == ""
+
+
+@pytest.mark.anyio
 async def test_save_refuses_mismatched_category_allocations_without_receipt_items() -> None:
     transaction = _transaction(
         "receipt",
@@ -1128,7 +1246,7 @@ async def test_transactions_table_shows_review_and_pair_status() -> None:
         table = cast(DataTable[str], app.query_one("#transactions", DataTable))
         row = table.get_row_at(0)
 
-    assert row[3] == "Reviewed | Pair"
+    assert row[4] == "Reviewed | Pair"
 
 
 @pytest.mark.anyio

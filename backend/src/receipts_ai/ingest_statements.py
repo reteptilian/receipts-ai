@@ -24,6 +24,7 @@ from receipts_ai.cache import SqliteCallCache
 from receipts_ai.categorization import (
     CachedCategoryModelClient,
     categorize_transactions,
+    classify_transactions_by_product_taxonomy,
     create_ollama_category_client,
 )
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
@@ -65,6 +66,7 @@ CSV_FIELDNAMES: tuple[str, ...] = (
     "currency",
     "kind",
     "status",
+    "taxonomy",
     "linked_transaction_ids",
     "category_allocations",
     "notes",
@@ -188,8 +190,12 @@ def main() -> None:
         if args.categorize_transactions:
             if category_client is not None:
                 categorize_transactions(statement_transactions, client=category_client)
+                classify_transactions_by_product_taxonomy(
+                    statement_transactions, client=category_client
+                )
             else:
                 categorize_transactions(statement_transactions)
+                classify_transactions_by_product_taxonomy(statement_transactions)
         if args.upsert_firestore:
             for transaction in statement_transactions:
                 upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
@@ -389,6 +395,7 @@ def _transaction_rows(transactions: Iterable[Transaction]) -> list[dict[str, obj
                 "currency": transaction.currency,
                 "kind": transaction.kind.value if transaction.kind is not None else None,
                 "status": transaction.status.value if transaction.status is not None else None,
+                "taxonomy": transaction.taxonomy,
                 "linked_transaction_ids": json.dumps(document.get("linkedTransactionIds", [])),
                 "category_allocations": json.dumps(document.get("categoryAllocations", [])),
                 "notes": transaction.notes,
