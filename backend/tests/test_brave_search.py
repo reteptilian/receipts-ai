@@ -38,15 +38,7 @@ class ReceiptItemKwargs(TypedDict, total=False):
     net_amount: str
     line_type: LineType | None
     category_id: str | None
-    taxonomy1: str | None
-    taxonomy2: str | None
-    taxonomy3: str | None
-    taxonomy4: str | None
-    taxonomy5: str | None
-    taxonomy6: str | None
-    taxonomy7: str | None
-    taxonomy8: str | None
-    taxonomy9: str | None
+    taxonomy: str | None
     confidence: float | None
 
 

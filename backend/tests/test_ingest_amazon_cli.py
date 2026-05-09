@@ -230,7 +230,7 @@ def test_main_categorizes_without_cleaning_amazon_descriptions(
         calls.append("taxonomy")
         assert transaction.receipt is not None
         assert transaction.receipt.items[0].description.startswith("Gaiam Yoga Block")
-        transaction.receipt.items[0].taxonomy1 = "Sporting Goods"
+        transaction.receipt.items[0].taxonomy = "Sporting Goods"
         return transaction
 
     monkeypatch.setattr(

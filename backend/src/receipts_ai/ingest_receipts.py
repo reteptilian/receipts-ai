@@ -34,6 +34,12 @@ from receipts_ai.firestore_client import (
 )
 from receipts_ai.models.transaction import IngestionType, Receipt, RecordType, Transaction
 from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
+from receipts_ai.taxonomy import (
+    MAX_TAXONOMY_LEVELS,
+    effective_receipt_item_taxonomy,
+    effective_transaction_taxonomy,
+    split_taxonomy_path,
+)
 from receipts_ai.transactions import transaction_combined_description
 
 RECEIPT_PIPELINES: tuple[str, ...] = ("azure",)
@@ -491,6 +497,7 @@ def _transaction_receipt_item_rows(
     transaction: Transaction,
 ) -> list[dict[str, object | None]]:
     combined_description = transaction_combined_description(transaction)
+    transaction_taxonomy_parts = split_taxonomy_path(effective_transaction_taxonomy(transaction))
     transaction_fields: dict[str, object | None] = {
         "transaction_id": transaction.id,
         "transaction_date": transaction.transaction_date.isoformat(),
@@ -537,6 +544,8 @@ def _transaction_receipt_item_rows(
     rows: list[dict[str, object | None]] = []
     for allocation in category_allocations or [None]:
         row = dict(transaction_fields)
+        for index, value in enumerate(transaction_taxonomy_parts, start=1):
+            row[f"item_taxonomy_{index}"] = value
         if allocation is not None:
             row["category_allocation.category_id"] = allocation.category_id
             row["category_allocation.amount"] = allocation.amount
@@ -565,6 +574,7 @@ def _receipt_item_rows(
     extraction = receipt.extraction
     rows: list[dict[str, object | None]] = []
     for index, item in enumerate(receipt.items, start=1):
+        taxonomy_parts = split_taxonomy_path(effective_receipt_item_taxonomy(item))
         row: dict[str, object | None] = {
             "transaction_id": transaction_id,
             "transaction_date": transaction_date,
@@ -596,17 +606,10 @@ def _receipt_item_rows(
             "item_discount_description": item.discount_description,
             "item_net_amount": item.net_amount,
             "item_line_type": item.line_type.value if item.line_type is not None else None,
-            "item_taxonomy_1": item.taxonomy1,
-            "item_taxonomy_2": item.taxonomy2,
-            "item_taxonomy_3": item.taxonomy3,
-            "item_taxonomy_4": item.taxonomy4,
-            "item_taxonomy_5": item.taxonomy5,
-            "item_taxonomy_6": item.taxonomy6,
-            "item_taxonomy_7": item.taxonomy7,
-            "item_taxonomy_8": item.taxonomy8,
-            "item_taxonomy_9": item.taxonomy9,
             "item_confidence": item.confidence,
         }
+        for taxonomy_index in range(1, MAX_TAXONOMY_LEVELS + 1):
+            row[f"item_taxonomy_{taxonomy_index}"] = taxonomy_parts[taxonomy_index - 1]
         if include_brave_search_result:
             row["item_brave_search_result"] = item.brave_search_result
         if include_item_category_id:

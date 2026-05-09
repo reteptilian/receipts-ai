@@ -126,6 +126,10 @@
       "$ref": "#/$defs/nonEmptyString",
       "description": "Receipt data extraction service used for this transaction, such as azure-doc-intelligence or gemini-3-flash-lite."
     },
+    "taxonomy": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Flattened product taxonomy path for non-itemized transactions, joined with ' > '."
+    },
     "receiptImageExtractionResults": {
       "$ref": "#/$defs/nonEmptyString",
       "description": "JSON-encoded map of raw receipt image extraction service responses keyed by service name, such as azure-doc-intelligence or gemini."
@@ -277,6 +281,17 @@
           "$ref": "#/$defs/decimalString",
           "description": "User-provided correction for the signed transaction amount."
         },
+        "taxonomy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-provided correction for the flattened transaction taxonomy path."
+        },
         "categoryAllocations": {
           "type": "array",
           "description": "User-provided category split. When present, this replaces categoryAllocations in effective/display views, including when empty.",
@@ -371,41 +386,9 @@
         "categoryId": {
           "$ref": "#/$defs/nonEmptyString"
         },
-        "taxonomy1": {
+        "taxonomy": {
           "$ref": "#/$defs/nonEmptyString",
-          "description": "First-level product taxonomy category."
-        },
-        "taxonomy2": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Second-level product taxonomy category."
-        },
-        "taxonomy3": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Third-level product taxonomy category."
-        },
-        "taxonomy4": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Fourth-level product taxonomy category."
-        },
-        "taxonomy5": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Fifth-level product taxonomy category."
-        },
-        "taxonomy6": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Sixth-level product taxonomy category."
-        },
-        "taxonomy7": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Seventh-level product taxonomy category."
-        },
-        "taxonomy8": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Eighth-level product taxonomy category."
-        },
-        "taxonomy9": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Ninth-level product taxonomy category."
+          "description": "Flattened product taxonomy path, joined with ' > '."
         },
         "userOverrides": {
           "$ref": "#/$defs/receiptItemUserOverrides",
@@ -506,7 +489,7 @@
             }
           ]
         },
-        "taxonomy1": {
+        "taxonomy": {
           "anyOf": [
             {
               "$ref": "#/$defs/nonEmptyString"
@@ -515,95 +498,7 @@
               "type": "null"
             }
           ],
-          "description": "User-provided correction for the first-level product taxonomy category."
-        },
-        "taxonomy2": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "User-provided correction for the second-level product taxonomy category."
-        },
-        "taxonomy3": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "User-provided correction for the third-level product taxonomy category."
-        },
-        "taxonomy4": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "User-provided correction for the fourth-level product taxonomy category."
-        },
-        "taxonomy5": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "User-provided correction for the fifth-level product taxonomy category."
-        },
-        "taxonomy6": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "User-provided correction for the sixth-level product taxonomy category."
-        },
-        "taxonomy7": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "User-provided correction for the seventh-level product taxonomy category."
-        },
-        "taxonomy8": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "User-provided correction for the eighth-level product taxonomy category."
-        },
-        "taxonomy9": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "User-provided correction for the ninth-level product taxonomy category."
+          "description": "User-provided correction for the flattened product taxonomy path."
         }
       }
     },

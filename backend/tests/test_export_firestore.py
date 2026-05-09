@@ -52,15 +52,7 @@ class ReceiptItemKwargs(TypedDict, total=False):
     net_amount: str
     line_type: LineType | None
     category_id: str | None
-    taxonomy1: str | None
-    taxonomy2: str | None
-    taxonomy3: str | None
-    taxonomy4: str | None
-    taxonomy5: str | None
-    taxonomy6: str | None
-    taxonomy7: str | None
-    taxonomy8: str | None
-    taxonomy9: str | None
+    taxonomy: str | None
     confidence: float | None
 
 
@@ -638,12 +630,7 @@ def test_export_firestore_receipt_items_csv_writes_all_transaction_rows(tmp_path
                     amount="7.00",
                     net_amount="6.50",
                     category_id="Food & Dining > Coffee Shops",
-                    taxonomy1="Food & Dining",
-                    taxonomy2="Coffee Shops",
-                    taxonomy3="Prepared Drinks",
-                    taxonomy4="Coffee",
-                    taxonomy5="Hot Drinks",
-                    taxonomy6="Latte",
+                    taxonomy="Food & Dining > Coffee Shops > Prepared Drinks > Coffee > Hot Drinks > Latte",
                 ),
                 ReceiptItem(
                     description="Bagel",
@@ -733,6 +720,7 @@ def test_export_firestore_receipt_items_csv_unpivots_transactions_without_receip
         description="POS PURCHASE GROCERY #123",
         amount="-12.00",
         currency="USD",
+        taxonomy="Food, Beverages & Tobacco > Food Items",
         category_allocations=[
             CategoryAllocation(category_id="Groceries", amount="-7.00"),
             CategoryAllocation(category_id="Household", amount="-5.00"),
@@ -766,7 +754,11 @@ def test_export_firestore_receipt_items_csv_unpivots_transactions_without_receip
     ]
     assert [row["category_allocation.amount"] for row in rows] == ["-7.00", "-5.00"]
     assert [row["item_description"] for row in rows] == ["", ""]
-    assert [row["item_taxonomy_1"] for row in rows] == ["", ""]
+    assert [row["item_taxonomy_1"] for row in rows] == [
+        "Food, Beverages & Tobacco",
+        "Food, Beverages & Tobacco",
+    ]
+    assert [row["item_taxonomy_2"] for row in rows] == ["Food Items", "Food Items"]
 
 
 def test_export_firestore_receipt_items_csv_uses_payee_for_credit_card_combined_description(

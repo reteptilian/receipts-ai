@@ -54,15 +54,7 @@ class ReceiptItemKwargs(TypedDict, total=False):
     net_amount: str
     line_type: LineType | None
     category_id: str | None
-    taxonomy1: str | None
-    taxonomy2: str | None
-    taxonomy3: str | None
-    taxonomy4: str | None
-    taxonomy5: str | None
-    taxonomy6: str | None
-    taxonomy7: str | None
-    taxonomy8: str | None
-    taxonomy9: str | None
+    taxonomy: str | None
     confidence: float | None
 
 
@@ -684,7 +676,7 @@ def test_classify_receipt_items_by_product_taxonomy_walks_each_level():
         description="Nabisco Premium Saltine Crackers",
         raw_description="RAW CONFUSING CODE",
         amount="4.49",
-        taxonomy4="Stale Value",
+        taxonomy="Stale Value",
         brave_search_result=json.dumps(
             [
                 {
@@ -728,11 +720,7 @@ def test_classify_receipt_items_by_product_taxonomy_walks_each_level():
     )
 
     assert result is transaction
-    assert item.taxonomy1 == "Food, Beverages & Tobacco"
-    assert item.taxonomy2 == "Food Items"
-    assert item.taxonomy3 == "Bakery"
-    assert item.taxonomy4 == "Crackers"
-    assert item.taxonomy5 is None
+    assert item.taxonomy == "Food, Beverages & Tobacco > Food Items > Bakery > Crackers"
     assert len(client.prompts) == 4
     assert "pick the most appropriate product type" in client.prompts[0]
     assert "Animals & Pet Supplies" in client.prompts[0]
@@ -778,8 +766,7 @@ def test_classify_receipt_items_by_product_taxonomy_stops_when_model_repeats_par
 
     classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
 
-    assert item.taxonomy1 == "Electronics"
-    assert item.taxonomy2 is None
+    assert item.taxonomy == "Electronics"
     assert len(client.prompts) == 2
     assert "Audio" in client.prompts[1]
 
@@ -837,10 +824,7 @@ def test_classify_receipt_items_by_product_taxonomy_stops_at_parent_on_low_proba
 
     classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
 
-    assert item.taxonomy1 == "Food, Beverages & Tobacco"
-    assert item.taxonomy2 == "Food Items"
-    assert item.taxonomy3 == "Bakery"
-    assert item.taxonomy4 is None
+    assert item.taxonomy == "Food, Beverages & Tobacco > Food Items > Bakery"
     assert len(client.prompts) == 4
 
 
@@ -884,7 +868,7 @@ def test_classify_receipt_items_by_product_taxonomy_maps_single_token_aliases():
 
     classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
 
-    assert item.taxonomy1 == "Fruits & Vegetables"
+    assert item.taxonomy == "Fruits & Vegetables"
     assert "I: Frozen Desserts & Novelties" in client.prompts[0]
     assert "J: Fruits & Vegetables" in client.prompts[0]
     assert client.prompts[0].endswith("Label: ")
@@ -970,9 +954,7 @@ def test_classify_receipt_items_by_product_taxonomy_searches_multiple_probable_p
 
     classify_receipt_items_by_product_taxonomy(transaction, client=client, taxonomy=taxonomy)
 
-    assert item.taxonomy1 == "Food, Beverages & Tobacco"
-    assert item.taxonomy2 == "Beverages"
-    assert item.taxonomy3 == "Juice"
+    assert item.taxonomy == "Food, Beverages & Tobacco > Beverages > Juice"
     assert len(client.prompts) == 4
     assert (
         "Selected product taxonomy path: Food, Beverages & Tobacco > Beverages" in client.prompts[3]
@@ -1023,10 +1005,7 @@ def test_classify_receipt_items_by_product_taxonomy_vector_search_ranks_nearest_
     )
 
     assert result is transaction
-    assert item.taxonomy1 == "Electronics"
-    assert item.taxonomy2 == "Audio"
-    assert item.taxonomy3 == "Headphones"
-    assert item.taxonomy4 is None
+    assert item.taxonomy == "Electronics > Audio > Headphones"
     assert embedding_client.texts == ["Apple AirPods Pro 3"]
     assert len(client.prompts) == 1
     assert "Choose the correct Google Product Category path" in client.prompts[0]

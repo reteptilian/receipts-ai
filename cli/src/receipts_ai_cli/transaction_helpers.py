@@ -18,6 +18,7 @@ from receipts_ai.models.transaction import (
     Transaction,
     UserCategoryAllocation,
 )
+from receipts_ai.taxonomy import effective_receipt_item_taxonomy
 from textual.widgets import Input
 
 TransactionLoader = Callable[[], Sequence[Transaction]]
@@ -130,16 +131,11 @@ RECEIPT_ITEM_COLUMNS = (
         lambda value: _parse_optional_text(value),
         lambda item: _format_optional(_effective_receipt_item_value(item, "category_id")),
     ),
-    *(
-        ReceiptItemColumn(
-            f"Taxonomy {index}",
-            f"taxonomy{index}",
-            lambda value: _parse_optional_text(value),
-            lambda item, field_name=f"taxonomy{index}": _format_optional(
-                _effective_receipt_item_value(item, field_name)
-            ),
-        )
-        for index in range(1, 10)
+    ReceiptItemColumn(
+        "Taxonomy",
+        "taxonomy",
+        lambda value: _parse_optional_text(value),
+        lambda item: _format_optional(effective_receipt_item_taxonomy(item)),
     ),
 )
 

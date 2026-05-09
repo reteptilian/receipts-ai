@@ -16,6 +16,7 @@ from typing import Protocol, cast
 from receipts_ai.cache import SqliteCallCache
 from receipts_ai.config import first_config_value
 from receipts_ai.models.transaction import CategoryAllocation, ReceiptItem, Source1, Transaction
+from receipts_ai.taxonomy import flatten_taxonomy_parts
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_TIMEOUT_SECONDS = 30.0
@@ -1424,9 +1425,7 @@ def _append_budget_category_paths(
 
 
 def _set_item_taxonomy(item: ReceiptItem, selected_path: list[str]) -> None:
-    for level in range(1, MAX_TAXONOMY_LEVELS + 1):
-        value = selected_path[level - 1] if level <= len(selected_path) else None
-        setattr(item, f"taxonomy{level}", value)
+    item.taxonomy = flatten_taxonomy_parts(selected_path)
 
 
 def _category_choice_schema(choices: tuple[str, ...]) -> dict[str, object]:

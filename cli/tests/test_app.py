@@ -453,9 +453,7 @@ async def test_enter_on_transaction_with_receipt_items_opens_items_screen() -> N
                 discount_description="Promo",
                 net_amount="6.5",
                 category_id="coffee",
-                taxonomy1="Food",
-                taxonomy2="Drink",
-                taxonomy9="Latte",
+                taxonomy="Food > Drink > Latte",
             )
         ]
     )
@@ -496,15 +494,7 @@ async def test_enter_on_transaction_with_receipt_items_opens_items_screen() -> N
         "6.5",
         "item",
         "coffee",
-        "Food",
-        "Drink",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "Latte",
+        "Food > Drink > Latte",
     ]
 
 

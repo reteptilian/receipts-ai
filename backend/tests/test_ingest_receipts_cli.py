@@ -52,15 +52,7 @@ class ReceiptItemKwargs(TypedDict, total=False):
     net_amount: str
     line_type: LineType | None
     category_id: str | None
-    taxonomy1: str | None
-    taxonomy2: str | None
-    taxonomy3: str | None
-    taxonomy4: str | None
-    taxonomy5: str | None
-    taxonomy6: str | None
-    taxonomy7: str | None
-    taxonomy8: str | None
-    taxonomy9: str | None
+    taxonomy: str | None
     confidence: float | None
 
 
@@ -87,8 +79,7 @@ def test_writes_one_csv_row_per_receipt_item():
                 discount_description="/1779212",
                 net_amount="6.00",
                 category_id="Food & Dining > Fast Food & Coffee",
-                taxonomy1="Food, Beverages & Tobacco",
-                taxonomy2="Beverages",
+                taxonomy="Food, Beverages & Tobacco > Beverages",
             ),
             ReceiptItem(description="Bagel", amount="3.00", confidence=0.91),
         ],
@@ -832,7 +823,7 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
     ) -> Transaction:
         assert client.__class__.__name__ == "CachedCategoryModelClient"
         assert transaction_to_classify.receipt is not None
-        transaction_to_classify.receipt.items[0].taxonomy1 = "Food, Beverages & Tobacco"
+        transaction_to_classify.receipt.items[0].taxonomy = "Food, Beverages & Tobacco"
         return transaction_to_classify
 
     monkeypatch.setattr(
@@ -877,7 +868,7 @@ def test_main_wraps_ollama_client_when_cache_file_is_provided(
 
     assert transaction.receipt is not None
     assert transaction.receipt.items[0].category_id == "Food & Dining > Fast Food & Coffee"
-    assert transaction.receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"
+    assert transaction.receipt.items[0].taxonomy == "Food, Beverages & Tobacco"
 
 
 def test_main_can_categorize_items_after_brave_search(
@@ -938,7 +929,7 @@ def test_main_can_categorize_items_after_brave_search(
         calls.append("taxonomy")
         assert transaction_to_classify.receipt is not None
         assert transaction_to_classify.receipt.items[0].brave_search_result == "search payload"
-        transaction_to_classify.receipt.items[0].taxonomy1 = "Food, Beverages & Tobacco"
+        transaction_to_classify.receipt.items[0].taxonomy = "Food, Beverages & Tobacco"
         return transaction_to_classify
 
     monkeypatch.setattr(
@@ -979,7 +970,7 @@ def test_main_can_categorize_items_after_brave_search(
 
     assert calls == ["brave", "clean", "categorize", "taxonomy"]
     assert receipt.items[0].category_id == "Food & Dining > Groceries"
-    assert receipt.items[0].taxonomy1 == "Food, Beverages & Tobacco"
+    assert receipt.items[0].taxonomy == "Food, Beverages & Tobacco"
 
 
 def test_main_categorizes_items_with_flattened_budget_categories(
@@ -1107,9 +1098,7 @@ def test_main_can_use_vector_product_taxonomy_method(
     ) -> Transaction:
         calls.append("vector-taxonomy")
         assert transaction_to_classify.receipt is not None
-        transaction_to_classify.receipt.items[0].taxonomy1 = "Electronics"
-        transaction_to_classify.receipt.items[0].taxonomy2 = "Audio"
-        transaction_to_classify.receipt.items[0].taxonomy3 = "Headphones"
+        transaction_to_classify.receipt.items[0].taxonomy = "Electronics > Audio > Headphones"
         return transaction_to_classify
 
     def fail_greedy_taxonomy(_transaction: Transaction) -> Transaction:
@@ -1158,9 +1147,7 @@ def test_main_can_use_vector_product_taxonomy_method(
 
     assert calls == ["brave", "clean", "categorize", "vector-taxonomy"]
     assert receipt.items[0].category_id == "Shopping & Retail > Electronics"
-    assert receipt.items[0].taxonomy1 == "Electronics"
-    assert receipt.items[0].taxonomy2 == "Audio"
-    assert receipt.items[0].taxonomy3 == "Headphones"
+    assert receipt.items[0].taxonomy == "Electronics > Audio > Headphones"
 
 
 def test_main_can_upsert_processed_transaction_to_firestore(
