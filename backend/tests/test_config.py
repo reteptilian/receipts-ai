@@ -43,6 +43,37 @@ def test_config_value_strips_matching_quotes(monkeypatch: pytest.MonkeyPatch, tm
     assert config_value("OPENAI_MODEL") == "gpt-test"
 
 
+def test_config_value_ignores_inline_comments(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    (tmp_path / ".receipts_ai.config").write_text(
+        "\n".join(
+            (
+                "OPENAI_API_KEY=config-key # disabled locally sometimes",
+                "OPENAI_MODEL = gpt-test    # temporary override",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert config_value("OPENAI_API_KEY") == "config-key"
+    assert config_value("OPENAI_MODEL") == "gpt-test"
+
+
+def test_config_value_preserves_hash_inside_quotes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    (tmp_path / ".receipts_ai.config").write_text(
+        'OPENAI_MODEL="gpt-test#preview" # keep quoted hash\n',
+        encoding="utf-8",
+    )
+
+    assert config_value("OPENAI_MODEL") == "gpt-test#preview"
+
+
 def test_environment_value_takes_precedence_over_home_config_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):

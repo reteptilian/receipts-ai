@@ -41,7 +41,7 @@ def _config_file_values(home: str) -> dict[str, str]:
             raise RuntimeError(
                 f"{config_path}:{line_number} must use KEY=VALUE config variable format"
             )
-        values[key.strip()] = _normalize_config_value(value)
+        values[key.strip()] = _normalize_config_value(_strip_inline_comment(value))
     return values
 
 
@@ -50,3 +50,17 @@ def _normalize_config_value(value: str) -> str:
     if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
         return stripped[1:-1]
     return stripped
+
+
+def _strip_inline_comment(value: str) -> str:
+    in_quote: str | None = None
+    for index, char in enumerate(value):
+        if char in {"'", '"'}:
+            if in_quote == char:
+                in_quote = None
+            elif in_quote is None:
+                in_quote = char
+            continue
+        if char == "#" and in_quote is None:
+            return value[:index]
+    return value
