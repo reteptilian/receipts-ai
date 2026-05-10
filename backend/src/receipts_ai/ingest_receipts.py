@@ -1053,6 +1053,7 @@ def _receipt_data_from_ollama_lines(
         cached_response = cache.get("ollama_receipt_extraction", request)
         if isinstance(cached_response, str):
             LOGGER.info("Using cached Ollama receipt extraction: line_count=%s", len(lines))
+            _append_receipt_ollama_response_log(cached_response, cached=True)
             return _receipt_data_from_ollama_response(cached_response, raw_text=raw_text)
 
     response = UrlLibOllamaClient(
@@ -1068,7 +1069,42 @@ def _receipt_data_from_ollama_lines(
     if cache is not None:
         cache.set("ollama_receipt_extraction", request, response)
         LOGGER.info("Cached Ollama receipt extraction: line_count=%s", len(lines))
+    _append_receipt_ollama_response_log(response, cached=False)
     return _receipt_data_from_ollama_response(response, raw_text=raw_text)
+
+
+def _append_receipt_ollama_response_log(response: str, *, cached: bool) -> None:
+    path_value = first_config_value(OLLAMA_PROMPT_LOG_ENV_VARS)
+    if not path_value:
+        return
+
+    path = Path(path_value).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        pretty_response = json.dumps(
+            json.loads(response),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    except json.JSONDecodeError:
+        pretty_response = response
+
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    separator = "=" * 96
+    sections = [
+        separator,
+        f"OLLAMA RECEIPT RESPONSE {timestamp}",
+        f"cached: {str(cached).lower()}",
+        f"response_chars: {len(response)}",
+        "",
+        "response:",
+        pretty_response,
+        separator,
+        "",
+    ]
+    with path.open("a", encoding="utf-8") as file:
+        file.write("\n".join(sections))
 
 
 def _receipt_data_from_ollama_response(response: str, *, raw_text: str) -> ReceiptDataExtraction:

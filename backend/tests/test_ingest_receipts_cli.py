@@ -199,6 +199,55 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
     assert requests[1]["output_format"] == ingest_receipts._receipt_ollama_output_schema()
 
 
+def test_receipt_data_from_ollama_lines_writes_pretty_response_to_prompt_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    prompt_log_path = tmp_path / "logs" / "ollama-prompts.log"
+
+    class FakeOllamaClient:
+        def __init__(
+            self, *, url: str, model: str, timeout_seconds: float, think: bool
+        ) -> None:
+            pass
+
+        def complete_structured(
+            self,
+            prompt: str,
+            *,
+            options: dict[str, object],
+            output_format: dict[str, object],
+        ) -> str:
+            return json.dumps(
+                {
+                    "analysis": "Latte has no associated discount line.",
+                    "merchantName": "Coffee Shop",
+                    "transactionDate": "2026-05-09",
+                    "subtotal": "7.50",
+                    "tax": "0.00",
+                    "total": "7.50",
+                    "items": [{"description": "Latte", "amount": "7.50", "discount": "0.00"}],
+                },
+                separators=(",", ":"),
+            )
+
+    monkeypatch.setattr(ingest_receipts, "UrlLibOllamaClient", FakeOllamaClient)
+    monkeypatch.setenv("RECEIPTS_AI_OLLAMA_PROMPT_LOG", str(prompt_log_path))
+
+    ingest_receipts._receipt_data_from_ollama_lines(
+        ["Coffee Shop", "Latte 7.50"],
+        raw_text="Coffee Shop\nLatte 7.50",
+        model="gemma4:e4b",
+        cache=None,
+    )
+
+    content = prompt_log_path.read_text(encoding="utf-8")
+    assert "OLLAMA RECEIPT RESPONSE " in content
+    assert "cached: false" in content
+    assert '"merchantName": "Coffee Shop"' in content
+    assert '"items": [\n    {\n      "amount": "7.50"' in content
+
+
 def test_receipt_data_from_ollama_response_maps_discount_schema_to_extraction_items():
     receipt_data = ingest_receipts._receipt_data_from_ollama_response(
         json.dumps(
