@@ -53,7 +53,7 @@ from receipts_ai.models.receipt_data_extraction import (
     ReceiptDataExtractionMetadata,
     ReceiptExtractionPipeline,
 )
-from receipts_ai.models.transaction import IngestionType, Receipt, RecordType, Transaction
+from receipts_ai.models.transaction import IngestionType, LineType, Receipt, RecordType, Transaction
 from receipts_ai.receipt_extraction import (
     transaction_from_document_intelligence_result,
     transaction_from_receipt_data,
@@ -1038,6 +1038,23 @@ def _receipt_data_from_ollama_response(response: str, *, raw_text: str) -> Recei
         raise ValueError(f"Ollama receipt extraction response was not JSON: {response[:500]}") from error
 
     receipt_data = _OllamaReceiptDataExtraction.model_validate(payload)
+    items = [
+        ExtractedReceiptItem(
+            description=item.description,
+            amount=item.amount,
+            discount_amount=_discount_amount_from_ollama_receipt_item(item),
+        )
+        for item in receipt_data.items
+    ]
+    if Decimal(receipt_data.tax) != 0:
+        items.append(
+            ExtractedReceiptItem(
+                description="Sales tax",
+                amount=receipt_data.tax,
+                line_type=LineType.tax,
+            )
+        )
+
     return ReceiptDataExtraction(
         merchant_name=receipt_data.merchant_name,
         transaction_date=date.fromisoformat(receipt_data.transaction_date),
@@ -1046,14 +1063,7 @@ def _receipt_data_from_ollama_response(response: str, *, raw_text: str) -> Recei
         subtotal=receipt_data.subtotal,
         total_tax=receipt_data.tax,
         total=receipt_data.total,
-        items=[
-            ExtractedReceiptItem(
-                description=item.description,
-                amount=item.amount,
-                discount_amount=_discount_amount_from_ollama_receipt_item(item),
-            )
-            for item in receipt_data.items
-        ],
+        items=items,
         extraction=ReceiptDataExtractionMetadata(
             pipeline=ReceiptExtractionPipeline.visionkit_ollama,
             model=None,

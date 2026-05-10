@@ -224,6 +224,32 @@ def test_receipt_data_from_ollama_response_maps_discount_schema_to_extraction_it
     assert receipt_data.currency == "USD"
     assert receipt_data.items[0].discount_amount == "-1.25"
     assert receipt_data.items[1].discount_amount is None
+    assert [(item.description, item.amount, item.line_type) for item in receipt_data.items] == [
+        ("Granola", "6.99", LineType.item),
+        ("Milk", "3.50", LineType.item),
+        ("Sales tax", "0.45", LineType.tax),
+    ]
+
+
+def test_receipt_data_from_ollama_response_omits_zero_tax_line_item():
+    receipt_data = ingest_receipts._receipt_data_from_ollama_response(
+        json.dumps(
+            {
+                "analysis": "Latte has no associated discount line.",
+                "merchantName": "Coffee Shop",
+                "transactionDate": "2026-05-09",
+                "items": [{"description": "Latte", "amount": "7.50", "discount": "0.00"}],
+                "subtotal": "7.50",
+                "tax": "0.00",
+                "total": "7.50",
+            }
+        ),
+        raw_text="Coffee Shop\nLatte 7.50",
+    )
+
+    assert [(item.description, item.amount, item.line_type) for item in receipt_data.items] == [
+        ("Latte", "7.50", LineType.item),
+    ]
 
 
 def test_receipt_data_from_ollama_response_rejects_implausible_date_year():
