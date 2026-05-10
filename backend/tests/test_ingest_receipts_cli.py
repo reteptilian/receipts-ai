@@ -92,6 +92,26 @@ def test_visionkit_text_lines_groups_observations_top_to_bottom_and_left_to_righ
     ]
 
 
+def test_visionkit_text_lines_rejects_observations_with_mismatched_heights():
+    observations = [
+        ingest_receipts._VisionKitTextObservation(
+            text="Item A", confidence=0.9, x=0.1, y=0.72, width=0.2, height=0.08
+        ),
+        ingest_receipts._VisionKitTextObservation(
+            text="Item B", confidence=0.9, x=0.1, y=0.62, width=0.2, height=0.08
+        ),
+        ingest_receipts._VisionKitTextObservation(
+            text="SPURIOUS", confidence=0.2, x=0.5, y=0.6, width=0.2, height=0.3
+        ),
+    ]
+
+    assert ingest_receipts._visionkit_text_lines(observations) == [
+        "Item A",
+        "SPURIOUS",
+        "Item B",
+    ]
+
+
 def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -183,6 +183,21 @@ class _VisionKitTextLine:
         )
 
 
+_VISIONKIT_LINE_MIN_HEIGHT_RATIO = 0.75
+_VISIONKIT_LINE_MAX_HEIGHT_RATIO = 1.5
+
+
+def _visionkit_observation_matches_line(
+    observation: _VisionKitTextObservation,
+    line: _VisionKitTextLine,
+) -> bool:
+    return (
+        abs(observation.center_y - line.center_y) <= line.height / 2
+        and observation.height >= line.height * _VISIONKIT_LINE_MIN_HEIGHT_RATIO
+        and observation.height <= line.height * _VISIONKIT_LINE_MAX_HEIGHT_RATIO
+    )
+
+
 def _visionkit_text_observation_summary(observation: _VisionKitTextObservation) -> str:
     confidence = (
         f"{observation.confidence:.3f}" if observation.confidence is not None else "unknown"
@@ -841,19 +856,23 @@ def _visionkit_text_lines(observations: list[_VisionKitTextObservation]) -> list
         for line_index, line in enumerate(lines, start=1):
             delta = abs(observation.center_y - line.center_y)
             threshold = line.height / 2
+            height_ratio = observation.height / line.height
+            match = _visionkit_observation_matches_line(observation, line)
             LOGGER.debug(
-                "Comparing against line %d: %s delta_center_y=%.4f threshold=%.4f match=%s",
+                "Comparing against line %d: %s delta_center_y=%.4f threshold=%.4f "
+                "height_ratio=%.4f match=%s",
                 line_index,
                 _visionkit_text_line_summary(line),
                 delta,
                 threshold,
-                delta <= threshold,
+                height_ratio,
+                match,
             )
         matching_line = next(
             (
                 line
                 for line in lines
-                if abs(observation.center_y - line.center_y) <= line.height / 2
+                if _visionkit_observation_matches_line(observation, line)
             ),
             None,
         )
