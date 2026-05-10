@@ -20,9 +20,9 @@ from receipts_ai.ingest_receipts import (
     DEFAULT_RECEIPT_OLLAMA_MODEL,
     _ollama_timeout_seconds,
     _ollama_url,
-    _OllamaReceiptDataExtraction,
     _receipt_data_from_ollama_response,
     _receipt_ollama_model,
+    _receipt_ollama_output_schema,
     _receipt_ollama_think,
     _visionkit_ollama_receipt_prompt,
     _visionkit_text_lines,
@@ -327,7 +327,7 @@ def _output_schema(args: argparse.Namespace) -> dict[str, object]:
 
 def _schema_preset(schema_preset: SchemaPreset) -> dict[str, object]:
     if schema_preset == "full":
-        return _OllamaReceiptDataExtraction.model_json_schema(by_alias=True)
+        return _receipt_ollama_output_schema()
     if schema_preset == "simple":
         return _SimpleReceiptDataExtraction.model_json_schema(by_alias=True)
     if schema_preset == "total":

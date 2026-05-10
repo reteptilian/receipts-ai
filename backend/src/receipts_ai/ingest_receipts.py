@@ -136,18 +136,92 @@ TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES: tuple[str, ...] = tuple(
 
 LOGGER = logging.getLogger(__name__)
 
+_RECEIPT_OLLAMA_OUTPUT_SCHEMA: dict[str, object] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "ReceiptData",
+    "type": "object",
+    "required": [
+        "analysis",
+        "merchantName",
+        "transactionDate",
+        "items",
+        "subtotal",
+        "tax",
+        "total",
+    ],
+    "properties": {
+        "analysis": {
+            "type": "string",
+            "description": "Briefly list each item and its associated discount line found in the OCR.",
+        },
+        "merchantName": {"type": "string"},
+        "merchantAddress": {"type": "string"},
+        "transactionDate": {
+            "type": "string",
+            "format": "date",
+            "description": "Date in YYYY-MM-DD format",
+        },
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["description", "amount", "discount"],
+                "properties": {
+                    "description": {"type": "string"},
+                    "amount": {
+                        "type": "string",
+                        "pattern": "^[0-9]+(\\.[0-9]{2})?$",
+                        "description": "String representation of amount without currency symbol",
+                    },
+                    "discount": {
+                        "type": "string",
+                        "pattern": "^[0-9]+(\\.[0-9]{2})?$",
+                        "description": (
+                            "String representation of an instant savings or discount applied "
+                            "to the item (without currency symbol)"
+                        ),
+                    },
+                },
+            },
+        },
+        "subtotal": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]{2})?$",
+            "description": "String representation of subtotal without currency symbol",
+        },
+        "tax": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]{2})?$",
+            "description": "String representation of tax without currency symbol",
+        },
+        "total": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]{2})?$",
+            "description": "String representation of total without currency symbol",
+        },
+    },
+}
+
+
+class _OllamaReceiptItem(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    description: Annotated[str, Field(min_length=1)]
+    amount: Annotated[str, Field(pattern="^[0-9]+(\\.[0-9]{2})?$")]
+    discount: Annotated[str, Field(pattern="^[0-9]+(\\.[0-9]{2})?$")]
+
 
 class _OllamaReceiptDataExtraction(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
+    analysis: str
     merchant_name: Annotated[str, Field(alias="merchantName", min_length=1)]
+    merchant_address: Annotated[str | None, Field(alias="merchantAddress", min_length=1)] = None
     transaction_date: Annotated[date, Field(alias="transactionDate")]
-    currency: Annotated[str, Field(pattern="^[A-Z]{3}$")] = "USD"
-    receipt_number: Annotated[str | None, Field(alias="receiptNumber", min_length=1)] = None
-    subtotal: str | None = None
-    total_tax: Annotated[str | None, Field(alias="totalTax")] = None
-    total: str
-    items: Annotated[list[ExtractedReceiptItem], Field(min_length=1)]
+    items: Annotated[list[_OllamaReceiptItem], Field(min_length=1)]
+    subtotal: Annotated[str, Field(pattern="^[0-9]+(\\.[0-9]{2})?$")]
+    tax: Annotated[str, Field(pattern="^[0-9]+(\\.[0-9]{2})?$")]
+    total: Annotated[str, Field(pattern="^[0-9]+(\\.[0-9]{2})?$")]
 
 
 class _OcrMacOCR(Protocol):
@@ -920,7 +994,7 @@ def _receipt_data_from_ollama_lines(
     model: str,
     cache: SqliteCallCache | None,
 ) -> ReceiptDataExtraction:
-    schema = _OllamaReceiptDataExtraction.model_json_schema(by_alias=True)
+    schema = _receipt_ollama_output_schema()
     prompt = _visionkit_ollama_receipt_prompt(lines)
     think = _receipt_ollama_think()
     request = {
@@ -962,21 +1036,16 @@ def _receipt_data_from_ollama_response(response: str, *, raw_text: str) -> Recei
     return ReceiptDataExtraction(
         merchant_name=receipt_data.merchant_name,
         transaction_date=receipt_data.transaction_date,
-        currency=receipt_data.currency,
-        receipt_number=receipt_data.receipt_number,
+        currency="USD",
+        receipt_number=None,
         subtotal=receipt_data.subtotal,
-        total_tax=receipt_data.total_tax,
+        total_tax=receipt_data.tax,
         total=receipt_data.total,
         items=[
             ExtractedReceiptItem(
                 description=item.description,
-                quantity=item.quantity,
-                unit_price=item.unit_price,
                 amount=item.amount,
-                discount_amount=item.discount_amount,
-                discount_description=item.discount_description,
-                line_type=item.line_type,
-                confidence=item.confidence,
+                discount_amount=_discount_amount_from_ollama_receipt_item(item),
             )
             for item in receipt_data.items
         ],
@@ -989,11 +1058,21 @@ def _receipt_data_from_ollama_response(response: str, *, raw_text: str) -> Recei
     )
 
 
+def _receipt_ollama_output_schema() -> dict[str, object]:
+    return cast(dict[str, object], json.loads(json.dumps(_RECEIPT_OLLAMA_OUTPUT_SCHEMA)))
+
+
+def _discount_amount_from_ollama_receipt_item(item: _OllamaReceiptItem) -> str | None:
+    discount = Decimal(item.discount)
+    if discount == 0:
+        return None
+    return format(-discount, "f")
+
+
 def _visionkit_ollama_receipt_prompt(lines: list[str]) -> str:
     return (
-        "Extract receipt JSON. Amounts are strings without currency. "
-        "Dates YYYY-MM-DD. currency ISO. Optional unknown=null. "
-        "items are purchase lines; include tax/tip/discount lines only when shown.\n"
+        "Extract receipt data from this OCR text.\n\n"
+        "Put item-level instant savings in the item discount.\n\n"
         "OCR:\n"
         + "\n".join(lines)
     )

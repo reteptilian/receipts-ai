@@ -140,11 +140,13 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
             )
             return json.dumps(
                 {
+                    "analysis": "Latte has no associated discount line.",
                     "merchantName": "Coffee Shop",
                     "transactionDate": "2026-05-09",
-                    "currency": "USD",
+                    "subtotal": "7.50",
+                    "tax": "0.00",
                     "total": "7.50",
-                    "items": [{"description": "Latte", "amount": "7.50"}],
+                    "items": [{"description": "Latte", "amount": "7.50", "discount": "0.00"}],
                 }
             )
 
@@ -183,11 +185,45 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
     assert transaction.receipt.extraction.confidence == 0.7
     assert transaction.receipt.extraction.raw_text == "Coffee Shop\nLatte 7.50"
     assert transaction.receipt.items[0].description == "Latte"
+    assert transaction.receipt.items[0].discount_amount is None
     assert requests[0]["model"] == "gemma4:e4b"
     assert requests[0]["think"] is True
-    assert "OCR:\nCoffee Shop\nLatte 7.50" in str(requests[1]["prompt"])
+    assert requests[1]["prompt"] == (
+        "Extract receipt data from this OCR text.\n\n"
+        "Put item-level instant savings in the item discount.\n\n"
+        "OCR:\n"
+        "Coffee Shop\n"
+        "Latte 7.50"
+    )
     assert requests[1]["options"] == {"temperature": 0}
-    assert isinstance(requests[1]["output_format"], dict)
+    assert requests[1]["output_format"] == ingest_receipts._receipt_ollama_output_schema()
+
+
+def test_receipt_data_from_ollama_response_maps_discount_schema_to_extraction_items():
+    receipt_data = ingest_receipts._receipt_data_from_ollama_response(
+        json.dumps(
+            {
+                "analysis": "Granola matched instant savings 1.25.",
+                "merchantName": "Market",
+                "transactionDate": "2026-05-09",
+                "items": [
+                    {"description": "Granola", "amount": "6.99", "discount": "1.25"},
+                    {"description": "Milk", "amount": "3.50", "discount": "0.00"},
+                ],
+                "subtotal": "10.49",
+                "tax": "0.45",
+                "total": "9.69",
+            }
+        ),
+        raw_text="Market\nGranola 6.99\nInstant Savings -1.25",
+    )
+
+    assert receipt_data.merchant_name == "Market"
+    assert receipt_data.subtotal == "10.49"
+    assert receipt_data.total_tax == "0.45"
+    assert receipt_data.currency == "USD"
+    assert receipt_data.items[0].discount_amount == "-1.25"
+    assert receipt_data.items[1].discount_amount is None
 
 
 def test_visionkit_ollama_pipeline_can_disable_thinking(monkeypatch: pytest.MonkeyPatch):
