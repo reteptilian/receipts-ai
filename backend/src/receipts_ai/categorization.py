@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import Protocol, cast
@@ -23,6 +24,7 @@ DEFAULT_OLLAMA_TIMEOUT_SECONDS = 30.0
 OLLAMA_URL_ENV_VARS = ("OLLAMA_URL",)
 OLLAMA_MODEL_ENV_VARS = ("OLLAMA_MODEL", "OLLAMA_MODEL_NAME")
 OLLAMA_TIMEOUT_ENV_VARS = ("OLLAMA_TIMEOUT_SECONDS",)
+OLLAMA_PROMPT_LOG_ENV_VARS = ("RECEIPTS_AI_OLLAMA_PROMPT_LOG", "OLLAMA_PROMPT_LOG")
 
 MAX_SEARCH_RESULTS = 5
 MAX_TAXONOMY_SEARCH_PATHS = 5
@@ -137,7 +139,12 @@ class _BudgetCategoryPath:
 
 class UrlLibOllamaClient:
     def __init__(
-        self, *, url: str, model: str, timeout_seconds: float = DEFAULT_OLLAMA_TIMEOUT_SECONDS
+        self,
+        *,
+        url: str,
+        model: str,
+        timeout_seconds: float = DEFAULT_OLLAMA_TIMEOUT_SECONDS,
+        prompt_log_path: str | Path | None = None,
     ) -> None:
         self.url = url.rstrip("/")
         self.generate_url = (
@@ -145,6 +152,9 @@ class UrlLibOllamaClient:
         )
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.prompt_log_path = (
+            Path(prompt_log_path) if prompt_log_path is not None else _ollama_prompt_log_path()
+        )
 
     def complete(self, prompt: str) -> str:
         return self._generate(
@@ -256,6 +266,14 @@ class UrlLibOllamaClient:
             "Ollama generate curl reproduction command: %s",
             _ollama_curl_command(self.generate_url, request_payload),
         )
+        if self.prompt_log_path is not None:
+            _append_ollama_prompt_log(
+                self.prompt_log_path,
+                url=self.generate_url,
+                timeout_seconds=self.timeout_seconds,
+                request_payload=request_payload,
+                payload_bytes=len(payload),
+            )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                 response_payload = response.read().decode("utf-8")
@@ -343,6 +361,65 @@ def _format_ollama_request_value(value: object) -> str:
         return repr(value)
 
 
+def _append_ollama_prompt_log(
+    path: Path,
+    *,
+    url: str,
+    timeout_seconds: float,
+    request_payload: dict[str, object],
+    payload_bytes: int,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prompt = request_payload.get("prompt")
+    if not isinstance(prompt, str):
+        prompt = ""
+
+    properties = {
+        key: value
+        for key, value in request_payload.items()
+        if key not in {"prompt", "options", "format"}
+    }
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    separator = "=" * 96
+    prompt_separator = "-" * 96
+    sections = [
+        separator,
+        f"OLLAMA CALL {timestamp}",
+        f"url: {url}",
+        f"model: {request_payload.get('model', 'unset')}",
+        f"timeout_seconds: {timeout_seconds}",
+        f"prompt_chars: {len(prompt)}",
+        f"payload_bytes: {payload_bytes}",
+        "",
+        "properties:",
+        json.dumps(properties, ensure_ascii=False, indent=2, sort_keys=True),
+        "",
+        "options:",
+        json.dumps(
+            request_payload.get("options", {}),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
+        "",
+        "format:",
+        json.dumps(
+            request_payload.get("format", "unset"),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
+        "",
+        "prompt:",
+        prompt_separator,
+        prompt,
+        separator,
+        "",
+    ]
+    with path.open("a", encoding="utf-8") as file:
+        file.write("\n".join(sections))
+
+
 def _ollama_curl_command(url: str, request_payload: dict[str, object]) -> str:
     payload = json.dumps(request_payload, ensure_ascii=False, sort_keys=True)
     return " ".join(
@@ -386,6 +463,13 @@ def _format_ollama_count(value: object) -> str:
     if not isinstance(value, int | float):
         return "unknown"
     return str(int(value))
+
+
+def _ollama_prompt_log_path() -> Path | None:
+    path = first_config_value(OLLAMA_PROMPT_LOG_ENV_VARS)
+    if not path:
+        return None
+    return Path(path).expanduser()
 
 
 def _format_ollama_eval_rate(response: dict[str, object]) -> str:

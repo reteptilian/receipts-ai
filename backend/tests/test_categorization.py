@@ -19,6 +19,7 @@ from receipts_ai.categorization import (
     DEFAULT_OLLAMA_URL,
     MAX_TAXONOMY_ALIAS_CHOICES,
     MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES,
+    OLLAMA_PROMPT_LOG_ENV_VARS,
     TRANSACTION_TAXONOMY_NONE_CHOICE,
     CachedCategoryModelClient,
     CategoryChoiceProbability,
@@ -1645,6 +1646,78 @@ def test_url_lib_ollama_client_debug_logs_curl_reproduction_command(
             sort_keys=True,
         ),
     ]
+
+
+def test_url_lib_ollama_client_writes_human_prompt_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        assert request.full_url == "http://example.test:11434/api/generate"
+        assert timeout == 30.0
+        return FakeResponse({"response": '{"category":"Groceries"}'})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    prompt_log_path = tmp_path / "nested" / "ollama-prompts.log"
+    client = UrlLibOllamaClient(
+        url="http://example.test:11434",
+        model="llama3.2",
+        prompt_log_path=prompt_log_path,
+    )
+
+    client.complete_choice("Choose one\nWith a second line", choices=("Groceries", "Dining"))
+
+    content = prompt_log_path.read_text(encoding="utf-8")
+    assert content.count("OLLAMA CALL ") == 1
+    assert "url: http://example.test:11434/api/generate" in content
+    assert "model: llama3.2" in content
+    assert "prompt_chars:" in content
+    assert "payload_bytes:" in content
+    assert '"stream": false' in content
+    assert '"think": false' in content
+    assert '"temperature": 0' in content
+    assert '"enum": [\n        \"Groceries\",\n        \"Dining\"\n      ]' in content
+    assert "prompt:\n" in content
+    assert "Choose one\nWith a second line\n\nReturn only JSON matching this schema." in content
+
+
+def test_url_lib_ollama_client_writes_prompt_log_before_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    def fake_urlopen(_request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        assert timeout == 12.5
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    prompt_log_path = tmp_path / "ollama-prompts.log"
+    client = UrlLibOllamaClient(
+        url="http://example.test:11434",
+        model="llama3.2",
+        timeout_seconds=12.5,
+        prompt_log_path=prompt_log_path,
+    )
+
+    with pytest.raises(RuntimeError):
+        client.complete("Choose one\nEven if it times out")
+
+    content = prompt_log_path.read_text(encoding="utf-8")
+    assert "timeout_seconds: 12.5" in content
+    assert "Choose one\nEven if it times out" in content
+
+
+def test_create_ollama_category_client_uses_prompt_log_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    prompt_log_path = tmp_path / "ollama-prompts.log"
+    monkeypatch.setenv("OLLAMA_MODEL", "llama3.2")
+    monkeypatch.setenv(OLLAMA_PROMPT_LOG_ENV_VARS[0], str(prompt_log_path))
+
+    client = create_ollama_category_client()
+
+    assert isinstance(client, UrlLibOllamaClient)
+    assert client.prompt_log_path == prompt_log_path
 
 
 def test_url_lib_ollama_client_error_includes_endpoint(monkeypatch: pytest.MonkeyPatch):

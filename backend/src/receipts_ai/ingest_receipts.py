@@ -6,6 +6,7 @@ import hashlib
 import importlib
 import json
 import logging
+import os
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -27,6 +28,7 @@ from receipts_ai.cache import SqliteCallCache
 from receipts_ai.categorization import (
     DEFAULT_OLLAMA_TIMEOUT_SECONDS,
     DEFAULT_OLLAMA_URL,
+    OLLAMA_PROMPT_LOG_ENV_VARS,
     OLLAMA_TIMEOUT_ENV_VARS,
     OLLAMA_URL_ENV_VARS,
     CachedCategoryModelClient,
@@ -273,7 +275,17 @@ def main() -> None:
         default="WARNING",
         help="Show logs at this level.",
     )
+    parser.add_argument(
+        "--ollama-prompt-log",
+        type=Path,
+        help=(
+            "Append human-readable Ollama request traces to this file, including "
+            "pretty-printed request properties, options, format, and prompt text."
+        ),
+    )
     args = parser.parse_args()
+    if args.ollama_prompt_log is not None:
+        os.environ[OLLAMA_PROMPT_LOG_ENV_VARS[0]] = str(args.ollama_prompt_log)
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
     cache = SqliteCallCache(args.cache_file) if args.cache_file is not None else None
