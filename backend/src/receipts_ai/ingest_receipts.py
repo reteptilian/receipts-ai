@@ -302,6 +302,14 @@ def main() -> None:
             "pretty-printed request properties, options, format, and prompt text."
         ),
     )
+    parser.add_argument(
+        "--visionkit-ocr-debug-image-folder",
+        type=Path,
+        help=(
+            "When using --pipeline visionkit_ollama, write PNGs with OCR observation "
+            "bounding boxes and numbered text legends to this folder."
+        ),
+    )
     args = parser.parse_args()
     if args.ollama_prompt_log is not None:
         os.environ[OLLAMA_PROMPT_LOG_ENV_VARS[0]] = str(args.ollama_prompt_log)
@@ -316,7 +324,17 @@ def main() -> None:
 
     transactions: list[Transaction] = []
     for receipt_path in args.receipts:
-        transaction = _process_receipt(receipt_path, pipeline=args.pipeline, cache=cache)
+        visionkit_ocr_debug_image_path = (
+            _visionkit_ocr_debug_image_path(args.visionkit_ocr_debug_image_folder, receipt_path)
+            if args.visionkit_ocr_debug_image_folder is not None
+            else None
+        )
+        transaction = _process_receipt(
+            receipt_path,
+            pipeline=args.pipeline,
+            cache=cache,
+            visionkit_ocr_debug_image_path=visionkit_ocr_debug_image_path,
+        )
         if transaction.receipt is None:
             raise ValueError(f"transaction from {receipt_path} does not contain a receipt")
         if not transaction_is_on_or_after(transaction, args.after):
@@ -434,6 +452,7 @@ def _process_receipt(
     *,
     pipeline: str,
     cache: SqliteCallCache | None,
+    visionkit_ocr_debug_image_path: Path | None = None,
 ) -> Transaction:
     if pipeline == "azure":
         return populate_transaction_ingestion_metadata(
@@ -446,7 +465,11 @@ def _process_receipt(
 
     if pipeline == "visionkit_ollama":
         return populate_transaction_ingestion_metadata(
-            _transaction_from_visionkit_ollama_receipt(receipt_path, cache=cache),
+            _transaction_from_visionkit_ollama_receipt(
+                receipt_path,
+                cache=cache,
+                ocr_debug_image_path=visionkit_ocr_debug_image_path,
+            ),
             ingestion_filename=receipt_path.name,
             ingestion_file_url=file_url_from_path(receipt_path),
             ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
@@ -473,8 +496,12 @@ def _transaction_from_visionkit_ollama_receipt(
     receipt_path: Path,
     *,
     cache: SqliteCallCache | None,
+    ocr_debug_image_path: Path | None = None,
 ) -> Transaction:
-    observations = _visionkit_text_observations(receipt_path)
+    observations = _visionkit_text_observations(
+        receipt_path,
+        debug_image_path=ocr_debug_image_path,
+    )
     lines = _visionkit_text_lines(observations)
     LOGGER.info(
         "VisionKit OCR grouped %d observation(s) into %d line(s) for %s",
@@ -497,7 +524,11 @@ def _transaction_from_visionkit_ollama_receipt(
     return transaction_from_receipt_data(receipt_data)
 
 
-def _visionkit_text_observations(receipt_path: Path) -> list[_VisionKitTextObservation]:
+def _visionkit_text_observations(
+    receipt_path: Path,
+    *,
+    debug_image_path: Path | None = None,
+) -> list[_VisionKitTextObservation]:
     try:
         from ocrmac import ocrmac
     except ImportError as error:
@@ -525,6 +556,17 @@ def _visionkit_text_observations(receipt_path: Path) -> list[_VisionKitTextObser
                 index,
                 len(observations),
                 _visionkit_text_observation_summary(observation),
+            )
+        if observations and debug_image_path is not None:
+            _write_visionkit_ocr_debug_image(
+                image_path,
+                debug_image_path,
+                observations,
+            )
+            LOGGER.info(
+                "Wrote VisionKit OCR debug image with %d observation(s) to %s",
+                len(observations),
+                debug_image_path,
             )
         return observations
 
@@ -678,6 +720,102 @@ def _visionkit_text_observation(annotation: object) -> _VisionKitTextObservation
         y=y,
         width=width,
         height=height,
+    )
+
+
+def _visionkit_ocr_debug_image_path(output_folder: Path, receipt_path: Path) -> Path:
+    return output_folder / f"{receipt_path.stem}.visionkit-ocr-debug.png"
+
+
+def _write_visionkit_ocr_debug_image(
+    image_path: Path,
+    output_path: Path,
+    observations: list[_VisionKitTextObservation],
+) -> None:
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError as error:
+        raise RuntimeError(
+            "Writing VisionKit OCR debug images requires Pillow, which is installed with ocrmac."
+        ) from error
+
+    with Image.open(image_path) as source_image:
+        image = source_image.convert("RGB")
+
+    font = ImageFont.load_default()
+    draw_probe = ImageDraw.Draw(image)
+    image_width, image_height = image.size
+    legend_entries = [
+        f"{index}. {observation.text}" for index, observation in enumerate(observations, start=1)
+    ]
+    legend_text_width = max(
+        (round(draw_probe.textlength(entry, font=font)) for entry in legend_entries),
+        default=0,
+    )
+    legend_width = min(max(260, legend_text_width + 24), 520)
+    legend_line_height = 16
+    canvas_height = max(image_height, 32 + legend_line_height * len(legend_entries))
+    canvas = Image.new("RGB", (image_width + legend_width, canvas_height), "white")
+    canvas.paste(image, (0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    box_color = (218, 45, 45)
+    label_fill = (218, 45, 45)
+    label_text_fill = (255, 255, 255)
+    line_width = max(2, round(min(image_width, image_height) / 500))
+    label_padding = max(2, line_width)
+
+    for index, observation in enumerate(observations, start=1):
+        left, top, right, bottom = _visionkit_observation_pixel_box(
+            observation,
+            image_width=image_width,
+            image_height=image_height,
+        )
+        draw.rectangle((left, top, right, bottom), outline=box_color, width=line_width)
+
+        label = str(index)
+        text_bbox = draw.textbbox((0, 0), label, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        label_left = left
+        label_top = max(0, top - text_height - label_padding * 2)
+        label_right = min(image_width, label_left + text_width + label_padding * 2)
+        label_bottom = label_top + text_height + label_padding * 2
+        draw.rectangle((label_left, label_top, label_right, label_bottom), fill=label_fill)
+        draw.text(
+            (label_left + label_padding, label_top + label_padding),
+            label,
+            fill=label_text_fill,
+            font=font,
+        )
+
+    legend_x = image_width + 12
+    legend_y = 12
+    draw.text((legend_x, legend_y), "OCR observations", fill=(0, 0, 0), font=font)
+    legend_y += 20
+    for entry in legend_entries:
+        draw.text((legend_x, legend_y), entry, fill=(0, 0, 0), font=font)
+        legend_y += legend_line_height
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path)
+
+
+def _visionkit_observation_pixel_box(
+    observation: _VisionKitTextObservation,
+    *,
+    image_width: int,
+    image_height: int,
+) -> tuple[int, int, int, int]:
+    left = round(observation.x * image_width)
+    top = round((1 - observation.y - observation.height) * image_height)
+    right = round((observation.x + observation.width) * image_width)
+    bottom = round((1 - observation.y) * image_height)
+    return (
+        max(0, min(image_width, left)),
+        max(0, min(image_height, top)),
+        max(0, min(image_width, right)),
+        max(0, min(image_height, bottom)),
     )
 
 

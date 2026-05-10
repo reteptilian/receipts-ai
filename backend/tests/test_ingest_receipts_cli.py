@@ -27,6 +27,12 @@ from receipts_ai.ingest_receipts import (
     write_transaction_receipt_items_csv,
     write_transactions_json,
 )
+from receipts_ai.models.receipt_data_extraction import (
+    ExtractedReceiptItem,
+    ReceiptDataExtraction,
+    ReceiptDataExtractionMetadata,
+    ReceiptExtractionPipeline,
+)
 from receipts_ai.models.transaction import (
     ExtractionMetadata,
     IngestionType,
@@ -121,7 +127,7 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
     monkeypatch.setattr(
         ingest_receipts,
         "_visionkit_text_observations",
-        lambda _path: [
+        lambda _path, *, debug_image_path=None: [
             ingest_receipts._VisionKitTextObservation(
                 text="Coffee Shop", confidence=0.8, x=0.1, y=0.8, width=0.5, height=0.1
             ),
@@ -157,6 +163,112 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
     assert "OCR:\nCoffee Shop\nLatte 7.50" in str(requests[1]["prompt"])
     assert requests[1]["options"] == {"temperature": 0}
     assert isinstance(requests[1]["output_format"], dict)
+
+
+def test_visionkit_ollama_pipeline_passes_debug_image_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    receipt_path = tmp_path / "receipt.png"
+    receipt_path.write_bytes(b"image")
+    debug_image_path = tmp_path / "debug.png"
+    debug_paths: list[Path | None] = []
+
+    def fake_text_observations(
+        _path: Path,
+        *,
+        debug_image_path: Path | None = None,
+    ) -> list[ingest_receipts._VisionKitTextObservation]:
+        debug_paths.append(debug_image_path)
+        return [
+            ingest_receipts._VisionKitTextObservation(
+                text="Coffee Shop", confidence=0.8, x=0.1, y=0.8, width=0.5, height=0.1
+            ),
+            ingest_receipts._VisionKitTextObservation(
+                text="Latte 7.50", confidence=0.6, x=0.1, y=0.6, width=0.5, height=0.1
+            ),
+        ]
+
+    monkeypatch.setattr(ingest_receipts, "_visionkit_text_observations", fake_text_observations)
+    monkeypatch.setattr(
+        ingest_receipts,
+        "_receipt_data_from_ollama_lines",
+        lambda _lines, *, raw_text, model, cache: ReceiptDataExtraction(
+            merchant_name="Coffee Shop",
+            transaction_date=date(2026, 5, 9),
+            currency="USD",
+            total="7.50",
+            items=[ExtractedReceiptItem(description="Latte", amount="7.50")],
+            extraction=ReceiptDataExtractionMetadata(
+                pipeline=ReceiptExtractionPipeline.visionkit_ollama,
+                raw_text=raw_text,
+            ),
+        ),
+    )
+
+    ingest_receipts._process_receipt(
+        receipt_path,
+        pipeline="visionkit_ollama",
+        cache=None,
+        visionkit_ocr_debug_image_path=debug_image_path,
+    )
+
+    assert debug_paths == [debug_image_path]
+
+
+def test_main_visionkit_ocr_debug_image_folder_supports_multiple_receipts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    receipt_paths = [tmp_path / "first.png", tmp_path / "second.png"]
+    for receipt_path in receipt_paths:
+        receipt_path.write_bytes(b"image")
+    debug_folder = tmp_path / "debug"
+    debug_paths: list[Path | None] = []
+
+    def fake_process_receipt(
+        receipt_path: Path,
+        *,
+        pipeline: str,
+        cache: object,
+        visionkit_ocr_debug_image_path: Path | None = None,
+    ) -> Transaction:
+        assert pipeline == "visionkit_ollama"
+        assert cache is None
+        debug_paths.append(visionkit_ocr_debug_image_path)
+        return Transaction(
+            id=f"receipt_{receipt_path.stem}",
+            source=Source.receipt,
+            transaction_date=date(2026, 5, 9),
+            payee=receipt_path.stem,
+            amount="-1.00",
+            currency="USD",
+            receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="1.00")]),
+        )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai-ingest-receipts",
+            "--pipeline",
+            "visionkit_ollama",
+            "--visionkit-ocr-debug-image-folder",
+            str(debug_folder),
+            str(receipt_paths[0]),
+            str(receipt_paths[1]),
+        ],
+    )
+    monkeypatch.setattr(ingest_receipts, "_process_receipt", fake_process_receipt)
+
+    main()
+
+    assert capsys.readouterr().out
+    assert debug_paths == [
+        debug_folder / "first.visionkit-ocr-debug.png",
+        debug_folder / "second.visionkit-ocr-debug.png",
+    ]
 
 
 def test_visionkit_pdf_ocr_image_path_renders_single_page_pdf(
@@ -202,6 +314,7 @@ def test_visionkit_text_observations_ocr_pdf_rendered_page(
     pdf_path = tmp_path / "receipt.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
     ocr_paths: list[Path] = []
+    debug_calls: list[tuple[Path, Path, list[ingest_receipts._VisionKitTextObservation]]] = []
 
     def fake_render(_input_path: Path, output_path: Path) -> None:
         output_path.write_bytes(b"png")
@@ -216,6 +329,13 @@ def test_visionkit_text_observations_ocr_pdf_rendered_page(
 
     monkeypatch.setattr(ingest_receipts, "_pdf_page_count", lambda _path: 1)
     monkeypatch.setattr(ingest_receipts, "_render_pdf_first_page_to_png", fake_render)
+    monkeypatch.setattr(
+        ingest_receipts,
+        "_write_visionkit_ocr_debug_image",
+        lambda image_path, output_path, observations: debug_calls.append(
+            (image_path, output_path, observations)
+        ),
+    )
     monkeypatch.setitem(
         sys.modules,
         "ocrmac",
@@ -226,6 +346,44 @@ def test_visionkit_text_observations_ocr_pdf_rendered_page(
 
     assert [observation.text for observation in observations] == ["Coffee"]
     assert ocr_paths[0].name == "page-1.png"
+    assert debug_calls == []
+
+    debug_image_path = tmp_path / "debug.png"
+    ingest_receipts._visionkit_text_observations(pdf_path, debug_image_path=debug_image_path)
+
+    assert debug_calls[0][0].name == "page-1.png"
+    assert debug_calls[0][1] == debug_image_path
+    assert [observation.text for observation in debug_calls[0][2]] == ["Coffee"]
+
+
+def test_write_visionkit_ocr_debug_image_draws_numbered_boxes_and_legend(tmp_path: Path):
+    pytest.importorskip("PIL")
+    from PIL import Image, ImageStat
+
+    image_path = tmp_path / "receipt.png"
+    output_path = tmp_path / "receipt.visionkit-ocr-debug.png"
+    Image.new("RGB", (100, 80), "white").save(image_path)
+
+    ingest_receipts._write_visionkit_ocr_debug_image(
+        image_path,
+        output_path,
+        [
+            ingest_receipts._VisionKitTextObservation(
+                text="Coffee", confidence=0.9, x=0.1, y=0.2, width=0.3, height=0.2
+            ),
+            ingest_receipts._VisionKitTextObservation(
+                text="7.50", confidence=0.8, x=0.6, y=0.5, width=0.2, height=0.1
+            ),
+        ],
+    )
+
+    with Image.open(output_path) as output_image:
+        assert output_image.size[0] > 100
+        assert output_image.size[1] == 80
+        box_region = output_image.crop((8, 46, 42, 66))
+        legend_region = output_image.crop((110, 10, output_image.size[0] - 4, 70))
+        assert any(channel_min < 255 for channel_min, _ in ImageStat.Stat(box_region).extrema)
+        assert any(channel_min < 255 for channel_min, _ in ImageStat.Stat(legend_region).extrema)
 
 
 def test_writes_one_csv_row_per_receipt_item():
