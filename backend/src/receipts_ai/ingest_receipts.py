@@ -74,6 +74,12 @@ RECEIPT_OLLAMA_MODEL_ENV_VARS = (
     "OLLAMA_MODEL",
     "OLLAMA_MODEL_NAME",
 )
+RECEIPT_OLLAMA_THINK_ENV_VARS = (
+    "VISIONKIT_OLLAMA_THINK",
+    "VISIONKIT_OLLAMA_THINKING",
+    "OLLAMA_RECEIPT_THINK",
+    "OLLAMA_THINK",
+)
 VISIONKIT_OLLAMA_CACHE_VERSION = "visionkit_ollama_receipt_v1"
 CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
@@ -916,9 +922,11 @@ def _receipt_data_from_ollama_lines(
 ) -> ReceiptDataExtraction:
     schema = _OllamaReceiptDataExtraction.model_json_schema(by_alias=True)
     prompt = _visionkit_ollama_receipt_prompt(lines)
+    think = _receipt_ollama_think()
     request = {
         "version": VISIONKIT_OLLAMA_CACHE_VERSION,
         "model": model,
+        "think": think,
         "prompt": prompt,
         "format": schema,
     }
@@ -932,6 +940,7 @@ def _receipt_data_from_ollama_lines(
         url=_ollama_url(),
         model=model,
         timeout_seconds=_ollama_timeout_seconds(),
+        think=think,
     ).complete_structured(
         prompt,
         options={"temperature": 0},
@@ -994,6 +1003,20 @@ def _receipt_ollama_model() -> str:
     return first_config_value(RECEIPT_OLLAMA_MODEL_ENV_VARS, DEFAULT_RECEIPT_OLLAMA_MODEL) or (
         DEFAULT_RECEIPT_OLLAMA_MODEL
     )
+
+
+def _receipt_ollama_think() -> bool:
+    value = first_config_value(RECEIPT_OLLAMA_THINK_ENV_VARS)
+    if value is None:
+        return True
+    normalized = value.strip().casefold()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+
+    env_var_list = ", ".join(RECEIPT_OLLAMA_THINK_ENV_VARS)
+    raise RuntimeError(f"{env_var_list} must be true or false")
 
 
 def _ollama_url() -> str:

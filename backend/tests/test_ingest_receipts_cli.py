@@ -121,8 +121,12 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
     requests: list[dict[str, object]] = []
 
     class FakeOllamaClient:
-        def __init__(self, *, url: str, model: str, timeout_seconds: float) -> None:
-            requests.append({"url": url, "model": model, "timeout_seconds": timeout_seconds})
+        def __init__(
+            self, *, url: str, model: str, timeout_seconds: float, think: bool
+        ) -> None:
+            requests.append(
+                {"url": url, "model": model, "timeout_seconds": timeout_seconds, "think": think}
+            )
 
         def complete_structured(
             self,
@@ -180,9 +184,19 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
     assert transaction.receipt.extraction.raw_text == "Coffee Shop\nLatte 7.50"
     assert transaction.receipt.items[0].description == "Latte"
     assert requests[0]["model"] == "gemma4:e4b"
+    assert requests[0]["think"] is True
     assert "OCR:\nCoffee Shop\nLatte 7.50" in str(requests[1]["prompt"])
     assert requests[1]["options"] == {"temperature": 0}
     assert isinstance(requests[1]["output_format"], dict)
+
+
+def test_visionkit_ollama_pipeline_can_disable_thinking(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VISIONKIT_OLLAMA_THINK", "false")
+    monkeypatch.delenv("VISIONKIT_OLLAMA_THINKING", raising=False)
+    monkeypatch.delenv("OLLAMA_RECEIPT_THINK", raising=False)
+    monkeypatch.delenv("OLLAMA_THINK", raising=False)
+
+    assert ingest_receipts._receipt_ollama_think() is False
 
 
 def test_visionkit_ollama_pipeline_passes_debug_image_path(

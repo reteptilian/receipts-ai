@@ -145,6 +145,7 @@ class UrlLibOllamaClient:
         model: str,
         timeout_seconds: float = DEFAULT_OLLAMA_TIMEOUT_SECONDS,
         prompt_log_path: str | Path | None = None,
+        think: bool = False,
     ) -> None:
         self.url = url.rstrip("/")
         self.generate_url = (
@@ -152,6 +153,7 @@ class UrlLibOllamaClient:
         )
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.think = think
         self.prompt_log_path = (
             Path(prompt_log_path) if prompt_log_path is not None else _ollama_prompt_log_path()
         )
@@ -229,7 +231,7 @@ class UrlLibOllamaClient:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "think": False,
+            "think": self.think,
             "options": options,
         }
         if output_format is not None:

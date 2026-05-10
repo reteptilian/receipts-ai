@@ -1283,6 +1283,28 @@ def test_url_lib_ollama_client_posts_generate_request(monkeypatch: pytest.Monkey
     }
 
 
+def test_url_lib_ollama_client_can_enable_thinking(monkeypatch: pytest.MonkeyPatch):
+    requests: list[urllib.request.Request] = []
+
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float) -> FakeResponse:
+        _ = timeout
+        requests.append(request)
+        return FakeResponse({"response": "Groceries\n"})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = UrlLibOllamaClient(
+        url="http://example.test:11434",
+        model="qwen3",
+        think=True,
+    )
+
+    client.complete("Choose one")
+
+    request_data = requests[0].data
+    assert isinstance(request_data, bytes)
+    assert json.loads(request_data)["think"] is True
+
+
 def test_url_lib_ollama_client_can_request_choice_schema(
     monkeypatch: pytest.MonkeyPatch,
 ):
