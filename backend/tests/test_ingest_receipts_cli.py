@@ -1009,12 +1009,62 @@ def test_main_processes_multiple_receipts_as_combined_csv(
 
     rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
     assert analyze_calls == [receipt_1_path, receipt_2_path]
-    assert [row["transaction_id"] for row in rows] == ["transaction_001", "transaction_002"]
+    assert [row["transaction_id"] for row in rows] == [
+        ingest_receipts.receipt_image_transaction_id(hashlib.sha256(b"receipt 1").hexdigest()),
+        ingest_receipts.receipt_image_transaction_id(hashlib.sha256(b"receipt 2").hexdigest()),
+    ]
     assert [row["ingestion_file_sha256_hex"] for row in rows] == [
         hashlib.sha256(b"receipt 1").hexdigest(),
         hashlib.sha256(b"receipt 2").hexdigest(),
     ]
     assert [row["item_description"] for row in rows] == ["Item 001", "Item 002"]
+
+
+def test_receipt_image_transaction_id_is_pipeline_independent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"same receipt image")
+
+    def transaction(transaction_id: str) -> Transaction:
+        return Transaction(
+            id=transaction_id,
+            source=Source.receipt,
+            transaction_date=date(2026, 4, 27),
+            payee="Coffee Shop",
+            amount="-7.00",
+            currency="USD",
+            receipt=Receipt(items=[ReceiptItem(description="Coffee", amount="7.00")]),
+        )
+
+    monkeypatch.setattr(
+        ingest_receipts,
+        "_transaction_from_azure_receipt",
+        lambda _path, *, cache: transaction("azure_raw_text_id"),
+    )
+    monkeypatch.setattr(
+        ingest_receipts,
+        "_transaction_from_visionkit_ollama_receipt",
+        lambda _path, *, cache, ocr_debug_image_path=None: transaction("visionkit_raw_text_id"),
+    )
+
+    azure_transaction = ingest_receipts._process_receipt(
+        receipt_path,
+        pipeline="azure",
+        cache=None,
+    )
+    visionkit_transaction = ingest_receipts._process_receipt(
+        receipt_path,
+        pipeline="visionkit_ollama",
+        cache=None,
+    )
+
+    expected_id = ingest_receipts.receipt_image_transaction_id(
+        hashlib.sha256(b"same receipt image").hexdigest()
+    )
+    assert azure_transaction.id == expected_id
+    assert visionkit_transaction.id == expected_id
 
 
 def test_main_wraps_brave_search_client_when_cache_file_is_provided(

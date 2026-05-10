@@ -469,12 +469,14 @@ def _process_receipt(
     cache: SqliteCallCache | None,
     visionkit_ocr_debug_image_path: Path | None = None,
 ) -> Transaction:
+    receipt_content = receipt_path.read_bytes()
+    receipt_sha256_hex = sha256_hex(receipt_content)
     if pipeline == "azure":
         return populate_transaction_ingestion_metadata(
             _transaction_from_azure_receipt(receipt_path, cache=cache),
             ingestion_filename=receipt_path.name,
             ingestion_file_url=file_url_from_path(receipt_path),
-            ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
+            ingestion_file_sha256_hex=receipt_sha256_hex,
             ingestion_type=IngestionType.receipt_img,
         )
 
@@ -487,7 +489,7 @@ def _process_receipt(
             ),
             ingestion_filename=receipt_path.name,
             ingestion_file_url=file_url_from_path(receipt_path),
-            ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
+            ingestion_file_sha256_hex=receipt_sha256_hex,
             ingestion_type=IngestionType.receipt_img,
         )
 
@@ -1088,6 +1090,7 @@ def populate_transaction_ingestion_metadata(
     transaction.ingestion_type = ingestion_type
     if ingestion_type == IngestionType.receipt_img:
         transaction.record_type = RecordType.receipt_based
+        transaction.id = receipt_image_transaction_id(ingestion_file_sha256_hex)
     return transaction
 
 
@@ -1097,6 +1100,10 @@ def file_url_from_path(path: Path) -> str:
 
 def sha256_hex(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def receipt_image_transaction_id(ingestion_file_sha256_hex: str) -> str:
+    return f"receipt_{ingestion_file_sha256_hex[:24]}"
 
 
 def parse_after_date(value: str) -> date:
