@@ -2,8 +2,13 @@ from __future__ import annotations
 
 # pyright: reportPrivateUsage=false
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
+
+import pandas as pd
+import pytest
 
 from receipts_ai import ingest_receipts
 from receipts_ai.models.receipt_data_extraction import (
@@ -15,6 +20,10 @@ from receipts_ai.models.receipt_data_extraction import (
 from receipts_ai.review_models import ReceiptReviewStatus
 from receipts_ai.review_service import compare_receipt_data, write_training_jsonl
 from receipts_ai.review_store import ReceiptReviewStore
+from receipts_ai.review_streamlit_app import (
+    _receipt_preview_image,
+    _sanity_check_failures,
+)
 
 
 def _receipt_data(
@@ -109,6 +118,20 @@ def test_compare_receipt_data_reports_field_mismatches():
     assert result.score < 1
 
 
+def test_compare_receipt_data_fuzzy_compares_merchant_name():
+    result = compare_receipt_data(
+        _receipt_data(merchant_name="COSTCO"),
+        _receipt_data(merchant_name="COSTCO WHOLESALE"),
+        receipt_sha256_hex="0" * 64,
+        candidate_pipeline="visionkit_ollama",
+    )
+
+    merchant_field = next(field for field in result.fields if field.path == "merchantName")
+
+    assert merchant_field.similarity is not None
+    assert not merchant_field.matches
+
+
 def test_write_training_jsonl_uses_reviewed_receipts(tmp_path: Path):
     receipt_path = tmp_path / "receipt.png"
     receipt_path.write_bytes(b"image")
@@ -138,3 +161,71 @@ def test_write_training_jsonl_uses_reviewed_receipts(tmp_path: Path):
         "discount": "0.00",
     }
     assert receipt_sha in output
+
+
+def test_sanity_check_failures_report_total_and_subtotal_mismatches():
+    items = pd.DataFrame(
+        [
+            {"amount": "10.00", "discount_amount": "-2.00", "line_type": "item"},
+            {"amount": "1.00", "discount_amount": None, "line_type": "tax"},
+        ]
+    )
+
+    failures = _sanity_check_failures(
+        subtotal="9.00",
+        total_tax="1.00",
+        total="12.00",
+        items=items,
+    )
+
+    assert failures == [
+        {
+            "check": "total = subtotal + tax",
+            "expected": "10.00",
+            "actual": "12.00",
+        },
+        {
+            "check": "subtotal = sum(item net amounts)",
+            "expected": "8.00",
+            "actual": "9.00",
+        },
+    ]
+
+
+def test_sanity_check_failures_pass_when_amounts_balance():
+    items = [
+        {"amount": "10.00", "discount_amount": "-2.00", "line_type": "item"},
+        {"amount": "1.00", "discount_amount": None, "line_type": "tax"},
+    ]
+
+    assert (
+        _sanity_check_failures(
+            subtotal="8.00",
+            total_tax="1.00",
+            total="9.00",
+            items=items,
+        )
+        == []
+    )
+
+
+def test_receipt_preview_image_renders_pdf_to_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pdf_path = tmp_path / "receipt.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7\n")
+    preview_path = tmp_path / "receipt.png"
+    preview_path.write_bytes(b"png bytes")
+
+    @contextmanager
+    def fake_preview(path: Path) -> Generator[Path]:
+        assert path == pdf_path
+        yield preview_path
+
+    monkeypatch.setattr(
+        "receipts_ai.review_streamlit_app._visionkit_ocr_image_path",
+        fake_preview,
+    )
+
+    assert _receipt_preview_image(pdf_path) == b"png bytes"

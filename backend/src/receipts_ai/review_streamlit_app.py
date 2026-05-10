@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-# pyright: reportUnknownMemberType=false
+# pyright: reportPrivateUsage=false, reportUnknownMemberType=false
 import argparse
 import shlex
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from receipts_ai.cache import SqliteCallCache
+from receipts_ai.ingest_receipts import _visionkit_ocr_image_path
 from receipts_ai.models.receipt_data_extraction import (
     ExtractedReceiptItem,
     ReceiptDataExtraction,
@@ -60,11 +62,10 @@ def main() -> None:
         st.error("This receipt has no extraction yet.")
         return
 
-    left, right = st.columns([0.9, 1.1], gap="large")
-    with left:
+    image_column, review_column, context_column = st.columns([0.75, 1.35, 0.9], gap="large")
+    with image_column:
         _render_receipt_source(source.image_path, source.sha256_hex)
-        _render_extraction_metadata(store, selected_sha)
-    with right:
+    with review_column:
         _render_review_form(
             store,
             receipt_sha256_hex=selected_sha,
@@ -73,6 +74,8 @@ def main() -> None:
             status=review.status if review is not None else ReceiptReviewStatus.draft,
             notes=review.notes if review is not None else None,
         )
+    with context_column:
+        _render_extraction_metadata(store, selected_sha)
         st.divider()
         _render_comparison_tools(store, selected_sha, Path(source.image_path))
 
@@ -81,15 +84,16 @@ def _render_sidebar(store: ReceiptReviewStore, db_path: Path) -> None:
     st.sidebar.header("Workspace")
     st.sidebar.caption(str(db_path))
 
-    with st.sidebar.form("import_receipt"):
-        receipt_path_text = st.text_input("Receipt path")
-        pipeline = st.selectbox("Baseline pipeline", ["azure", "visionkit_ollama"], index=0)
-        cache_file_text = st.text_input("Pipeline cache DB", value="")
-        st.caption(
+    import_form = st.sidebar.form("import_receipt")
+    with import_form:
+        receipt_path_text = import_form.text_input("Receipt path")
+        pipeline = import_form.selectbox("Baseline pipeline", ["azure", "visionkit_ollama"], index=0)
+        cache_file_text = import_form.text_input("Pipeline cache DB", value="")
+        import_form.caption(
             "Optional. Use the same SQLite cache path you pass to ingestion with --cache-file."
         )
-        force = st.checkbox("Force new extraction", value=False)
-        submitted = st.form_submit_button("Import")
+        force = import_form.checkbox("Force new extraction", value=False)
+        submitted = import_form.form_submit_button("Import")
     if submitted:
         try:
             receipt_path = _path_from_text(receipt_path_text)
@@ -145,12 +149,23 @@ def _selected_receipt_sha(store: ReceiptReviewStore) -> str | None:
 
 def _render_receipt_source(image_path_text: str, sha256_hex: str) -> None:
     image_path = Path(image_path_text)
-    st.subheader("Image")
-    if image_path.exists() and image_path.suffix.casefold() != ".pdf":
-        st.image(str(image_path), use_container_width=True)
-    else:
-        st.code(str(image_path))
+    st.subheader("Receipt Image")
+    with st.container(height=780, border=True):
+        preview = _receipt_preview_image(image_path)
+        if preview is not None:
+            st.image(preview, use_container_width=True)
+        else:
+            st.code(str(image_path))
     st.caption(sha256_hex)
+
+
+def _receipt_preview_image(image_path: Path) -> bytes | str | None:
+    if not image_path.exists():
+        return None
+    if image_path.suffix.casefold() != ".pdf":
+        return str(image_path)
+    with _visionkit_ocr_image_path(image_path) as preview_path:
+        return preview_path.read_bytes()
 
 
 def _render_extraction_metadata(store: ReceiptReviewStore, receipt_sha256_hex: str) -> None:
@@ -211,6 +226,12 @@ def _render_review_form(
             )
         },
         key=f"items_{receipt_sha256_hex}",
+    )
+    _render_sanity_checks(
+        subtotal=subtotal,
+        total_tax=total_tax,
+        total=total,
+        items=edited_items,
     )
     notes_value = st.text_area("Notes", value=notes or "")
 
@@ -367,6 +388,138 @@ def _editor_records(items: Any) -> list[dict[str, Any]]:
     if isinstance(items, list):
         return cast(list[dict[str, Any]], items)
     raise ValueError("Unexpected item editor value.")
+
+
+def _render_sanity_checks(
+    *,
+    subtotal: str,
+    total_tax: str,
+    total: str,
+    items: Any,
+) -> None:
+    failures = _sanity_check_failures(
+        subtotal=subtotal,
+        total_tax=total_tax,
+        total=total,
+        items=items,
+    )
+    st.subheader("Sanity Checks")
+    if not failures:
+        st.success("All checks pass.")
+        return
+
+    st.warning(f"{len(failures)} failing check(s)")
+    st.dataframe(failures, hide_index=True, use_container_width=True)
+
+
+def _sanity_check_failures(
+    *,
+    subtotal: str | None,
+    total_tax: str | None,
+    total: str | None,
+    items: Any,
+) -> list[dict[str, str]]:
+    failures: list[dict[str, str]] = []
+    parsed_subtotal = _money_or_failure("subtotal", subtotal, failures)
+    parsed_tax = _money_or_failure("tax", total_tax, failures, default=Decimal("0"))
+    parsed_total = _money_or_failure("total", total, failures)
+
+    if parsed_subtotal is not None and parsed_tax is not None and parsed_total is not None:
+        expected_total = parsed_subtotal + parsed_tax
+        if _money_mismatch(parsed_total, expected_total):
+            failures.append(
+                {
+                    "check": "total = subtotal + tax",
+                    "expected": _money_text(expected_total),
+                    "actual": _money_text(parsed_total),
+                }
+            )
+
+    item_net_total = _item_net_total_or_failure(items, failures)
+    if parsed_subtotal is not None and item_net_total is not None:
+        if _money_mismatch(parsed_subtotal, item_net_total):
+            failures.append(
+                {
+                    "check": "subtotal = sum(item net amounts)",
+                    "expected": _money_text(item_net_total),
+                    "actual": _money_text(parsed_subtotal),
+                }
+            )
+
+    return failures
+
+
+def _money_or_failure(
+    field: str,
+    value: object | None,
+    failures: list[dict[str, str]],
+    *,
+    default: Decimal | None = None,
+) -> Decimal | None:
+    text = _clean_string(value)
+    if text is None:
+        return default
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        failures.append(
+            {
+                "check": f"{field} is a valid amount",
+                "expected": "decimal amount",
+                "actual": text,
+            }
+        )
+        return None
+
+
+def _item_net_total_or_failure(
+    items: Any,
+    failures: list[dict[str, str]],
+) -> Decimal | None:
+    try:
+        records = _editor_records(items)
+    except ValueError as error:
+        failures.append(
+            {
+                "check": "items can be read",
+                "expected": "editable item rows",
+                "actual": str(error),
+            }
+        )
+        return None
+
+    total = Decimal("0")
+    for index, record in enumerate(records):
+        if (
+            _clean_string(record.get("description")) is None
+            and _clean_string(record.get("amount")) is None
+            and _clean_string(record.get("discount_amount")) is None
+        ):
+            continue
+
+        line_type = _clean_string(record.get("line_type")) or LineType.item.value
+        if line_type != LineType.item.value:
+            continue
+
+        amount = _money_or_failure(f"items[{index}].amount", record.get("amount"), failures)
+        discount = _money_or_failure(
+            f"items[{index}].discount_amount",
+            record.get("discount_amount"),
+            failures,
+            default=Decimal("0"),
+        )
+        if amount is None or discount is None:
+            return None
+        total += amount - abs(discount)
+    return total
+
+
+def _money_mismatch(actual: Decimal, expected: Decimal) -> bool:
+    return actual.quantize(Decimal("0.01")) != expected.quantize(Decimal("0.01"))
+
+
+def _money_text(value: Decimal) -> str:
+    return format(value.quantize(Decimal("0.01")), "f")
 
 
 def _clean_string(value: object | None) -> str | None:

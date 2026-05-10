@@ -189,7 +189,7 @@ def compare_receipt_data(
     candidate_extraction_id: int | None = None,
 ) -> ReceiptComparisonResult:
     fields: list[ReceiptComparisonField] = []
-    _append_field(fields, "merchantName", expected.merchant_name, actual.merchant_name)
+    _append_field(fields, "merchantName", expected.merchant_name, actual.merchant_name, fuzzy=True)
     _append_field(fields, "transactionDate", expected.transaction_date, actual.transaction_date)
     _append_field(fields, "currency", expected.currency, actual.currency)
     _append_field(fields, "receiptNumber", expected.receipt_number, actual.receipt_number)
