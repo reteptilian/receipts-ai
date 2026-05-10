@@ -158,6 +158,10 @@ _RECEIPT_OLLAMA_OUTPUT_SCHEMA: dict[str, object] = {
         },
         "merchantName": {"type": "string"},
         "merchantAddress": {"type": "string"},
+        "locationId": {
+            "type": "string",
+            "description": "location id for a multi-location merchant (also known as Outlet Id or Unit Number)",
+        },
         "transactionDate": {
             "type": "string",
             "format": "date",
@@ -304,9 +308,7 @@ def _visionkit_text_line_summary(line: _VisionKitTextLine) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Analyze one or more receipts."
-    )
+    parser = argparse.ArgumentParser(description="Analyze one or more receipts.")
     parser.add_argument(
         "receipts",
         metavar="receipt",
@@ -656,7 +658,9 @@ def _transaction_from_visionkit_ollama_receipt(
 
     raw_text = "\n".join(lines)
     model = _receipt_ollama_model()
-    receipt_data = _receipt_data_from_ollama_lines(lines, raw_text=raw_text, model=model, cache=cache)
+    receipt_data = _receipt_data_from_ollama_lines(
+        lines, raw_text=raw_text, model=model, cache=cache
+    )
     receipt_data.extraction = ReceiptDataExtractionMetadata(
         pipeline=ReceiptExtractionPipeline.visionkit_ollama,
         model=f"ocrmac+{model}",
@@ -996,11 +1000,7 @@ def _visionkit_text_lines(observations: list[_VisionKitTextObservation]) -> list
                 match,
             )
         matching_line = next(
-            (
-                line
-                for line in lines
-                if _visionkit_observation_matches_line(observation, line)
-            ),
+            (line for line in lines if _visionkit_observation_matches_line(observation, line)),
             None,
         )
         if matching_line is None:
@@ -1111,7 +1111,9 @@ def _receipt_data_from_ollama_response(response: str, *, raw_text: str) -> Recei
     try:
         payload = json.loads(response)
     except json.JSONDecodeError as error:
-        raise ValueError(f"Ollama receipt extraction response was not JSON: {response[:500]}") from error
+        raise ValueError(
+            f"Ollama receipt extraction response was not JSON: {response[:500]}"
+        ) from error
 
     receipt_data = _OllamaReceiptDataExtraction.model_validate(payload)
     items = [
@@ -1164,8 +1166,7 @@ def _visionkit_ollama_receipt_prompt(lines: list[str]) -> str:
     return (
         "Extract receipt data from this OCR text.\n\n"
         "Put item-level instant savings in the item discount.\n\n"
-        "OCR:\n"
-        + "\n".join(lines)
+        "OCR:\n" + "\n".join(lines)
     )
 
 
