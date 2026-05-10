@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TypedDict, Unpack
+from typing import TypedDict, Unpack, cast
 
 import pytest
 
@@ -224,6 +224,33 @@ def test_receipt_data_from_ollama_response_maps_discount_schema_to_extraction_it
     assert receipt_data.currency == "USD"
     assert receipt_data.items[0].discount_amount == "-1.25"
     assert receipt_data.items[1].discount_amount is None
+
+
+def test_receipt_data_from_ollama_response_rejects_implausible_date_year():
+    with pytest.raises(ValueError, match="transactionDate"):
+        ingest_receipts._receipt_data_from_ollama_response(
+            json.dumps(
+                {
+                    "analysis": "Latte has no associated discount line.",
+                    "merchantName": "Coffee Shop",
+                    "transactionDate": "0420-06-20",
+                    "items": [{"description": "Latte", "amount": "7.50", "discount": "0.00"}],
+                    "subtotal": "7.50",
+                    "tax": "0.00",
+                    "total": "7.50",
+                }
+            ),
+            raw_text="Coffee Shop\nLatte 7.50",
+        )
+
+
+def test_receipt_ollama_output_schema_requires_modern_transaction_date_year():
+    schema = ingest_receipts._receipt_ollama_output_schema()
+
+    properties = cast(dict[str, object], schema["properties"])
+    transaction_date_schema = cast(dict[str, object], properties["transactionDate"])
+
+    assert transaction_date_schema["pattern"] == "^[12][0-9]{3}-[0-9]{2}-[0-9]{2}$"
 
 
 def test_visionkit_ollama_pipeline_can_disable_thinking(monkeypatch: pytest.MonkeyPatch):

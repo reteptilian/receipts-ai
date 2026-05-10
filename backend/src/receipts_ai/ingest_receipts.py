@@ -136,6 +136,7 @@ TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES: tuple[str, ...] = tuple(
 
 LOGGER = logging.getLogger(__name__)
 
+_RECEIPT_OLLAMA_DATE_PATTERN = "^[12][0-9]{3}-[0-9]{2}-[0-9]{2}$"
 _RECEIPT_OLLAMA_OUTPUT_SCHEMA: dict[str, object] = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "ReceiptData",
@@ -159,6 +160,7 @@ _RECEIPT_OLLAMA_OUTPUT_SCHEMA: dict[str, object] = {
         "transactionDate": {
             "type": "string",
             "format": "date",
+            "pattern": _RECEIPT_OLLAMA_DATE_PATTERN,
             "description": "Date in YYYY-MM-DD format",
         },
         "items": {
@@ -217,7 +219,10 @@ class _OllamaReceiptDataExtraction(BaseModel):
     analysis: str
     merchant_name: Annotated[str, Field(alias="merchantName", min_length=1)]
     merchant_address: Annotated[str | None, Field(alias="merchantAddress", min_length=1)] = None
-    transaction_date: Annotated[date, Field(alias="transactionDate")]
+    transaction_date: Annotated[
+        str,
+        Field(alias="transactionDate", pattern=_RECEIPT_OLLAMA_DATE_PATTERN),
+    ]
     items: Annotated[list[_OllamaReceiptItem], Field(min_length=1)]
     subtotal: Annotated[str, Field(pattern="^[0-9]+(\\.[0-9]{2})?$")]
     tax: Annotated[str, Field(pattern="^[0-9]+(\\.[0-9]{2})?$")]
@@ -1035,7 +1040,7 @@ def _receipt_data_from_ollama_response(response: str, *, raw_text: str) -> Recei
     receipt_data = _OllamaReceiptDataExtraction.model_validate(payload)
     return ReceiptDataExtraction(
         merchant_name=receipt_data.merchant_name,
-        transaction_date=receipt_data.transaction_date,
+        transaction_date=date.fromisoformat(receipt_data.transaction_date),
         currency="USD",
         receipt_number=None,
         subtotal=receipt_data.subtotal,
