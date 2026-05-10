@@ -183,6 +183,25 @@ class _VisionKitTextLine:
         )
 
 
+def _visionkit_text_observation_summary(observation: _VisionKitTextObservation) -> str:
+    confidence = (
+        f"{observation.confidence:.3f}" if observation.confidence is not None else "unknown"
+    )
+    return (
+        f"text={observation.text!r} conf={confidence} "
+        f"bbox=(x={observation.x:.4f}, y={observation.y:.4f}, "
+        f"w={observation.width:.4f}, h={observation.height:.4f}) "
+        f"center_y={observation.center_y:.4f}"
+    )
+
+
+def _visionkit_text_line_summary(line: _VisionKitTextLine) -> str:
+    return (
+        f"text={line.text!r} obs={len(line.observations)} "
+        f"center_y={line.center_y:.4f} height={line.height:.4f}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Analyze one or more receipts."
@@ -457,6 +476,12 @@ def _transaction_from_visionkit_ollama_receipt(
 ) -> Transaction:
     observations = _visionkit_text_observations(receipt_path)
     lines = _visionkit_text_lines(observations)
+    LOGGER.info(
+        "VisionKit OCR grouped %d observation(s) into %d line(s) for %s",
+        len(observations),
+        len(lines),
+        receipt_path,
+    )
     if not lines:
         raise ValueError(f"VisionKit OCR did not find text in {receipt_path}")
 
@@ -481,6 +506,7 @@ def _visionkit_text_observations(receipt_path: Path) -> list[_VisionKitTextObser
         ) from error
 
     with _visionkit_ocr_image_path(receipt_path) as image_path:
+        LOGGER.info("Running VisionKit OCR for %s using image %s", receipt_path, image_path)
         ocr = cast(_OcrMacOCR, ocrmac.OCR(str(image_path), recognition_level="accurate"))
         annotations = ocr.recognize()
         observations: list[_VisionKitTextObservation] = []
@@ -488,6 +514,18 @@ def _visionkit_text_observations(receipt_path: Path) -> list[_VisionKitTextObser
             observation = _visionkit_text_observation(annotation)
             if observation is not None:
                 observations.append(observation)
+        LOGGER.info(
+            "VisionKit OCR produced %d text observation(s) for %s",
+            len(observations),
+            receipt_path,
+        )
+        for index, observation in enumerate(observations, start=1):
+            LOGGER.debug(
+                "VisionKit OCR observation %d/%d: %s",
+                index,
+                len(observations),
+                _visionkit_text_observation_summary(observation),
+            )
         return observations
 
 
@@ -645,7 +683,34 @@ def _visionkit_text_observation(annotation: object) -> _VisionKitTextObservation
 
 def _visionkit_text_lines(observations: list[_VisionKitTextObservation]) -> list[str]:
     lines: list[_VisionKitTextLine] = []
-    for observation in sorted(observations, key=lambda item: item.center_y, reverse=True):
+    sorted_observations = sorted(observations, key=lambda item: item.center_y, reverse=True)
+    LOGGER.debug(
+        "Sorting %d VisionKit observation(s) by descending center_y for line grouping",
+        len(sorted_observations),
+    )
+    for index, observation in enumerate(sorted_observations, start=1):
+        LOGGER.debug(
+            "Sorted observation %d/%d: %s",
+            index,
+            len(sorted_observations),
+            _visionkit_text_observation_summary(observation),
+        )
+    for observation in sorted_observations:
+        LOGGER.debug(
+            "Grouping observation into line candidates: %s",
+            _visionkit_text_observation_summary(observation),
+        )
+        for line_index, line in enumerate(lines, start=1):
+            delta = abs(observation.center_y - line.center_y)
+            threshold = line.height / 2
+            LOGGER.debug(
+                "Comparing against line %d: %s delta_center_y=%.4f threshold=%.4f match=%s",
+                line_index,
+                _visionkit_text_line_summary(line),
+                delta,
+                threshold,
+                delta <= threshold,
+            )
         matching_line = next(
             (
                 line
@@ -655,9 +720,31 @@ def _visionkit_text_lines(observations: list[_VisionKitTextObservation]) -> list
             None,
         )
         if matching_line is None:
-            lines.append(_VisionKitTextLine(observations=[observation]))
+            new_line = _VisionKitTextLine(observations=[observation])
+            lines.append(new_line)
+            LOGGER.debug("Created new line: %s", _visionkit_text_line_summary(new_line))
         else:
             matching_line.observations.append(observation)
+            LOGGER.debug(
+                "Added observation to existing line: %s",
+                _visionkit_text_line_summary(matching_line),
+            )
+    for index, line in enumerate(lines, start=1):
+        sorted_line_observations = sorted(line.observations, key=lambda item: item.x)
+        LOGGER.debug(
+            "Final grouped line %d/%d: %s",
+            index,
+            len(lines),
+            _visionkit_text_line_summary(line),
+        )
+        for observation_index, observation in enumerate(sorted_line_observations, start=1):
+            LOGGER.debug(
+                "  line %d observation %d/%d: %s",
+                index,
+                observation_index,
+                len(sorted_line_observations),
+                _visionkit_text_observation_summary(observation),
+            )
     return [line.text for line in lines if line.text]
 
 
