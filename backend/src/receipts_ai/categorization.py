@@ -151,6 +151,19 @@ class UrlLibOllamaClient:
             prompt, options={"temperature": 0, "num_predict": 64, "stop": ["\n"]}
         ).response
 
+    def complete_structured(
+        self,
+        prompt: str,
+        *,
+        output_format: dict[str, object],
+        options: dict[str, object] | None = None,
+    ) -> str:
+        return self._generate(
+            prompt,
+            options=options or {"temperature": 0},
+            output_format=output_format,
+        ).response
+
     def complete_choice(self, prompt: str, *, choices: tuple[str, ...]) -> str:
         if not choices:
             raise ValueError("choices must not be empty")
@@ -1343,6 +1356,7 @@ def _transaction_product_taxonomy_prompt(
         f"Raw transaction description: {_transaction_description_text(transaction)}\n\n"
         f"{_transaction_merchant_category_text(transaction)}"
         f"Search results:\n{_transaction_search_results_text(transaction)}\n"
+        f"Candidate labels:\n{candidate_paths}\n"
         "Choice: "
     )
 

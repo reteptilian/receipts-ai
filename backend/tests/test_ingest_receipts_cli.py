@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# pyright: reportPrivateUsage=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
 import csv
 import hashlib
 import json
@@ -9,6 +10,7 @@ import sys
 from datetime import UTC, date, datetime
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TypedDict, Unpack
 
 import pytest
@@ -60,6 +62,170 @@ def ReceiptItem(**kwargs: Unpack[ReceiptItemKwargs]) -> GeneratedReceiptItem:  #
     if "amount" in kwargs and "net_amount" not in kwargs:
         kwargs["net_amount"] = kwargs["amount"]
     return GeneratedReceiptItem(**kwargs)
+
+
+def test_visionkit_text_lines_groups_observations_top_to_bottom_and_left_to_right():
+    observations = [
+        ingest_receipts._VisionKitTextObservation(
+            text="TOTAL", confidence=0.9, x=0.1, y=0.1, width=0.2, height=0.08
+        ),
+        ingest_receipts._VisionKitTextObservation(
+            text="2.50", confidence=0.9, x=0.7, y=0.12, width=0.1, height=0.08
+        ),
+        ingest_receipts._VisionKitTextObservation(
+            text="Coffee", confidence=0.9, x=0.2, y=0.72, width=0.2, height=0.1
+        ),
+        ingest_receipts._VisionKitTextObservation(
+            text="Shop", confidence=0.9, x=0.5, y=0.74, width=0.2, height=0.1
+        ),
+    ]
+
+    assert ingest_receipts._visionkit_text_lines(observations) == [
+        "Coffee Shop",
+        "TOTAL 2.50",
+    ]
+
+
+def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    receipt_path = tmp_path / "receipt.png"
+    receipt_path.write_bytes(b"image")
+    requests: list[dict[str, object]] = []
+
+    class FakeOllamaClient:
+        def __init__(self, *, url: str, model: str, timeout_seconds: float) -> None:
+            requests.append({"url": url, "model": model, "timeout_seconds": timeout_seconds})
+
+        def complete_structured(
+            self,
+            prompt: str,
+            *,
+            options: dict[str, object],
+            output_format: dict[str, object],
+        ) -> str:
+            requests.append(
+                {"prompt": prompt, "options": options, "output_format": output_format}
+            )
+            return json.dumps(
+                {
+                    "merchantName": "Coffee Shop",
+                    "transactionDate": "2026-05-09",
+                    "currency": "USD",
+                    "total": "7.50",
+                    "items": [{"description": "Latte", "amount": "7.50"}],
+                }
+            )
+
+    monkeypatch.setattr(
+        ingest_receipts,
+        "_visionkit_text_observations",
+        lambda _path: [
+            ingest_receipts._VisionKitTextObservation(
+                text="Coffee Shop", confidence=0.8, x=0.1, y=0.8, width=0.5, height=0.1
+            ),
+            ingest_receipts._VisionKitTextObservation(
+                text="Latte 7.50", confidence=0.6, x=0.1, y=0.6, width=0.5, height=0.1
+            ),
+        ],
+    )
+    monkeypatch.setattr(ingest_receipts, "UrlLibOllamaClient", FakeOllamaClient)
+    monkeypatch.setenv("OLLAMA_URL", "http://ollama.test")
+    monkeypatch.setenv("VISIONKIT_OLLAMA_MODEL", "gemma4:e4b")
+    monkeypatch.delenv("OLLAMA_RECEIPT_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL_NAME", raising=False)
+
+    transaction = ingest_receipts._process_receipt(
+        receipt_path, pipeline="visionkit_ollama", cache=None
+    )
+
+    assert transaction.payee == "Coffee Shop"
+    assert transaction.transaction_date == date(2026, 5, 9)
+    assert transaction.amount == "-7.50"
+    assert transaction.ingestion_filename == "receipt.png"
+    assert transaction.ingestion_type == "receipt_img"
+    assert transaction.record_type == "receipt_based"
+    assert transaction.receipt is not None
+    assert transaction.receipt.extraction is not None
+    assert transaction.receipt.extraction.model == "ocrmac+gemma4:e4b"
+    assert transaction.receipt.extraction.confidence == 0.7
+    assert transaction.receipt.extraction.raw_text == "Coffee Shop\nLatte 7.50"
+    assert transaction.receipt.items[0].description == "Latte"
+    assert requests[0]["model"] == "gemma4:e4b"
+    assert "OCR:\nCoffee Shop\nLatte 7.50" in str(requests[1]["prompt"])
+    assert requests[1]["options"] == {"temperature": 0}
+    assert isinstance(requests[1]["output_format"], dict)
+
+
+def test_visionkit_pdf_ocr_image_path_renders_single_page_pdf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pdf_path = tmp_path / "receipt.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    calls: list[tuple[Path, Path]] = []
+
+    def fake_render(input_path: Path, output_path: Path) -> None:
+        calls.append((input_path, output_path))
+        output_path.write_bytes(b"png")
+
+    monkeypatch.setattr(ingest_receipts, "_pdf_page_count", lambda _path: 1)
+    monkeypatch.setattr(ingest_receipts, "_render_pdf_first_page_to_png", fake_render)
+
+    with ingest_receipts._visionkit_ocr_image_path(pdf_path) as image_path:
+        assert image_path.name == "page-1.png"
+        assert image_path.read_bytes() == b"png"
+
+    assert calls == [(pdf_path, calls[0][1])]
+    assert not calls[0][1].exists()
+
+
+def test_visionkit_pdf_ocr_image_path_rejects_multi_page_pdf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pdf_path = tmp_path / "receipt.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(ingest_receipts, "_pdf_page_count", lambda _path: 2)
+
+    with pytest.raises(ValueError, match="only supports single-page PDFs"):
+        with ingest_receipts._visionkit_ocr_image_path(pdf_path):
+            pass
+
+
+def test_visionkit_text_observations_ocr_pdf_rendered_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pdf_path = tmp_path / "receipt.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    ocr_paths: list[Path] = []
+
+    def fake_render(_input_path: Path, output_path: Path) -> None:
+        output_path.write_bytes(b"png")
+
+    class FakeOCR:
+        def __init__(self, image: str, *, recognition_level: str) -> None:
+            assert recognition_level == "accurate"
+            ocr_paths.append(Path(image))
+
+        def recognize(self) -> list[tuple[str, float, tuple[float, float, float, float]]]:
+            return [("Coffee", 0.9, (0.1, 0.2, 0.3, 0.4))]
+
+    monkeypatch.setattr(ingest_receipts, "_pdf_page_count", lambda _path: 1)
+    monkeypatch.setattr(ingest_receipts, "_render_pdf_first_page_to_png", fake_render)
+    monkeypatch.setitem(
+        sys.modules,
+        "ocrmac",
+        SimpleNamespace(ocrmac=SimpleNamespace(OCR=FakeOCR)),
+    )
+
+    observations = ingest_receipts._visionkit_text_observations(pdf_path)
+
+    assert [observation.text for observation in observations] == ["Coffee"]
+    assert ocr_paths[0].name == "page-1.png"
 
 
 def test_writes_one_csv_row_per_receipt_item():

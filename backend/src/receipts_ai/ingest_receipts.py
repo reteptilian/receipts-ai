@@ -3,13 +3,20 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib
 import json
 import logging
 import sys
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, TextIO
+from tempfile import TemporaryDirectory
+from typing import Annotated, Any, Protocol, TextIO, cast
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from receipts_ai.brave_search import (
     CachedBraveSearchClient,
@@ -18,22 +25,37 @@ from receipts_ai.brave_search import (
 )
 from receipts_ai.cache import SqliteCallCache
 from receipts_ai.categorization import (
+    DEFAULT_OLLAMA_TIMEOUT_SECONDS,
+    DEFAULT_OLLAMA_URL,
+    OLLAMA_TIMEOUT_ENV_VARS,
+    OLLAMA_URL_ENV_VARS,
     CachedCategoryModelClient,
     CategoryModelClient,
+    UrlLibOllamaClient,
     categorize_receipt_items,
     classify_receipt_items_by_product_taxonomy,
     classify_receipt_items_by_product_taxonomy_vector_search,
     clean_receipt_item_descriptions,
     create_ollama_category_client,
 )
+from receipts_ai.config import first_config_value
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.firestore_client import (
     DEFAULT_FIRESTORE_COLLECTION,
     FirestoreClient,
     create_firestore_client,
 )
+from receipts_ai.models.receipt_data_extraction import (
+    ExtractedReceiptItem,
+    ReceiptDataExtraction,
+    ReceiptDataExtractionMetadata,
+    ReceiptExtractionPipeline,
+)
 from receipts_ai.models.transaction import IngestionType, Receipt, RecordType, Transaction
-from receipts_ai.receipt_extraction import transaction_from_document_intelligence_result
+from receipts_ai.receipt_extraction import (
+    transaction_from_document_intelligence_result,
+    transaction_from_receipt_data,
+)
 from receipts_ai.taxonomy import (
     MAX_TAXONOMY_LEVELS,
     effective_receipt_item_taxonomy,
@@ -42,7 +64,15 @@ from receipts_ai.taxonomy import (
 )
 from receipts_ai.transactions import transaction_combined_description
 
-RECEIPT_PIPELINES: tuple[str, ...] = ("azure",)
+RECEIPT_PIPELINES: tuple[str, ...] = ("azure", "visionkit_ollama")
+DEFAULT_RECEIPT_OLLAMA_MODEL = "gemma4:e4b"
+RECEIPT_OLLAMA_MODEL_ENV_VARS = (
+    "VISIONKIT_OLLAMA_MODEL",
+    "OLLAMA_RECEIPT_MODEL",
+    "OLLAMA_MODEL",
+    "OLLAMA_MODEL_NAME",
+)
+VISIONKIT_OLLAMA_CACHE_VERSION = "visionkit_ollama_receipt_v1"
 CSV_FIELDNAMES: tuple[str, ...] = (
     "transaction_id",
     "transaction_date",
@@ -97,6 +127,58 @@ TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES: tuple[str, ...] = tuple(
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+class _OllamaReceiptDataExtraction(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    merchant_name: Annotated[str, Field(alias="merchantName", min_length=1)]
+    transaction_date: Annotated[date, Field(alias="transactionDate")]
+    currency: Annotated[str, Field(pattern="^[A-Z]{3}$")] = "USD"
+    receipt_number: Annotated[str | None, Field(alias="receiptNumber", min_length=1)] = None
+    subtotal: str | None = None
+    total_tax: Annotated[str | None, Field(alias="totalTax")] = None
+    total: str
+    items: Annotated[list[ExtractedReceiptItem], Field(min_length=1)]
+
+
+class _OcrMacOCR(Protocol):
+    def recognize(self, px: bool = False) -> list[object]: ...
+
+
+@dataclass(frozen=True)
+class _VisionKitTextObservation:
+    text: str
+    confidence: float | None
+    x: float
+    y: float
+    width: float
+    height: float
+
+    @property
+    def center_y(self) -> float:
+        return self.y + self.height / 2
+
+
+@dataclass
+class _VisionKitTextLine:
+    observations: list[_VisionKitTextObservation]
+
+    @property
+    def center_y(self) -> float:
+        return sum(observation.center_y for observation in self.observations) / len(
+            self.observations
+        )
+
+    @property
+    def height(self) -> float:
+        return max(observation.height for observation in self.observations)
+
+    @property
+    def text(self) -> str:
+        return " ".join(
+            observation.text for observation in sorted(self.observations, key=lambda item: item.x)
+        )
 
 
 def main() -> None:
@@ -331,6 +413,15 @@ def _process_receipt(
             ingestion_type=IngestionType.receipt_img,
         )
 
+    if pipeline == "visionkit_ollama":
+        return populate_transaction_ingestion_metadata(
+            _transaction_from_visionkit_ollama_receipt(receipt_path, cache=cache),
+            ingestion_filename=receipt_path.name,
+            ingestion_file_url=file_url_from_path(receipt_path),
+            ingestion_file_sha256_hex=sha256_hex(receipt_path.read_bytes()),
+            ingestion_type=IngestionType.receipt_img,
+        )
+
     raise ValueError(f"unsupported receipt pipeline: {pipeline}")
 
 
@@ -345,6 +436,340 @@ def _transaction_from_azure_receipt(
         else analyze_receipt_file(receipt_path)
     )
     return transaction_from_document_intelligence_result(result)
+
+
+def _transaction_from_visionkit_ollama_receipt(
+    receipt_path: Path,
+    *,
+    cache: SqliteCallCache | None,
+) -> Transaction:
+    observations = _visionkit_text_observations(receipt_path)
+    lines = _visionkit_text_lines(observations)
+    if not lines:
+        raise ValueError(f"VisionKit OCR did not find text in {receipt_path}")
+
+    raw_text = "\n".join(lines)
+    model = _receipt_ollama_model()
+    receipt_data = _receipt_data_from_ollama_lines(lines, raw_text=raw_text, model=model, cache=cache)
+    receipt_data.extraction = ReceiptDataExtractionMetadata(
+        pipeline=ReceiptExtractionPipeline.visionkit_ollama,
+        model=f"ocrmac+{model}",
+        confidence=_mean_confidence(observations),
+        raw_text=raw_text,
+    )
+    return transaction_from_receipt_data(receipt_data)
+
+
+def _visionkit_text_observations(receipt_path: Path) -> list[_VisionKitTextObservation]:
+    try:
+        from ocrmac import ocrmac
+    except ImportError as error:
+        raise RuntimeError(
+            "The visionkit_ollama pipeline requires ocrmac. Install it with `uv add ocrmac`."
+        ) from error
+
+    with _visionkit_ocr_image_path(receipt_path) as image_path:
+        ocr = cast(_OcrMacOCR, ocrmac.OCR(str(image_path), recognition_level="accurate"))
+        annotations = ocr.recognize()
+        observations: list[_VisionKitTextObservation] = []
+        for annotation in annotations:
+            observation = _visionkit_text_observation(annotation)
+            if observation is not None:
+                observations.append(observation)
+        return observations
+
+
+@contextmanager
+def _visionkit_ocr_image_path(receipt_path: Path) -> Generator[Path, None, None]:
+    if receipt_path.suffix.lower() != ".pdf":
+        yield receipt_path
+        return
+
+    page_count = _pdf_page_count(receipt_path)
+    if page_count == 0:
+        raise ValueError(f"PDF receipt does not contain any pages: {receipt_path}")
+    if page_count > 1:
+        raise ValueError(
+            f"visionkit_ollama only supports single-page PDFs for now; "
+            f"{receipt_path} has {page_count} pages"
+        )
+
+    with TemporaryDirectory(prefix="receipts-ai-pdf-") as temp_dir:
+        image_path = Path(temp_dir) / "page-1.png"
+        _render_pdf_first_page_to_png(receipt_path, image_path)
+        yield image_path
+
+
+def _pdf_page_count(pdf_path: Path) -> int:
+    try:
+        quartz = _quartz_module()
+    except ImportError as error:
+        raise RuntimeError("PDF input for visionkit_ollama requires PyObjC Quartz.") from error
+
+    document = _quartz_pdf_document(quartz, pdf_path)
+    return int(quartz.CGPDFDocumentGetNumberOfPages(document))
+
+
+def _render_pdf_first_page_to_png(
+    pdf_path: Path,
+    output_path: Path,
+    *,
+    dpi: int = 200,
+) -> None:
+    try:
+        quartz = _quartz_module()
+    except ImportError as error:
+        raise RuntimeError("PDF input for visionkit_ollama requires PyObjC Quartz.") from error
+
+    document = _quartz_pdf_document(quartz, pdf_path)
+    page = quartz.CGPDFDocumentGetPage(document, 1)
+    if page is None:
+        raise ValueError(f"PDF receipt does not contain page 1: {pdf_path}")
+
+    media_box = quartz.CGPDFPageGetBoxRect(page, quartz.kCGPDFMediaBox)
+    width_points = float(media_box.size.width)
+    height_points = float(media_box.size.height)
+    scale = dpi / 72
+    width_pixels = max(1, round(width_points * scale))
+    height_pixels = max(1, round(height_points * scale))
+
+    color_space = quartz.CGColorSpaceCreateDeviceRGB()
+    context = quartz.CGBitmapContextCreate(
+        None,
+        width_pixels,
+        height_pixels,
+        8,
+        0,
+        color_space,
+        quartz.kCGImageAlphaPremultipliedLast,
+    )
+    if context is None:
+        raise RuntimeError(f"Could not create bitmap context for PDF receipt: {pdf_path}")
+
+    output_rect = quartz.CGRectMake(0, 0, width_pixels, height_pixels)
+    quartz.CGContextSetRGBFillColor(context, 1, 1, 1, 1)
+    quartz.CGContextFillRect(context, output_rect)
+    quartz.CGContextScaleCTM(context, scale, scale)
+    transform = quartz.CGPDFPageGetDrawingTransform(
+        page,
+        quartz.kCGPDFMediaBox,
+        quartz.CGRectMake(0, 0, width_points, height_points),
+        0,
+        True,
+    )
+    quartz.CGContextConcatCTM(context, transform)
+    quartz.CGContextDrawPDFPage(context, page)
+
+    image = quartz.CGBitmapContextCreateImage(context)
+    if image is None:
+        raise RuntimeError(f"Could not render PDF receipt page: {pdf_path}")
+
+    output_url = _quartz_file_url(quartz, output_path)
+    destination = quartz.CGImageDestinationCreateWithURL(output_url, "public.png", 1, None)
+    if destination is None:
+        raise RuntimeError(f"Could not create PNG destination: {output_path}")
+    quartz.CGImageDestinationAddImage(destination, image, None)
+    if not quartz.CGImageDestinationFinalize(destination):
+        raise RuntimeError(f"Could not write rendered PDF page to {output_path}")
+
+
+def _quartz_module() -> Any:
+    return importlib.import_module("Quartz")
+
+
+def _quartz_pdf_document(quartz: Any, pdf_path: Path) -> Any:
+    document = quartz.CGPDFDocumentCreateWithURL(_quartz_file_url(quartz, pdf_path))
+    if document is None:
+        raise ValueError(f"Could not open PDF receipt: {pdf_path}")
+    return document
+
+
+def _quartz_file_url(quartz: Any, path: Path) -> Any:
+    path_bytes = str(path.resolve()).encode("utf-8")
+    return quartz.CFURLCreateFromFileSystemRepresentation(
+        None,
+        path_bytes,
+        len(path_bytes),
+        False,
+    )
+
+
+def _visionkit_text_observation(annotation: object) -> _VisionKitTextObservation | None:
+    if not isinstance(annotation, tuple | list):
+        return None
+
+    values = cast(tuple[object, ...] | list[object], annotation)
+    if len(values) < 3:
+        return None
+
+    text = values[0]
+    confidence = values[1]
+    bounding_box = values[2]
+    if not isinstance(text, str) or not text.strip():
+        return None
+    if not isinstance(bounding_box, tuple | list):
+        return None
+
+    box = cast(tuple[object, ...] | list[object], bounding_box)
+    if len(box) < 4:
+        return None
+
+    x = _float_or_none(box[0])
+    y = _float_or_none(box[1])
+    width = _float_or_none(box[2])
+    height = _float_or_none(box[3])
+    if x is None or y is None or width is None or height is None or height <= 0:
+        return None
+
+    return _VisionKitTextObservation(
+        text=text.strip(),
+        confidence=_float_or_none(confidence),
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+    )
+
+
+def _visionkit_text_lines(observations: list[_VisionKitTextObservation]) -> list[str]:
+    lines: list[_VisionKitTextLine] = []
+    for observation in sorted(observations, key=lambda item: item.center_y, reverse=True):
+        matching_line = next(
+            (
+                line
+                for line in lines
+                if abs(observation.center_y - line.center_y) <= line.height / 2
+            ),
+            None,
+        )
+        if matching_line is None:
+            lines.append(_VisionKitTextLine(observations=[observation]))
+        else:
+            matching_line.observations.append(observation)
+    return [line.text for line in lines if line.text]
+
+
+def _receipt_data_from_ollama_lines(
+    lines: list[str],
+    *,
+    raw_text: str,
+    model: str,
+    cache: SqliteCallCache | None,
+) -> ReceiptDataExtraction:
+    schema = _OllamaReceiptDataExtraction.model_json_schema(by_alias=True)
+    prompt = _visionkit_ollama_receipt_prompt(lines)
+    request = {
+        "version": VISIONKIT_OLLAMA_CACHE_VERSION,
+        "model": model,
+        "prompt": prompt,
+        "format": schema,
+    }
+    if cache is not None:
+        cached_response = cache.get("ollama_receipt_extraction", request)
+        if isinstance(cached_response, str):
+            LOGGER.info("Using cached Ollama receipt extraction: line_count=%s", len(lines))
+            return _receipt_data_from_ollama_response(cached_response, raw_text=raw_text)
+
+    response = UrlLibOllamaClient(
+        url=_ollama_url(),
+        model=model,
+        timeout_seconds=_ollama_timeout_seconds(),
+    ).complete_structured(
+        prompt,
+        options={"temperature": 0},
+        output_format=schema,
+    )
+    if cache is not None:
+        cache.set("ollama_receipt_extraction", request, response)
+        LOGGER.info("Cached Ollama receipt extraction: line_count=%s", len(lines))
+    return _receipt_data_from_ollama_response(response, raw_text=raw_text)
+
+
+def _receipt_data_from_ollama_response(response: str, *, raw_text: str) -> ReceiptDataExtraction:
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Ollama receipt extraction response was not JSON: {response[:500]}") from error
+
+    receipt_data = _OllamaReceiptDataExtraction.model_validate(payload)
+    return ReceiptDataExtraction(
+        merchant_name=receipt_data.merchant_name,
+        transaction_date=receipt_data.transaction_date,
+        currency=receipt_data.currency,
+        receipt_number=receipt_data.receipt_number,
+        subtotal=receipt_data.subtotal,
+        total_tax=receipt_data.total_tax,
+        total=receipt_data.total,
+        items=[
+            ExtractedReceiptItem(
+                description=item.description,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                amount=item.amount,
+                discount_amount=item.discount_amount,
+                discount_description=item.discount_description,
+                line_type=item.line_type,
+                confidence=item.confidence,
+            )
+            for item in receipt_data.items
+        ],
+        extraction=ReceiptDataExtractionMetadata(
+            pipeline=ReceiptExtractionPipeline.visionkit_ollama,
+            model=None,
+            confidence=None,
+            raw_text=raw_text,
+        ),
+    )
+
+
+def _visionkit_ollama_receipt_prompt(lines: list[str]) -> str:
+    return (
+        "Extract receipt JSON. Amounts are strings without currency. "
+        "Dates YYYY-MM-DD. currency ISO. Optional unknown=null. "
+        "items are purchase lines; include tax/tip/discount lines only when shown.\n"
+        "OCR:\n"
+        + "\n".join(lines)
+    )
+
+
+def _receipt_ollama_model() -> str:
+    return first_config_value(RECEIPT_OLLAMA_MODEL_ENV_VARS, DEFAULT_RECEIPT_OLLAMA_MODEL) or (
+        DEFAULT_RECEIPT_OLLAMA_MODEL
+    )
+
+
+def _ollama_url() -> str:
+    return first_config_value(OLLAMA_URL_ENV_VARS, DEFAULT_OLLAMA_URL) or DEFAULT_OLLAMA_URL
+
+
+def _ollama_timeout_seconds() -> float:
+    for config_key in OLLAMA_TIMEOUT_ENV_VARS:
+        value = first_config_value((config_key,))
+        if value is None:
+            continue
+        try:
+            timeout_seconds = float(value)
+        except ValueError as error:
+            raise RuntimeError(f"{config_key} must be a number") from error
+        if timeout_seconds <= 0:
+            raise RuntimeError(f"{config_key} must be greater than 0")
+        return timeout_seconds
+    return DEFAULT_OLLAMA_TIMEOUT_SECONDS
+
+
+def _mean_confidence(observations: list[_VisionKitTextObservation]) -> float | None:
+    confidences = [
+        observation.confidence for observation in observations if observation.confidence is not None
+    ]
+    if not confidences:
+        return None
+    return sum(confidences) / len(confidences)
+
+
+def _float_or_none(value: object) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    return None
 
 
 def upsert_transaction_to_firestore(

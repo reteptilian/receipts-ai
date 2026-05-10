@@ -43,6 +43,7 @@ dependencies = [
     "firebase-admin>=7.4.0",
     "google-api-python-client>=2.196.0",
     "gspread>=6.2.1",
+    "ocrmac>=1.0.1",
     "pydantic>=2.12.5",
     "sentence-transformers>=5.0.0",
 ]
