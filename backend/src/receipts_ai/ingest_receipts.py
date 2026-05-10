@@ -58,6 +58,7 @@ from receipts_ai.receipt_extraction import (
     transaction_from_document_intelligence_result,
     transaction_from_receipt_data,
 )
+from receipts_ai.review_store import ReceiptReviewStore
 from receipts_ai.taxonomy import (
     MAX_TAXONOMY_LEVELS,
     effective_receipt_item_taxonomy,
@@ -375,6 +376,19 @@ def main() -> None:
         help="Cache Azure Document Intelligence, Brave Search, and Ollama responses in this SQLite database.",
     )
     parser.add_argument(
+        "--review-db",
+        type=Path,
+        help=(
+            "SQLite review database. When reviewed data exists for a receipt image SHA, "
+            "use it instead of running the selected extraction pipeline."
+        ),
+    )
+    parser.add_argument(
+        "--ignore-reviewed",
+        action="store_true",
+        help="Run the selected extraction pipeline even when --review-db contains reviewed data.",
+    )
+    parser.add_argument(
         "--upsert-firestore",
         action="store_true",
         help=(
@@ -416,6 +430,11 @@ def main() -> None:
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
     cache = SqliteCallCache(args.cache_file) if args.cache_file is not None else None
+    review_store = (
+        ReceiptReviewStore(args.review_db)
+        if args.review_db is not None and not args.ignore_reviewed
+        else None
+    )
     category_client = (
         CachedCategoryModelClient(cache=cache, client_factory=create_ollama_category_client)
         if cache is not None
@@ -429,12 +448,21 @@ def main() -> None:
             if args.visionkit_ocr_debug_image_folder is not None
             else None
         )
-        transaction = _process_receipt(
-            receipt_path,
-            pipeline=args.pipeline,
-            cache=cache,
-            visionkit_ocr_debug_image_path=visionkit_ocr_debug_image_path,
-        )
+        if review_store is None:
+            transaction = _process_receipt(
+                receipt_path,
+                pipeline=args.pipeline,
+                cache=cache,
+                visionkit_ocr_debug_image_path=visionkit_ocr_debug_image_path,
+            )
+        else:
+            transaction = _process_receipt(
+                receipt_path,
+                pipeline=args.pipeline,
+                cache=cache,
+                visionkit_ocr_debug_image_path=visionkit_ocr_debug_image_path,
+                review_store=review_store,
+            )
         if transaction.receipt is None:
             raise ValueError(f"transaction from {receipt_path} does not contain a receipt")
         if not transaction_is_on_or_after(transaction, args.after):
@@ -553,9 +581,21 @@ def _process_receipt(
     pipeline: str,
     cache: SqliteCallCache | None,
     visionkit_ocr_debug_image_path: Path | None = None,
+    review_store: ReceiptReviewStore | None = None,
 ) -> Transaction:
     receipt_content = receipt_path.read_bytes()
     receipt_sha256_hex = sha256_hex(receipt_content)
+    if review_store is not None:
+        reviewed_receipt_data = review_store.reviewed_receipt_data(receipt_sha256_hex)
+        if reviewed_receipt_data is not None:
+            LOGGER.info("Using reviewed receipt data for %s", receipt_path)
+            return populate_transaction_ingestion_metadata(
+                transaction_from_receipt_data(reviewed_receipt_data),
+                ingestion_filename=receipt_path.name,
+                ingestion_file_url=file_url_from_path(receipt_path),
+                ingestion_file_sha256_hex=receipt_sha256_hex,
+                ingestion_type=IngestionType.receipt_img,
+            )
     if pipeline == "azure":
         return populate_transaction_ingestion_metadata(
             _transaction_from_azure_receipt(receipt_path, cache=cache),

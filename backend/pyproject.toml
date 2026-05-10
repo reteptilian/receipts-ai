@@ -46,6 +46,7 @@ dependencies = [
     "ocrmac>=1.0.1",
     "pydantic>=2.12.5",
     "sentence-transformers>=5.0.0",
+    "streamlit>=1.57.0",
 ]
 
 
@@ -70,6 +71,7 @@ receipts-ai-download-google-drive-folder = "receipts_ai.download_google_drive_fo
 receipts-ai-ingest-amazon = "receipts_ai.ingest_amazon:main"
 receipts-ai-ingest-receipts = "receipts_ai.ingest_receipts:main"
 receipts-ai-ingest-statements = "receipts_ai.ingest_statements:main"
+receipts-ai-review = "receipts_ai.review_cli:main"
 
 
 # ---- Build system ----
