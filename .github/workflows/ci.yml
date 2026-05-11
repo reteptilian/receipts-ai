@@ -23,7 +23,7 @@ jobs:
           - name: backend
             os: macos-latest
           - name: cli
-            os: ubuntu-latest
+            os: macos-latest
         python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     runs-on: ${{ matrix.project.os }}
