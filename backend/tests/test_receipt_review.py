@@ -364,6 +364,61 @@ def test_sanity_check_failures_pass_when_amounts_balance():
     )
 
 
+def test_sanity_check_failures_use_total_minus_tax_when_subtotal_is_missing():
+    items = [
+        {"amount": "10.00", "discount_amount": "-2.00", "line_type": "item"},
+        {"amount": "1.00", "discount_amount": None, "line_type": "tax"},
+    ]
+
+    assert (
+        _sanity_check_failures(
+            subtotal=None,
+            total_tax="1.00",
+            total="9.00",
+            items=items,
+        )
+        == []
+    )
+
+
+def test_sanity_check_failures_report_total_minus_tax_item_mismatch():
+    items = [
+        {"amount": "10.00", "discount_amount": "-2.00", "line_type": "item"},
+        {"amount": "1.00", "discount_amount": None, "line_type": "tax"},
+    ]
+
+    failures = _sanity_check_failures(
+        subtotal=None,
+        total_tax="1.00",
+        total="12.00",
+        items=items,
+    )
+
+    assert failures == [
+        {
+            "check": "total minus tax = sum(item net amounts)",
+            "expected": "8.00",
+            "actual": "11.00",
+        },
+    ]
+
+
+def test_sanity_check_failures_use_zero_tax_for_total_minus_tax_check():
+    items = [
+        {"amount": "8.00", "discount_amount": None, "line_type": "item"},
+    ]
+
+    assert (
+        _sanity_check_failures(
+            subtotal=None,
+            total_tax=None,
+            total="8.00",
+            items=items,
+        )
+        == []
+    )
+
+
 def test_sanity_check_failures_report_missing_tax_line_item():
     items = [
         {"amount": "10.00", "discount_amount": None, "line_type": "item"},

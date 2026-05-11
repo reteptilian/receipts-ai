@@ -563,6 +563,16 @@ def _sanity_check_failures(
                     "actual": _money_text(parsed_subtotal),
                 }
             )
+    elif parsed_total is not None and parsed_tax is not None and item_net_total is not None:
+        expected_item_total = parsed_total - parsed_tax
+        if _money_mismatch(expected_item_total, item_net_total):
+            failures.append(
+                {
+                    "check": "total minus tax = sum(item net amounts)",
+                    "expected": _money_text(item_net_total),
+                    "actual": _money_text(expected_item_total),
+                }
+            )
 
     tax_line_total = _tax_line_total_or_failure(items, failures)
     if parsed_tax is not None and tax_line_total is not None:
