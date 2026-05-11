@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+# pyright: reportPrivateUsage=false
 import logging
 from argparse import Namespace
 from datetime import date
@@ -81,10 +84,14 @@ def test_configure_logging_without_log_file_stays_off_terminal() -> None:
 
 def test_log_firestore_configuration_logs_emulator(caplog: pytest.LogCaptureFixture) -> None:
     with patch("receipts_ai_cli.app.config_value") as mock_config_value:
-        mock_config_value.side_effect = lambda key: {
-            "FIRESTORE_EMULATOR_HOST": "127.0.0.1:8080",
-            "FIREBASE_SERVICE_ACCT_KEY_FILEPATH": None,
-        }[key]
+
+        def fake_config_value(key: str) -> str | None:
+            return {
+                "FIRESTORE_EMULATOR_HOST": "127.0.0.1:8080",
+                "FIREBASE_SERVICE_ACCT_KEY_FILEPATH": None,
+            }[key]
+
+        mock_config_value.side_effect = fake_config_value
 
         with caplog.at_level(logging.INFO):
             _log_firestore_configuration()
@@ -94,10 +101,14 @@ def test_log_firestore_configuration_logs_emulator(caplog: pytest.LogCaptureFixt
 
 def test_log_firestore_configuration_logs_service_account(caplog: pytest.LogCaptureFixture) -> None:
     with patch("receipts_ai_cli.app.config_value") as mock_config_value:
-        mock_config_value.side_effect = lambda key: {
-            "FIRESTORE_EMULATOR_HOST": None,
-            "FIREBASE_SERVICE_ACCT_KEY_FILEPATH": "/tmp/firebase.json",
-        }[key]
+
+        def fake_config_value(key: str) -> str | None:
+            return {
+                "FIRESTORE_EMULATOR_HOST": None,
+                "FIREBASE_SERVICE_ACCT_KEY_FILEPATH": "/tmp/firebase.json",
+            }[key]
+
+        mock_config_value.side_effect = fake_config_value
 
         with caplog.at_level(logging.INFO):
             _log_firestore_configuration()
@@ -112,10 +123,13 @@ def test_main_configures_logging_then_runs_app(monkeypatch: pytest.MonkeyPatch) 
     parse_args_result = Namespace(log_file=None, log_level="INFO")
     configure_calls: list[tuple[str, Path | None]] = []
 
+    def fake_configure_logging(*, log_level: str, log_file: Path | None) -> None:
+        configure_calls.append((log_level, log_file))
+
     monkeypatch.setattr("receipts_ai_cli.app._parse_args", lambda: parse_args_result)
     monkeypatch.setattr(
         "receipts_ai_cli.app._configure_logging",
-        lambda *, log_level, log_file: configure_calls.append((log_level, log_file)),
+        fake_configure_logging,
     )
 
     firestore_calls = 0
@@ -125,7 +139,7 @@ def test_main_configures_logging_then_runs_app(monkeypatch: pytest.MonkeyPatch) 
         nonlocal firestore_calls
         firestore_calls += 1
 
-    def fake_run(self: ReceiptsAIApp) -> None:
+    def fake_run(_self: ReceiptsAIApp) -> None:
         nonlocal run_calls
         run_calls += 1
 
@@ -858,9 +872,7 @@ async def test_receipt_item_taxonomy_uses_advanced_taxonomy_picker() -> None:
 
         def exact_matches(self, query: str) -> tuple[str, ...]:
             folded_query = query.casefold()
-            return tuple(
-                choice for choice in self.choices if folded_query in choice.casefold()
-            )
+            return tuple(choice for choice in self.choices if folded_query in choice.casefold())
 
         def semantic_matches(self, query: str) -> tuple[str, ...]:
             if query == "gaming screen":
@@ -955,9 +967,7 @@ async def test_transaction_taxonomy_uses_advanced_taxonomy_picker_and_can_clear(
 
         def exact_matches(self, query: str) -> tuple[str, ...]:
             folded_query = query.casefold()
-            return tuple(
-                choice for choice in self.choices if folded_query in choice.casefold()
-            )
+            return tuple(choice for choice in self.choices if folded_query in choice.casefold())
 
         def semantic_matches(self, query: str) -> tuple[str, ...]:
             if query == "coffee beans":

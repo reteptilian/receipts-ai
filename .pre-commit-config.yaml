@@ -7,3 +7,9 @@ repos:
         language: system
         files: ^backend/
         pass_filenames: false
+      - id: cli-lint
+        name: CLI Lint
+        entry: bash -c "cd cli && make lint"
+        language: system
+        files: ^cli/
+        pass_filenames: false

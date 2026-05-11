@@ -42,7 +42,9 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Textual CLI for reviewing receipts-ai transactions.")
+    parser = argparse.ArgumentParser(
+        description="Textual CLI for reviewing receipts-ai transactions."
+    )
     parser.add_argument(
         "--log-file",
         type=Path,

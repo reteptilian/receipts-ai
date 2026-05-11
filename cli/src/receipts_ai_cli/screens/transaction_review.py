@@ -209,7 +209,10 @@ class TransactionReviewScreen(Screen[None]):
         )
         value = table.get_cell_at(coordinate)
 
-        if table.id == "receipt-items" and RECEIPT_ITEM_COLUMNS[coordinate.column].field_name == "taxonomy":
+        if (
+            table.id == "receipt-items"
+            and RECEIPT_ITEM_COLUMNS[coordinate.column].field_name == "taxonomy"
+        ):
 
             def check_taxonomy_choice(new_value: str | None) -> None:
                 self._commit_receipt_item_cell_edit(coordinate, new_value or "")

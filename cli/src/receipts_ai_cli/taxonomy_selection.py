@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+# pyright: reportPrivateImportUsage=false
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import lru_cache
 from threading import Lock
-from typing import cast
+from typing import Any, cast
 
 import sentence_transformers.sentence_transformer.model as sentence_transformer_model
 from receipts_ai.categorization import (
@@ -19,6 +20,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 class _TransformersProgressBarGuard:
+    def __init__(self) -> None:
+        self._progress_bar_enabled = False
+
     def __enter__(self) -> None:
         self._progress_bar_enabled = transformers_logging.is_progress_bar_enabled()
         transformers_logging.disable_progress_bar()
@@ -31,17 +35,24 @@ class _TransformersProgressBarGuard:
 
 
 class _SentenceTransformersTrangeGuard:
+    def __init__(self) -> None:
+        self._original_trange: Callable[..., range] | None = None
+
     def __enter__(self) -> None:
-        self._original_trange = sentence_transformer_model.trange
+        self._original_trange = cast(
+            Callable[..., range],
+            sentence_transformer_model.trange,
+        )
         sentence_transformer_model.trange = _plain_trange
         return None
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        sentence_transformer_model.trange = self._original_trange
+        if self._original_trange is not None:
+            sentence_transformer_model.trange = self._original_trange
         return None
 
 
-def _plain_trange(*args: int, **kwargs: object) -> range:
+def _plain_trange(*args: int, **_kwargs: Any) -> range:
     return range(*args)
 
 
@@ -66,7 +77,9 @@ def _taxonomy_choices_from_tree(
 class TaxonomySearcher:
     def __init__(self) -> None:
         self._embedding_index = load_product_taxonomy_embeddings()
-        self._choices = tuple(_format_taxonomy_path(entry.path) for entry in self._embedding_index.entries)
+        self._choices = tuple(
+            _format_taxonomy_path(entry.path) for entry in self._embedding_index.entries
+        )
         if not self._choices:
             taxonomy = load_product_taxonomy()
             self._choices = _taxonomy_choices_from_tree(taxonomy)
@@ -94,7 +107,11 @@ class TaxonomySearcher:
             if position < 0:
                 continue
             score = (
-                0 if folded_choice == cleaned_query else 1 if folded_choice.startswith(cleaned_query) else 2,
+                0
+                if folded_choice == cleaned_query
+                else 1
+                if folded_choice.startswith(cleaned_query)
+                else 2,
                 position,
                 len(choice),
                 index,
