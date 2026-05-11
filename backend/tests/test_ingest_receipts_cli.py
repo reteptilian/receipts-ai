@@ -929,6 +929,43 @@ def test_create_firestore_client_sets_emulator_env_from_config_file(
     assert os.environ["FIRESTORE_EMULATOR_HOST"] == "127.0.0.1:8080"
 
 
+def test_create_firestore_client_reads_selected_config_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    sentinel_client = object()
+    home_path = tmp_path / "home"
+    home_path.mkdir()
+    config_path = tmp_path / "dev.receipts_ai.config"
+
+    monkeypatch.setenv("HOME", str(home_path))
+    monkeypatch.setenv("RECEIPTS_AI_CONFIG_FILE", str(config_path))
+    monkeypatch.delenv("FIRESTORE_EMULATOR_HOST", raising=False)
+    (home_path / ".receipts_ai.config").write_text(
+        "FIRESTORE_EMULATOR_HOST=home:8080\n",
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        "\n".join(
+            (
+                "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080",
+                "FIREBASE_PROJECT_ID=receipts-ai-local",
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        firestore_client,
+        "_create_firestore_emulator_client",
+        lambda: sentinel_client,
+    )
+
+    client = firestore_client.create_firestore_client()
+
+    assert client is sentinel_client
+    assert os.environ["FIRESTORE_EMULATOR_HOST"] == "127.0.0.1:8080"
+
+
 def test_json_output_includes_receipt_item_category():
     receipt = Receipt(
         total="4.49",

@@ -266,10 +266,12 @@ def test_review_cli_app_accepts_cache_file(
         *,
         server_port: int | None,
         cache_file: Path | None,
+        config_file: Path | None,
     ) -> None:
         captured["db_path"] = db_path_arg
         captured["server_port"] = server_port
         captured["cache_file"] = cache_file
+        captured["config_file"] = config_file
 
     monkeypatch.setattr(review_cli, "_run_streamlit_app", fake_run_streamlit_app)
     monkeypatch.setattr(
@@ -293,15 +295,17 @@ def test_review_cli_app_accepts_cache_file(
         "db_path": db_path,
         "server_port": 8502,
         "cache_file": cache_path,
+        "config_file": None,
     }
 
 
-def test_run_streamlit_app_forwards_cache_file(
+def test_run_streamlit_app_forwards_cache_and_config_files(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
     db_path = tmp_path / "reviews.sqlite"
     cache_path = tmp_path / "pipeline-cache.sqlite"
+    config_path = tmp_path / "dev.receipts_ai.config"
     captured: dict[str, list[str]] = {}
 
     def fake_streamlit_main() -> None:
@@ -309,14 +313,18 @@ def test_run_streamlit_app_forwards_cache_file(
 
     monkeypatch.setattr("streamlit.web.cli.main", fake_streamlit_main)
 
-    review_cli._run_streamlit_app(db_path, server_port=8502, cache_file=cache_path)
+    review_cli._run_streamlit_app(
+        db_path, server_port=8502, cache_file=cache_path, config_file=config_path
+    )
 
-    assert captured["argv"][-5:] == [
+    assert captured["argv"][-7:] == [
         "--",
         "--db",
         str(db_path),
         "--cache-file",
         str(cache_path),
+        "--config-file",
+        str(config_path),
     ]
     assert captured["argv"][3:5] == ["--server.port", "8502"]
 

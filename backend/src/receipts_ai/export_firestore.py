@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, TextIO
 
+from receipts_ai.config import add_config_file_argument, configure_config_file
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.firestore_transactions import (
     FirestoreTransactionClient,
@@ -28,6 +29,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Export all Firestore transaction receipt items to CSV."
     )
+    add_config_file_argument(parser)
     parser.add_argument(
         "-o",
         "--output",
@@ -68,6 +70,7 @@ def main() -> None:
         help="Show logs at this level.",
     )
     args = parser.parse_args()
+    configure_config_file(args.config_file)
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
 
     if args.google_sheet_title or args.google_sheet_id or args.google_sheet_url:

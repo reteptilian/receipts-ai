@@ -14,6 +14,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from receipts_ai.cache import SqliteCallCache
+from receipts_ai.config import add_config_file_argument, configure_config_file
 from receipts_ai.ingest_receipts import _visionkit_ocr_image_path
 from receipts_ai.models.receipt_data_extraction import (
     ExtractedReceiptItem,
@@ -49,6 +50,7 @@ _PIPELINE_CACHE_SESSION_KEY = "pipeline_cache_file"
 
 def main() -> None:
     args = _parse_args()
+    configure_config_file(args.config_file)
     store = ReceiptReviewStore(args.db)
 
     st.set_page_config(page_title="Receipt Review", layout="wide")
@@ -738,6 +740,7 @@ def _pipeline_cache_file_text() -> str:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    add_config_file_argument(parser)
     parser.add_argument("--db", type=Path, default=DEFAULT_REVIEW_DB_PATH)
     parser.add_argument("--cache-file", type=Path)
     return parser.parse_args()

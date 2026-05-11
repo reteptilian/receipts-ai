@@ -7,7 +7,7 @@ from pathlib import Path
 from receipts_ai.categorization import load_budget_category_choices
 
 # pyright: reportPrivateUsage=false
-from receipts_ai.config import config_value
+from receipts_ai.config import add_config_file_argument, config_value, configure_config_file
 from receipts_ai.firestore_client import (
     FIREBASE_SERVICE_ACCT_KEY_FILEPATH_ENV_VAR,
     FIRESTORE_EMULATOR_HOST_ENV_VAR,
@@ -45,6 +45,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Textual CLI for reviewing receipts-ai transactions."
     )
+    add_config_file_argument(parser)
     parser.add_argument(
         "--log-file",
         type=Path,
@@ -100,6 +101,7 @@ def _log_firestore_configuration() -> None:
 
 def main() -> None:
     args = _parse_args()
+    configure_config_file(args.config_file)
     _configure_logging(log_level=args.log_level, log_file=args.log_file)
     _log_firestore_configuration()
     ReceiptsAIApp().run()

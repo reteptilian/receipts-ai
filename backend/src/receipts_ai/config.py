@@ -1,16 +1,38 @@
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
 
 CONFIG_FILENAME = ".receipts_ai.config"
+CONFIG_FILE_ENV_VAR = "RECEIPTS_AI_CONFIG_FILE"
+
+
+def add_config_file_argument(
+    parser: argparse.ArgumentParser, *, suppress_default: bool = False
+) -> None:
+    default = argparse.SUPPRESS if suppress_default else None
+    parser.add_argument(
+        "--config-file",
+        type=Path,
+        default=default,
+        help=(
+            "Path to a receipts-ai config file. Defaults to "
+            f"~/{CONFIG_FILENAME}. Can also be set with {CONFIG_FILE_ENV_VAR}."
+        ),
+    )
+
+
+def configure_config_file(config_file: Path | str | None) -> None:
+    if config_file is not None:
+        os.environ[CONFIG_FILE_ENV_VAR] = str(config_file)
 
 
 def config_value(key: str, default: str | None = None) -> str | None:
     value = os.environ.get(key)
     if value:
         return value
-    return _config_file_values(str(Path.home())).get(key, default)
+    return _config_file_values().get(key, default)
 
 
 def first_config_value(keys: tuple[str, ...], default: str | None = None) -> str | None:
@@ -18,7 +40,7 @@ def first_config_value(keys: tuple[str, ...], default: str | None = None) -> str
         value = os.environ.get(key)
         if value:
             return value
-    config_values = _config_file_values(str(Path.home()))
+    config_values = _config_file_values()
     for key in keys:
         value = config_values.get(key)
         if value:
@@ -26,8 +48,15 @@ def first_config_value(keys: tuple[str, ...], default: str | None = None) -> str
     return default
 
 
-def _config_file_values(home: str) -> dict[str, str]:
-    config_path = Path(home) / CONFIG_FILENAME
+def _config_file_path() -> Path:
+    config_file = os.environ.get(CONFIG_FILE_ENV_VAR)
+    if config_file:
+        return Path(config_file).expanduser()
+    return Path.home() / CONFIG_FILENAME
+
+
+def _config_file_values() -> dict[str, str]:
+    config_path = _config_file_path()
     if not config_path.is_file():
         return {}
 

@@ -40,7 +40,7 @@ from receipts_ai.categorization import (
     clean_receipt_item_descriptions,
     create_ollama_category_client,
 )
-from receipts_ai.config import first_config_value
+from receipts_ai.config import add_config_file_argument, configure_config_file, first_config_value
 from receipts_ai.document_intelligence import analyze_receipt_file
 from receipts_ai.firestore_client import (
     DEFAULT_FIRESTORE_COLLECTION,
@@ -309,6 +309,7 @@ def _visionkit_text_line_summary(line: _VisionKitTextLine) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Analyze one or more receipts.")
+    add_config_file_argument(parser)
     parser.add_argument(
         "receipts",
         metavar="receipt",
@@ -436,6 +437,7 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    configure_config_file(args.config_file)
     if args.ollama_prompt_log is not None:
         os.environ[OLLAMA_PROMPT_LOG_ENV_VARS[0]] = str(args.ollama_prompt_log)
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")

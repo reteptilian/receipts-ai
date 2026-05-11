@@ -29,6 +29,7 @@ from receipts_ai.categorization import (
     classify_transactions_by_product_taxonomy,
     create_ollama_category_client,
 )
+from receipts_ai.config import add_config_file_argument, configure_config_file
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.ingest_receipts import (
     file_url_from_path,
@@ -85,6 +86,7 @@ OFX_CREDIT_CARD_ACCOUNT_TYPES = frozenset(("CREDITCARD", "CREDITLINE"))
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest one or more statement files.")
+    add_config_file_argument(parser)
     parser.add_argument(
         "statements",
         metavar="statement",
@@ -165,6 +167,7 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    configure_config_file(args.config_file)
     if args.ollama_prompt_log is not None:
         os.environ[OLLAMA_PROMPT_LOG_ENV_VARS[0]] = str(args.ollama_prompt_log)
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")

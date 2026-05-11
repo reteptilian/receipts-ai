@@ -120,13 +120,22 @@ def test_log_firestore_configuration_logs_service_account(caplog: pytest.LogCapt
 
 
 def test_main_configures_logging_then_runs_app(monkeypatch: pytest.MonkeyPatch) -> None:
-    parse_args_result = Namespace(log_file=None, log_level="INFO")
+    config_path = Path("/tmp/receipts-ai-dev.config")
+    parse_args_result = Namespace(config_file=config_path, log_file=None, log_level="INFO")
+    config_calls: list[Path | None] = []
     configure_calls: list[tuple[str, Path | None]] = []
+
+    def fake_configure_config_file(config_file: Path | None) -> None:
+        config_calls.append(config_file)
 
     def fake_configure_logging(*, log_level: str, log_file: Path | None) -> None:
         configure_calls.append((log_level, log_file))
 
     monkeypatch.setattr("receipts_ai_cli.app._parse_args", lambda: parse_args_result)
+    monkeypatch.setattr(
+        "receipts_ai_cli.app.configure_config_file",
+        fake_configure_config_file,
+    )
     monkeypatch.setattr(
         "receipts_ai_cli.app._configure_logging",
         fake_configure_logging,
@@ -150,6 +159,7 @@ def test_main_configures_logging_then_runs_app(monkeypatch: pytest.MonkeyPatch) 
 
     main()
 
+    assert config_calls == [config_path]
     assert configure_calls == [("INFO", None)]
     assert firestore_calls == 1
     assert run_calls == 1

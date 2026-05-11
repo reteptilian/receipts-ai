@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from receipts_ai.cache import SqliteCallCache
+from receipts_ai.config import add_config_file_argument, configure_config_file
 from receipts_ai.review_service import import_receipt_for_review, write_training_jsonl
 from receipts_ai.review_store import DEFAULT_REVIEW_DB_PATH, ReceiptReviewStore
 
@@ -14,6 +15,7 @@ LOG_LEVEL_CHOICES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Review and compare receipt extraction output.")
+    add_config_file_argument(parser)
     _add_log_level_argument(parser)
     parser.add_argument(
         "--db",
@@ -24,6 +26,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     app_parser = subparsers.add_parser("app", help="Launch the Streamlit review UI.")
+    add_config_file_argument(app_parser, suppress_default=True)
     _add_log_level_argument(app_parser, default=argparse.SUPPRESS)
     app_parser.add_argument(
         "--server-port",
@@ -37,6 +40,7 @@ def main() -> None:
     )
 
     import_parser = subparsers.add_parser("import", help="Run a baseline pipeline for receipts.")
+    add_config_file_argument(import_parser, suppress_default=True)
     _add_log_level_argument(import_parser, default=argparse.SUPPRESS)
     import_parser.add_argument("receipts", metavar="receipt", nargs="+", type=Path)
     import_parser.add_argument("--pipeline", choices=("azure", "visionkit_ollama"), default="azure")
@@ -47,13 +51,20 @@ def main() -> None:
         "export-training",
         help="Export reviewed receipts as JSONL examples for OCR-text-to-JSON SFT.",
     )
+    add_config_file_argument(export_parser, suppress_default=True)
     _add_log_level_argument(export_parser, default=argparse.SUPPRESS)
     export_parser.add_argument("-o", "--output", type=Path, required=True)
 
     args = parser.parse_args()
+    configure_config_file(args.config_file)
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
     if args.command == "app":
-        _run_streamlit_app(args.db, server_port=args.server_port, cache_file=args.cache_file)
+        _run_streamlit_app(
+            args.db,
+            server_port=args.server_port,
+            cache_file=args.cache_file,
+            config_file=args.config_file,
+        )
         return
 
     store = ReceiptReviewStore(args.db)
@@ -98,6 +109,7 @@ def _run_streamlit_app(
     *,
     server_port: int | None,
     cache_file: Path | None,
+    config_file: Path | None,
 ) -> None:
     from streamlit.web import cli as streamlit_cli
 
@@ -116,6 +128,8 @@ def _run_streamlit_app(
     ]
     if cache_file is not None:
         sys.argv.extend(["--cache-file", str(cache_file)])
+    if config_file is not None:
+        sys.argv.extend(["--config-file", str(config_file)])
     if server_port is not None:
         sys.argv[3:3] = ["--server.port", str(server_port)]
     streamlit_cli.main()

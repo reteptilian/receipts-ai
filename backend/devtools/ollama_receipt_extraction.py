@@ -16,6 +16,7 @@ from receipts_ai.categorization import (
     OLLAMA_PROMPT_LOG_ENV_VARS,
     UrlLibOllamaClient,
 )
+from receipts_ai.config import add_config_file_argument, configure_config_file
 from receipts_ai.ingest_receipts import (
     DEFAULT_RECEIPT_OLLAMA_MODEL,
     _ollama_timeout_seconds,
@@ -126,12 +127,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    early_parser = argparse.ArgumentParser(add_help=False)
+    add_config_file_argument(early_parser)
+    early_args, _ = early_parser.parse_known_args(argv)
+    configure_config_file(early_args.config_file)
+
     parser = argparse.ArgumentParser(
         description=(
             "Call Ollama with the same constrained JSON schema used by the "
             "visionkit_ollama receipt pipeline."
         )
     )
+    add_config_file_argument(parser)
     prompt_source = parser.add_mutually_exclusive_group()
     prompt_source.add_argument(
         "--prompt",

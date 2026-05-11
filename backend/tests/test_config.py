@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from receipts_ai.config import config_value, first_config_value
+from receipts_ai.config import CONFIG_FILE_ENV_VAR, config_value, first_config_value
 
 
 def test_config_value_reads_home_config_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -83,6 +83,27 @@ def test_environment_value_takes_precedence_over_home_config_file(
     )
 
     assert config_value("OPENAI_API_KEY") == "env-key"
+
+
+def test_config_file_env_var_overrides_home_config_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    home_path = tmp_path / "home"
+    home_path.mkdir()
+    config_path = tmp_path / "dev.receipts_ai.config"
+    monkeypatch.setenv("HOME", str(home_path))
+    monkeypatch.setenv(CONFIG_FILE_ENV_VAR, str(config_path))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    (home_path / ".receipts_ai.config").write_text(
+        "OPENAI_API_KEY=home-key\n",
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        "OPENAI_API_KEY=dev-key\n",
+        encoding="utf-8",
+    )
+
+    assert config_value("OPENAI_API_KEY") == "dev-key"
 
 
 def test_first_config_value_checks_keys_in_order(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
