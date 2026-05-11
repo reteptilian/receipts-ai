@@ -446,6 +446,17 @@ def _sanity_check_failures(
                 }
             )
 
+    tax_line_total = _tax_line_total_or_failure(items, failures)
+    if parsed_tax is not None and tax_line_total is not None:
+        if _money_mismatch(parsed_tax, tax_line_total):
+            failures.append(
+                {
+                    "check": "tax = sum(tax line amounts)",
+                    "expected": _money_text(tax_line_total),
+                    "actual": _money_text(parsed_tax),
+                }
+            )
+
     return failures
 
 
@@ -519,6 +530,42 @@ def _item_net_total_or_failure(
                 }
             )
         total += amount + discount
+    return total
+
+
+def _tax_line_total_or_failure(
+    items: Any,
+    failures: list[dict[str, str]],
+) -> Decimal | None:
+    try:
+        records = _editor_records(items)
+    except ValueError as error:
+        failures.append(
+            {
+                "check": "items can be read",
+                "expected": "editable item rows",
+                "actual": str(error),
+            }
+        )
+        return None
+
+    total = Decimal("0")
+    for index, record in enumerate(records):
+        if (
+            _clean_string(record.get("description")) is None
+            and _clean_string(record.get("amount")) is None
+            and _clean_string(record.get("discount_amount")) is None
+        ):
+            continue
+
+        line_type = _clean_string(record.get("line_type")) or LineType.item.value
+        if line_type != LineType.tax.value:
+            continue
+
+        amount = _money_or_failure(f"items[{index}].amount", record.get("amount"), failures)
+        if amount is None:
+            return None
+        total += amount
     return total
 
 
