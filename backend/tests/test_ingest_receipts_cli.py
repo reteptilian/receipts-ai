@@ -207,11 +207,12 @@ def test_receipt_data_from_ollama_lines_writes_pretty_response_to_prompt_log(
 
         def complete_structured(
             self,
-            _prompt: str,
+            prompt: str,
             *,
-            _options: dict[str, object],
-            _output_format: dict[str, object],
+            options: dict[str, object],
+            output_format: dict[str, object],
         ) -> str:
+            del prompt, options, output_format
             return json.dumps(
                 {
                     "analysis": "Latte has no associated discount line.",
