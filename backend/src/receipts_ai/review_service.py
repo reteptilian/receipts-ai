@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # pyright: reportPrivateUsage=false, reportPrivateLocalImportUsage=false
 import json
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
@@ -46,6 +47,8 @@ from receipts_ai.review_models import (
 )
 from receipts_ai.review_store import ReceiptReviewStore
 
+LOGGER = logging.getLogger(__name__)
+
 
 def import_receipt_for_review(
     receipt_path: Path,
@@ -55,11 +58,18 @@ def import_receipt_for_review(
     cache: SqliteCallCache | None = None,
     force: bool = False,
 ) -> ReceiptExtractionRecord:
+    LOGGER.info("Importing receipt for review: path=%s pipeline=%s", receipt_path, pipeline)
     receipt_sha256_hex = sha256_hex(receipt_path.read_bytes())
     store.upsert_source(sha256_hex=receipt_sha256_hex, image_path=receipt_path)
     if not force:
         existing = store.latest_extraction(receipt_sha256_hex, pipeline=pipeline)
         if existing is not None:
+            LOGGER.info(
+                "Using existing receipt extraction: path=%s pipeline=%s extraction_id=%s",
+                receipt_path,
+                pipeline,
+                existing.id,
+            )
             return existing
 
     extraction = run_receipt_pipeline(receipt_path, pipeline=pipeline, cache=cache)
@@ -118,6 +128,7 @@ def run_receipt_pipeline(
 ) -> PipelineExtractionResult:
     if pipeline not in RECEIPT_PIPELINES:
         raise ValueError(f"unsupported receipt pipeline: {pipeline}")
+    LOGGER.info("Running receipt pipeline: path=%s pipeline=%s", receipt_path, pipeline)
     if pipeline == "azure":
         result = (
             analyze_receipt_file(receipt_path, cache=cache)

@@ -32,7 +32,9 @@ def analyze_receipt_file(
     client: AnalyzeDocumentClient | None = None,
     cache: SqliteCallCache | None = None,
 ) -> Any:
-    return analyze_receipt_bytes(Path(path).read_bytes(), client=client, cache=cache)
+    receipt_path = Path(path)
+    logger.info("Analyzing receipt file with Azure Document Intelligence: path=%s", receipt_path)
+    return analyze_receipt_bytes(receipt_path.read_bytes(), client=client, cache=cache)
 
 
 def analyze_receipt_bytes(

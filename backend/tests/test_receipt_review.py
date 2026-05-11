@@ -2,15 +2,18 @@ from __future__ import annotations
 
 # pyright: reportPrivateUsage=false
 import json
+import logging
+import sys
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
-from receipts_ai import ingest_receipts
+from receipts_ai import ingest_receipts, review_cli, review_service
 from receipts_ai.models.receipt_data_extraction import (
     ExtractedReceiptItem,
     ReceiptDataExtraction,
@@ -21,7 +24,9 @@ from receipts_ai.review_models import ReceiptReviewStatus
 from receipts_ai.review_service import compare_receipt_data, write_training_jsonl
 from receipts_ai.review_store import ReceiptReviewStore
 from receipts_ai.review_streamlit_app import (
+    _next_unreviewed_sha,
     _receipt_preview_image,
+    _receipt_queue_entries,
     _sanity_check_failures,
 )
 
@@ -29,12 +34,13 @@ from receipts_ai.review_streamlit_app import (
 def _receipt_data(
     *,
     merchant_name: str = "Coffee Shop",
+    receipt_date: date | None = None,
     total: str = "7.50",
     raw_text: str = "Coffee Shop\nLatte 7.50",
 ) -> ReceiptDataExtraction:
     return ReceiptDataExtraction(
         merchant_name=merchant_name,
-        transaction_date=date(2026, 5, 9),
+        transaction_date=receipt_date or date(2026, 5, 9),
         currency="USD",
         subtotal=total,
         total_tax="0.00",
@@ -77,6 +83,92 @@ def test_review_store_round_trips_reviewed_receipt_data(tmp_path: Path):
     assert reviewed_data.merchant_name == "Corrected Shop"
 
 
+def test_receipt_queue_entries_mark_unreviewed_and_sort_by_receipt_date(tmp_path: Path):
+    early_path = tmp_path / "early.png"
+    later_path = tmp_path / "later.png"
+    early_path.write_bytes(b"early")
+    later_path.write_bytes(b"later")
+    early_sha = ingest_receipts.sha256_hex(b"early")
+    later_sha = ingest_receipts.sha256_hex(b"later")
+    store = ReceiptReviewStore(tmp_path / "reviews.sqlite")
+    store.upsert_source(sha256_hex=later_sha, image_path=later_path)
+    store.upsert_source(sha256_hex=early_sha, image_path=early_path)
+    store.save_extraction(
+        receipt_sha256_hex=later_sha,
+        pipeline="azure",
+        receipt_data=_receipt_data(
+            merchant_name="Later Shop",
+            receipt_date=date(2026, 5, 9),
+        ),
+    )
+    early_extraction = store.save_extraction(
+        receipt_sha256_hex=early_sha,
+        pipeline="azure",
+        receipt_data=_receipt_data(
+            merchant_name="Early Shop",
+            receipt_date=date(2026, 5, 8),
+        ),
+    )
+    store.save_review(
+        receipt_sha256_hex=early_sha,
+        corrected_receipt_data=_receipt_data(
+            merchant_name="Early Shop",
+            receipt_date=date(2026, 5, 8),
+        ),
+        status=ReceiptReviewStatus.draft,
+        source_extraction_id=early_extraction.id,
+    )
+    store.save_review(
+        receipt_sha256_hex=later_sha,
+        corrected_receipt_data=_receipt_data(
+            merchant_name="Later Shop",
+            receipt_date=date(2026, 5, 9),
+        ),
+        status=ReceiptReviewStatus.reviewed,
+    )
+
+    entries = _receipt_queue_entries(store)
+
+    assert [entry.sha256_hex for entry in entries] == [early_sha, later_sha]
+    assert entries[0].label.startswith("* 2026-05-08  Early Shop")
+    assert entries[0].reviewed is False
+    assert entries[1].label.startswith("2026-05-09  Later Shop")
+    assert entries[1].reviewed is True
+
+
+def test_next_unreviewed_sha_skips_current_receipt(tmp_path: Path):
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    third_path = tmp_path / "third.png"
+    first_path.write_bytes(b"first")
+    second_path.write_bytes(b"second")
+    third_path.write_bytes(b"third")
+    first_sha = ingest_receipts.sha256_hex(b"first")
+    second_sha = ingest_receipts.sha256_hex(b"second")
+    third_sha = ingest_receipts.sha256_hex(b"third")
+    store = ReceiptReviewStore(tmp_path / "reviews.sqlite")
+    store.upsert_source(sha256_hex=first_sha, image_path=first_path)
+    store.upsert_source(sha256_hex=second_sha, image_path=second_path)
+    store.upsert_source(sha256_hex=third_sha, image_path=third_path)
+    for sha, day in [(first_sha, 1), (second_sha, 2), (third_sha, 3)]:
+        store.save_extraction(
+            receipt_sha256_hex=sha,
+            pipeline="azure",
+            receipt_data=_receipt_data(receipt_date=date(2026, 5, day)),
+        )
+    store.save_review(
+        receipt_sha256_hex=second_sha,
+        corrected_receipt_data=_receipt_data(receipt_date=date(2026, 5, 2)),
+        status=ReceiptReviewStatus.reviewed,
+    )
+
+    entries = _receipt_queue_entries(store)
+
+    assert _next_unreviewed_sha(entries, first_sha) == third_sha
+    assert _next_unreviewed_sha(entries, second_sha) == third_sha
+    assert _next_unreviewed_sha(entries, third_sha) == first_sha
+
+
 def test_process_receipt_prefers_reviewed_data(tmp_path: Path):
     receipt_path = tmp_path / "receipt.png"
     receipt_path.write_bytes(b"image")
@@ -116,6 +208,69 @@ def test_compare_receipt_data_reports_field_mismatches():
     assert "total" in mismatches
     assert "items[0].amount" in mismatches
     assert result.score < 1
+
+
+def test_review_cli_accepts_log_level_after_import_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    db_path = tmp_path / "reviews.sqlite"
+
+    def fake_import_receipt_for_review(
+        receipt_path_arg: Path,
+        *,
+        store: ReceiptReviewStore,
+        pipeline: str,
+        cache: object,
+        force: bool,
+    ) -> SimpleNamespace:
+        assert isinstance(store, ReceiptReviewStore)
+        assert receipt_path_arg == receipt_path
+        assert pipeline == "azure"
+        assert cache is None
+        assert force is False
+        return SimpleNamespace(id=123, receipt_sha256_hex="a" * 64)
+
+    monkeypatch.setattr(review_cli, "import_receipt_for_review", fake_import_receipt_for_review)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai-review",
+            "--db",
+            str(db_path),
+            "import",
+            "--log-level",
+            "INFO",
+            str(receipt_path),
+        ],
+    )
+
+    review_cli.main()
+
+    assert f"{receipt_path}: stored extraction 123 for {'a' * 64}" in capsys.readouterr().out
+
+
+def test_run_receipt_pipeline_logs_receipt_path_before_azure_call(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    receipt_path = tmp_path / "receipt.sqlite"
+
+    def fake_analyze_receipt_file(path: Path) -> object:
+        assert path == receipt_path
+        raise RuntimeError("unsupported file")
+
+    monkeypatch.setattr(review_service, "analyze_receipt_file", fake_analyze_receipt_file)
+
+    with caplog.at_level(logging.INFO, logger=review_service.__name__):
+        with pytest.raises(RuntimeError, match="unsupported file"):
+            review_service.run_receipt_pipeline(receipt_path, pipeline="azure")
+
+    assert f"Running receipt pipeline: path={receipt_path} pipeline=azure" in caplog.text
 
 
 def test_compare_receipt_data_fuzzy_compares_merchant_name():

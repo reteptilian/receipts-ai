@@ -3,6 +3,7 @@ from __future__ import annotations
 # pyright: reportPrivateUsage=false, reportUnknownMemberType=false
 import argparse
 import shlex
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -20,7 +21,12 @@ from receipts_ai.models.receipt_data_extraction import (
     ReceiptDataExtractionMetadata,
 )
 from receipts_ai.models.transaction import LineType
-from receipts_ai.review_models import ReceiptReviewStatus
+from receipts_ai.review_models import (
+    ReceiptExtractionRecord,
+    ReceiptReviewRecord,
+    ReceiptReviewStatus,
+    ReceiptSourceRecord,
+)
 from receipts_ai.review_service import (
     compare_reviewed_receipt_to_pipeline,
     import_receipt_for_review,
@@ -28,6 +34,14 @@ from receipts_ai.review_service import (
     write_training_jsonl,
 )
 from receipts_ai.review_store import DEFAULT_REVIEW_DB_PATH, ReceiptReviewStore
+
+
+@dataclass(frozen=True)
+class _ReceiptQueueEntry:
+    sha256_hex: str
+    label: str
+    transaction_date: date | None
+    reviewed: bool
 
 
 def main() -> None:
@@ -129,24 +143,126 @@ def _render_sidebar(store: ReceiptReviewStore, db_path: Path) -> None:
 
 
 def _selected_receipt_sha(store: ReceiptReviewStore) -> str | None:
-    sources = store.sources()
-    if not sources:
+    entries = _receipt_queue_entries(store)
+    if not entries:
         return None
-    options = [source.sha256_hex for source in sources]
-    labels = {
-        source.sha256_hex: f"{Path(source.image_path).name}  {source.sha256_hex[:12]}"
-        for source in sources
-    }
+
+    st.sidebar.subheader("Receipts")
+    _render_receipt_queue_progress(entries)
+
     current = st.session_state.get("selected_receipt_sha")
-    index = options.index(current) if isinstance(current, str) and current in options else 0
-    selected = st.sidebar.selectbox(
-        "Receipts",
-        options,
-        index=index,
-        format_func=lambda value: labels[value],
+    next_unreviewed_sha = _next_unreviewed_sha(
+        entries,
+        current if isinstance(current, str) else None,
     )
+    if st.sidebar.button(
+        "Next unreviewed",
+        disabled=next_unreviewed_sha is None,
+        use_container_width=True,
+    ):
+        st.session_state["selected_receipt_sha"] = next_unreviewed_sha
+        st.rerun()
+
+    options = [entry.sha256_hex for entry in entries]
+    labels = {entry.sha256_hex: entry.label for entry in entries}
+    index = options.index(current) if isinstance(current, str) and current in options else 0
+    with st.sidebar.container(height=420):
+        selected = st.radio(
+            "Receipts",
+            options,
+            index=index,
+            format_func=lambda value: labels[value],
+            label_visibility="collapsed",
+        )
     st.session_state["selected_receipt_sha"] = selected
     return selected
+
+
+def _receipt_queue_entries(store: ReceiptReviewStore) -> list[_ReceiptQueueEntry]:
+    reviews_by_sha = {review.receipt_sha256_hex: review for review in store.reviews()}
+    entries = [
+        _receipt_queue_entry(
+            source,
+            review=reviews_by_sha.get(source.sha256_hex),
+            extraction=store.latest_extraction(source.sha256_hex, pipeline="azure")
+            or store.latest_extraction(source.sha256_hex),
+        )
+        for source in store.sources()
+    ]
+    return sorted(
+        entries,
+        key=lambda entry: (
+            entry.transaction_date is None,
+            entry.transaction_date or date.max,
+            entry.label.casefold(),
+        ),
+    )
+
+
+def _receipt_queue_entry(
+    source: ReceiptSourceRecord,
+    *,
+    review: ReceiptReviewRecord | None,
+    extraction: ReceiptExtractionRecord | None,
+) -> _ReceiptQueueEntry:
+    receipt_data = (
+        review.corrected_receipt_data
+        if review is not None
+        else extraction.receipt_data
+        if extraction is not None
+        else None
+    )
+    transaction_date = receipt_data.transaction_date if receipt_data is not None else None
+    merchant_name = (
+        receipt_data.merchant_name if receipt_data is not None else Path(source.image_path).stem
+    )
+    reviewed = review is not None and review.status == ReceiptReviewStatus.reviewed
+    date_text = transaction_date.isoformat() if transaction_date is not None else "no date"
+    merchant_text = _truncate_label_part(
+        merchant_name or Path(source.image_path).stem,
+        max_length=28,
+    )
+    marker_text = "" if reviewed else "* "
+    return _ReceiptQueueEntry(
+        sha256_hex=source.sha256_hex,
+        label=f"{marker_text}{date_text}  {merchant_text}  {source.sha256_hex[:12]}",
+        transaction_date=transaction_date,
+        reviewed=reviewed,
+    )
+
+
+def _truncate_label_part(value: str, *, max_length: int) -> str:
+    text = " ".join(value.split())
+    if len(text) <= max_length:
+        return text
+    return f"{text[: max_length - 1]}..."
+
+
+def _render_receipt_queue_progress(entries: list[_ReceiptQueueEntry]) -> None:
+    reviewed_count = sum(1 for entry in entries if entry.reviewed)
+    st.sidebar.caption(f"Reviewed {reviewed_count} / {len(entries)}")
+
+
+def _next_unreviewed_sha(
+    entries: list[_ReceiptQueueEntry],
+    current_sha256_hex: str | None,
+) -> str | None:
+    unreviewed = [entry.sha256_hex for entry in entries if not entry.reviewed]
+    if not unreviewed:
+        return None
+    if current_sha256_hex is None:
+        return unreviewed[0]
+
+    options = [entry.sha256_hex for entry in entries]
+    if current_sha256_hex not in options:
+        return unreviewed[0]
+
+    current_index = options.index(current_sha256_hex)
+    ordered_candidates = entries[current_index + 1 :] + entries[:current_index]
+    for entry in ordered_candidates:
+        if not entry.reviewed:
+            return entry.sha256_hex
+    return None
 
 
 def _render_receipt_source(image_path_text: str, sha256_hex: str) -> None:

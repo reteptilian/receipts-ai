@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -8,9 +9,12 @@ from receipts_ai.cache import SqliteCallCache
 from receipts_ai.review_service import import_receipt_for_review, write_training_jsonl
 from receipts_ai.review_store import DEFAULT_REVIEW_DB_PATH, ReceiptReviewStore
 
+LOG_LEVEL_CHOICES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Review and compare receipt extraction output.")
+    _add_log_level_argument(parser)
     parser.add_argument(
         "--db",
         type=Path,
@@ -20,6 +24,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     app_parser = subparsers.add_parser("app", help="Launch the Streamlit review UI.")
+    _add_log_level_argument(app_parser, default=argparse.SUPPRESS)
     app_parser.add_argument(
         "--server-port",
         type=int,
@@ -27,6 +32,7 @@ def main() -> None:
     )
 
     import_parser = subparsers.add_parser("import", help="Run a baseline pipeline for receipts.")
+    _add_log_level_argument(import_parser, default=argparse.SUPPRESS)
     import_parser.add_argument("receipts", metavar="receipt", nargs="+", type=Path)
     import_parser.add_argument("--pipeline", choices=("azure", "visionkit_ollama"), default="azure")
     import_parser.add_argument("--cache-file", type=Path)
@@ -36,9 +42,11 @@ def main() -> None:
         "export-training",
         help="Export reviewed receipts as JSONL examples for OCR-text-to-JSON SFT.",
     )
+    _add_log_level_argument(export_parser, default=argparse.SUPPRESS)
     export_parser.add_argument("-o", "--output", type=Path, required=True)
 
     args = parser.parse_args()
+    logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
     if args.command == "app":
         _run_streamlit_app(args.db, server_port=args.server_port)
         return
@@ -65,6 +73,19 @@ def main() -> None:
             write_training_jsonl(store, file)
         print(f"wrote {args.output}")
         return
+
+
+def _add_log_level_argument(
+    parser: argparse.ArgumentParser,
+    *,
+    default: str = "WARNING",
+) -> None:
+    parser.add_argument(
+        "--log-level",
+        choices=LOG_LEVEL_CHOICES,
+        default=default,
+        help="Show logs at this level.",
+    )
 
 
 def _run_streamlit_app(db_path: Path, *, server_port: int | None) -> None:
