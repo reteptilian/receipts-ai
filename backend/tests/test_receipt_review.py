@@ -209,6 +209,27 @@ def test_sanity_check_failures_pass_when_amounts_balance():
     )
 
 
+def test_sanity_check_failures_reject_positive_item_discount_amount():
+    items = [
+        {"amount": "10.00", "discount_amount": "2.00", "line_type": "item"},
+    ]
+
+    failures = _sanity_check_failures(
+        subtotal="12.00",
+        total_tax="0.00",
+        total="12.00",
+        items=items,
+    )
+
+    assert failures == [
+        {
+            "check": "items[0].discount_amount is negative",
+            "expected": "negative discount amount",
+            "actual": "2.00",
+        },
+    ]
+
+
 def test_receipt_preview_image_renders_pdf_to_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

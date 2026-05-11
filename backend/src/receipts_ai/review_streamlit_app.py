@@ -510,7 +510,15 @@ def _item_net_total_or_failure(
         )
         if amount is None or discount is None:
             return None
-        total += amount - abs(discount)
+        if discount > 0:
+            failures.append(
+                {
+                    "check": f"items[{index}].discount_amount is negative",
+                    "expected": "negative discount amount",
+                    "actual": _money_text(discount),
+                }
+            )
+        total += amount + discount
     return total
 
 
