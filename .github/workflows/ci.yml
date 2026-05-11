@@ -16,17 +16,17 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.project }} / Python ${{ matrix.python-version }}
+    name: ${{ matrix.project.name }} / Python ${{ matrix.python-version }}
     strategy:
       matrix:
-        project: ["backend", "cli"]
-        # Update this as needed:
-        # Common platforms: ["ubuntu-latest", "macos-latest", "windows-latest"]
-        os: ["ubuntu-latest"]
+        project:
+          - name: backend
+            os: macos-latest
+          - name: cli
+            os: ubuntu-latest
         python-version: ["3.11", "3.12", "3.13", "3.14"]
 
-    # Linux only by default. Use ${{ matrix.os }} for other OSes.
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.project.os }}
 
     steps:
       # Generally following uv docs:
@@ -44,12 +44,12 @@ jobs:
           # Update this as needed:
           version: "0.10.2"
           enable-cache: true
-          cache-dependency-glob: "${{ matrix.project }}/uv.lock"
+          cache-dependency-glob: "${{ matrix.project.name }}/uv.lock"
           python-version: ${{ matrix.python-version }}
 
       - name: Set up Python (using uv)
         run: uv python install
-        working-directory: ${{ matrix.project }}
+        working-directory: ${{ matrix.project.name }}
 
       # Alternately can use the official Python action:
       # - name: Set up Python (using actions/setup-python)
@@ -59,16 +59,16 @@ jobs:
 
       - name: Install all dependencies
         run: uv sync --all-extras
-        working-directory: ${{ matrix.project }}
+        working-directory: ${{ matrix.project.name }}
 
       - name: Run linting
         run: uv run python devtools/lint.py
-        working-directory: ${{ matrix.project }}
+        working-directory: ${{ matrix.project.name }}
 
       - name: Run tests
         run: uv run pytest
-        working-directory: ${{ matrix.project }}
+        working-directory: ${{ matrix.project.name }}
 
       - name: Build package
         run: uv build
-        working-directory: ${{ matrix.project }}
+        working-directory: ${{ matrix.project.name }}
