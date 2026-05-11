@@ -298,7 +298,9 @@ class ReceiptReviewStore:
             for row in rows
         ]
 
-    def reviewed_training_examples(self) -> Iterable[tuple[ReceiptSourceRecord, ReceiptReviewRecord]]:
+    def reviewed_training_examples(
+        self,
+    ) -> Iterable[tuple[ReceiptSourceRecord, ReceiptReviewRecord]]:
         with self._connect() as connection:
             rows = connection.execute(
                 """

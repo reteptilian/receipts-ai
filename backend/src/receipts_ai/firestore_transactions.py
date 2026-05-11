@@ -242,7 +242,7 @@ def save_transaction_review_edits(
     )
 
     if receipt_transaction_id is not None:
-        receipt_ref = collection_reference.document(cast(str, receipt_transaction_id))
+        receipt_ref = collection_reference.document(receipt_transaction_id)
         receipt_document: dict[str, Any] = {
             "reviewed": reviewed,
             "updatedAt": timestamp,

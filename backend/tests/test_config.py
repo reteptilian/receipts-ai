@@ -61,9 +61,7 @@ def test_config_value_ignores_inline_comments(monkeypatch: pytest.MonkeyPatch, t
     assert config_value("OPENAI_MODEL") == "gpt-test"
 
 
-def test_config_value_preserves_hash_inside_quotes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_config_value_preserves_hash_inside_quotes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
     (tmp_path / ".receipts_ai.config").write_text(

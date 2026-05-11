@@ -121,9 +121,7 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
     requests: list[dict[str, object]] = []
 
     class FakeOllamaClient:
-        def __init__(
-            self, *, url: str, model: str, timeout_seconds: float, think: bool
-        ) -> None:
+        def __init__(self, *, url: str, model: str, timeout_seconds: float, think: bool) -> None:
             requests.append(
                 {"url": url, "model": model, "timeout_seconds": timeout_seconds, "think": think}
             )
@@ -135,9 +133,7 @@ def test_visionkit_ollama_pipeline_builds_transaction_from_constrained_json(
             options: dict[str, object],
             output_format: dict[str, object],
         ) -> str:
-            requests.append(
-                {"prompt": prompt, "options": options, "output_format": output_format}
-            )
+            requests.append({"prompt": prompt, "options": options, "output_format": output_format})
             return json.dumps(
                 {
                     "analysis": "Latte has no associated discount line.",
@@ -206,17 +202,15 @@ def test_receipt_data_from_ollama_lines_writes_pretty_response_to_prompt_log(
     prompt_log_path = tmp_path / "logs" / "ollama-prompts.log"
 
     class FakeOllamaClient:
-        def __init__(
-            self, *, url: str, model: str, timeout_seconds: float, think: bool
-        ) -> None:
+        def __init__(self, *, url: str, model: str, timeout_seconds: float, think: bool) -> None:
             pass
 
         def complete_structured(
             self,
-            prompt: str,
+            _prompt: str,
             *,
-            options: dict[str, object],
-            output_format: dict[str, object],
+            _options: dict[str, object],
+            _output_format: dict[str, object],
         ) -> str:
             return json.dumps(
                 {

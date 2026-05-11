@@ -33,7 +33,9 @@ class ReceiptDataExtractionMetadata(BaseModel):
     ] = None
     confidence: Annotated[
         float | None,
-        Field(description="Overall extraction confidence reported by the pipeline.", ge=0.0, le=1.0),
+        Field(
+            description="Overall extraction confidence reported by the pipeline.", ge=0.0, le=1.0
+        ),
     ] = None
     raw_text: Annotated[
         str | None,
@@ -54,7 +56,10 @@ class ExtractedReceiptItem(BaseModel):
     quantity: Annotated[float | None, Field(gt=0.0)] = None
     unit_price: Annotated[
         str | None,
-        Field(alias="unitPrice", description="Price for one unit of this item, as shown on the receipt."),
+        Field(
+            alias="unitPrice",
+            description="Price for one unit of this item, as shown on the receipt.",
+        ),
     ] = None
     amount: Annotated[
         str,
@@ -66,7 +71,10 @@ class ExtractedReceiptItem(BaseModel):
     ] = None
     discount_description: Annotated[
         str | None,
-        Field(alias="discountDescription", description="Receipt text that describes the item discount."),
+        Field(
+            alias="discountDescription",
+            description="Receipt text that describes the item discount.",
+        ),
     ] = None
     line_type: Annotated[
         LineType,
@@ -102,11 +110,18 @@ class ReceiptDataExtraction(BaseModel):
     ]
     currency: Annotated[
         str,
-        Field(description="ISO 4217 currency code inferred from receipt amounts.", pattern="^[A-Z]{3}$"),
+        Field(
+            description="ISO 4217 currency code inferred from receipt amounts.",
+            pattern="^[A-Z]{3}$",
+        ),
     ] = "USD"
     receipt_number: Annotated[
         str | None,
-        Field(alias="receiptNumber", description="Receipt or transaction number shown by the merchant.", min_length=1),
+        Field(
+            alias="receiptNumber",
+            description="Receipt or transaction number shown by the merchant.",
+            min_length=1,
+        ),
     ] = None
     subtotal: Annotated[
         str | None,

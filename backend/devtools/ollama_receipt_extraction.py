@@ -397,7 +397,10 @@ def _print_structured_response(
         )
     except (ValidationError, ValueError) as error:
         print(json.dumps(payload, indent=2, sort_keys=True))
-        print(f"\nERROR: response did not validate as {schema_preset!r} receipt data: {error}", file=sys.stderr)
+        print(
+            f"\nERROR: response did not validate as {schema_preset!r} receipt data: {error}",
+            file=sys.stderr,
+        )
         return 1
 
     print(formatted_response)

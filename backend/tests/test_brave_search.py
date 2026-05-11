@@ -234,9 +234,10 @@ def test_cached_brave_search_client_reuses_sqlite_cache(tmp_path: Path):
     assert first_result == second_result
     assert first_client.queries == ["FredMeyer NBSC SALTINE $2.25"]
     assert second_client.queries == []
-    assert SqliteCallCache(cache_path).get(
-        "brave_search", {"query": "FredMeyer NBSC SALTINE $2.25"}
-    ) == first_result
+    assert (
+        SqliteCallCache(cache_path).get("brave_search", {"query": "FredMeyer NBSC SALTINE $2.25"})
+        == first_result
+    )
 
 
 def test_cached_brave_search_client_does_not_create_client_on_cache_hit(tmp_path: Path):
@@ -250,7 +251,9 @@ def test_cached_brave_search_client_does_not_create_client_on_cache_hit(tmp_path
         factory_calls += 1
         return FakeBraveClient()
 
-    client = CachedBraveSearchClient(cache=SqliteCallCache(cache_path), client_factory=client_factory)
+    client = CachedBraveSearchClient(
+        cache=SqliteCallCache(cache_path), client_factory=client_factory
+    )
 
     result = client.search("Coffee Shop COF $7.00")
 

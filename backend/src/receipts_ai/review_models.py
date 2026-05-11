@@ -81,7 +81,9 @@ class ReceiptComparisonResult(BaseModel):
         str,
         Field(alias="receiptSha256Hex", pattern="^[a-f0-9]{64}$"),
     ]
-    candidate_extraction_id: Annotated[int | None, Field(alias="candidateExtractionId", ge=1)] = None
+    candidate_extraction_id: Annotated[int | None, Field(alias="candidateExtractionId", ge=1)] = (
+        None
+    )
     candidate_pipeline: Annotated[str, Field(alias="candidatePipeline", min_length=1)]
     field_count: Annotated[int, Field(alias="fieldCount", ge=0)]
     mismatch_count: Annotated[int, Field(alias="mismatchCount", ge=0)]

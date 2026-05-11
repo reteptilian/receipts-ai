@@ -282,9 +282,7 @@ def write_training_jsonl(store: ReceiptReviewStore, file: TextIO) -> None:
                 "schema": schema,
                 "review_status": review.status.value,
                 "reviewed_at": (
-                    review.reviewed_at.isoformat()
-                    if review.reviewed_at is not None
-                    else None
+                    review.reviewed_at.isoformat() if review.reviewed_at is not None else None
                 ),
                 "source_extraction_id": review.source_extraction_id,
             },

@@ -87,7 +87,9 @@ def _render_sidebar(store: ReceiptReviewStore, db_path: Path) -> None:
     import_form = st.sidebar.form("import_receipt")
     with import_form:
         receipt_path_text = import_form.text_input("Receipt path")
-        pipeline = import_form.selectbox("Baseline pipeline", ["azure", "visionkit_ollama"], index=0)
+        pipeline = import_form.selectbox(
+            "Baseline pipeline", ["azure", "visionkit_ollama"], index=0
+        )
         cache_file_text = import_form.text_input("Pipeline cache DB", value="")
         import_form.caption(
             "Optional. Use the same SQLite cache path you pass to ingestion with --cache-file."

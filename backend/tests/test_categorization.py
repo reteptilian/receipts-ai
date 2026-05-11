@@ -1698,7 +1698,7 @@ def test_url_lib_ollama_client_writes_human_prompt_log(
     assert '"stream": false' in content
     assert '"think": false' in content
     assert '"temperature": 0' in content
-    assert '"enum": [\n        \"Groceries\",\n        \"Dining\"\n      ]' in content
+    assert '"enum": [\n        "Groceries",\n        "Dining"\n      ]' in content
     assert "prompt:\n" in content
     assert "Choose one\nWith a second line\n\nReturn only JSON matching this schema." in content
 

@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: backend-lint
+        name: Backend Lint
+        entry: bash -c "cd backend && make lint"
+        language: system
+        files: ^backend/
+        pass_filenames: false
