@@ -44,12 +44,16 @@ class _ReceiptQueueEntry:
     reviewed: bool
 
 
+_PIPELINE_CACHE_SESSION_KEY = "pipeline_cache_file"
+
+
 def main() -> None:
     args = _parse_args()
     store = ReceiptReviewStore(args.db)
 
     st.set_page_config(page_title="Receipt Review", layout="wide")
     st.title("Receipt Review")
+    _initialize_pipeline_cache_state(args.cache_file)
 
     _render_sidebar(store, args.db)
     selected_sha = _selected_receipt_sha(store)
@@ -104,10 +108,11 @@ def _render_sidebar(store: ReceiptReviewStore, db_path: Path) -> None:
         pipeline = import_form.selectbox(
             "Baseline pipeline", ["azure", "visionkit_ollama"], index=0
         )
-        cache_file_text = import_form.text_input("Pipeline cache DB", value="")
-        import_form.caption(
-            "Optional. Use the same SQLite cache path you pass to ingestion with --cache-file."
+        cache_file_text = import_form.text_input(
+            "Pipeline cache DB",
+            key=_PIPELINE_CACHE_SESSION_KEY,
         )
+        import_form.caption("Optional. Used for imports and candidate comparisons.")
         force = import_form.checkbox("Force new extraction", value=False)
         submitted = import_form.form_submit_button("Import")
     if submitted:
@@ -158,7 +163,7 @@ def _selected_receipt_sha(store: ReceiptReviewStore) -> str | None:
     if st.sidebar.button(
         "Next unreviewed",
         disabled=next_unreviewed_sha is None,
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state["selected_receipt_sha"] = next_unreviewed_sha
         st.rerun()
@@ -271,7 +276,7 @@ def _render_receipt_source(image_path_text: str, sha256_hex: str) -> None:
     with st.container(height=780, border=True):
         preview = _receipt_preview_image(image_path)
         if preview is not None:
-            st.image(preview, use_container_width=True)
+            st.image(preview, width="stretch")
         else:
             st.code(str(image_path))
     st.caption(sha256_hex)
@@ -302,7 +307,7 @@ def _render_extraction_metadata(store: ReceiptReviewStore, receipt_sha256_hex: s
             }
         )
     if rows:
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width="stretch")
 
 
 def _render_review_form(
@@ -336,7 +341,7 @@ def _render_review_form(
         item_rows,
         num_rows="dynamic",
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "line_type": st.column_config.SelectboxColumn(
                 "line_type",
@@ -355,9 +360,9 @@ def _render_review_form(
 
     draft_col, reviewed_col = st.columns(2)
     with draft_col:
-        save_draft = st.button("Save draft", use_container_width=True)
+        save_draft = st.button("Save draft", width="stretch")
     with reviewed_col:
-        mark_reviewed = st.button("Mark reviewed", type="primary", use_container_width=True)
+        mark_reviewed = st.button("Mark reviewed", type="primary", width="stretch")
 
     if save_draft or mark_reviewed:
         try:
@@ -393,8 +398,8 @@ def _render_comparison_tools(
 ) -> None:
     st.subheader("Candidate Comparison")
     pipeline = st.selectbox("Candidate pipeline", ["visionkit_ollama"], index=0)
-    cache_file_text = st.text_input("Candidate pipeline cache DB", value="", key="comparison_cache")
-    st.caption("Optional. Reuses cached OCR/model calls from the same --cache-file database.")
+    cache_file_text = _pipeline_cache_file_text()
+    st.caption("Uses the workspace pipeline cache DB for cached OCR/model calls.")
     if st.button("Run comparison"):
         try:
             cache = SqliteCallCache(_path_from_text(cache_file_text)) if cache_file_text else None
@@ -426,7 +431,7 @@ def _render_comparison_tools(
         if not field.matches
     ]
     if diff_rows:
-        st.dataframe(diff_rows, hide_index=True, use_container_width=True)
+        st.dataframe(diff_rows, hide_index=True, width="stretch")
 
 
 def _item_rows(receipt_data: ReceiptDataExtraction) -> list[dict[str, object | None]]:
@@ -527,7 +532,7 @@ def _render_sanity_checks(
         return
 
     st.warning(f"{len(failures)} failing check(s)")
-    st.dataframe(failures, hide_index=True, use_container_width=True)
+    st.dataframe(failures, hide_index=True, width="stretch")
 
 
 def _sanity_check_failures(
@@ -721,9 +726,20 @@ def _float_or_none(value: object | None) -> float | None:
     return float(text)
 
 
+def _initialize_pipeline_cache_state(cache_file: Path | None) -> None:
+    if _PIPELINE_CACHE_SESSION_KEY not in st.session_state:
+        st.session_state[_PIPELINE_CACHE_SESSION_KEY] = str(cache_file) if cache_file else ""
+
+
+def _pipeline_cache_file_text() -> str:
+    value = st.session_state.get(_PIPELINE_CACHE_SESSION_KEY, "")
+    return value if isinstance(value, str) else ""
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, default=DEFAULT_REVIEW_DB_PATH)
+    parser.add_argument("--cache-file", type=Path)
     return parser.parse_args()
 
 

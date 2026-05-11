@@ -253,6 +253,74 @@ def test_review_cli_accepts_log_level_after_import_command(
     assert f"{receipt_path}: stored extraction 123 for {'a' * 64}" in capsys.readouterr().out
 
 
+def test_review_cli_app_accepts_cache_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    db_path = tmp_path / "reviews.sqlite"
+    cache_path = tmp_path / "pipeline-cache.sqlite"
+    captured: dict[str, object] = {}
+
+    def fake_run_streamlit_app(
+        db_path_arg: Path,
+        *,
+        server_port: int | None,
+        cache_file: Path | None,
+    ) -> None:
+        captured["db_path"] = db_path_arg
+        captured["server_port"] = server_port
+        captured["cache_file"] = cache_file
+
+    monkeypatch.setattr(review_cli, "_run_streamlit_app", fake_run_streamlit_app)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai-review",
+            "--db",
+            str(db_path),
+            "app",
+            "--server-port",
+            "8502",
+            "--cache-file",
+            str(cache_path),
+        ],
+    )
+
+    review_cli.main()
+
+    assert captured == {
+        "db_path": db_path,
+        "server_port": 8502,
+        "cache_file": cache_path,
+    }
+
+
+def test_run_streamlit_app_forwards_cache_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    db_path = tmp_path / "reviews.sqlite"
+    cache_path = tmp_path / "pipeline-cache.sqlite"
+    captured: dict[str, list[str]] = {}
+
+    def fake_streamlit_main() -> None:
+        captured["argv"] = list(sys.argv)
+
+    monkeypatch.setattr("streamlit.web.cli.main", fake_streamlit_main)
+
+    review_cli._run_streamlit_app(db_path, server_port=8502, cache_file=cache_path)
+
+    assert captured["argv"][-5:] == [
+        "--",
+        "--db",
+        str(db_path),
+        "--cache-file",
+        str(cache_path),
+    ]
+    assert captured["argv"][3:5] == ["--server.port", "8502"]
+
+
 def test_run_receipt_pipeline_logs_receipt_path_before_azure_call(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -30,6 +30,11 @@ def main() -> None:
         type=int,
         help="Optional Streamlit server port.",
     )
+    app_parser.add_argument(
+        "--cache-file",
+        type=Path,
+        help="Prepopulate the shared pipeline cache DB path in the Streamlit UI.",
+    )
 
     import_parser = subparsers.add_parser("import", help="Run a baseline pipeline for receipts.")
     _add_log_level_argument(import_parser, default=argparse.SUPPRESS)
@@ -48,7 +53,7 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level, format="%(levelname)s:%(name)s:%(message)s")
     if args.command == "app":
-        _run_streamlit_app(args.db, server_port=args.server_port)
+        _run_streamlit_app(args.db, server_port=args.server_port, cache_file=args.cache_file)
         return
 
     store = ReceiptReviewStore(args.db)
@@ -88,7 +93,12 @@ def _add_log_level_argument(
     )
 
 
-def _run_streamlit_app(db_path: Path, *, server_port: int | None) -> None:
+def _run_streamlit_app(
+    db_path: Path,
+    *,
+    server_port: int | None,
+    cache_file: Path | None,
+) -> None:
     from streamlit.web import cli as streamlit_cli
 
     app_path = Path(__file__).with_name("review_streamlit_app.py")
@@ -104,6 +114,8 @@ def _run_streamlit_app(db_path: Path, *, server_port: int | None) -> None:
         "--db",
         str(db_path),
     ]
+    if cache_file is not None:
+        sys.argv.extend(["--cache-file", str(cache_file)])
     if server_port is not None:
         sys.argv[3:3] = ["--server.port", str(server_port)]
     streamlit_cli.main()

@@ -382,7 +382,16 @@ def main() -> None:
         type=Path,
         help=(
             "SQLite review database. When reviewed data exists for a receipt image SHA, "
-            "use it instead of running the selected extraction pipeline."
+            "use it instead of running the selected extraction pipeline. By default, "
+            "receipts with no reviewed data in this database fail ingestion."
+        ),
+    )
+    parser.add_argument(
+        "--allow-unreviewed",
+        action="store_true",
+        help=(
+            "Allow the selected extraction pipeline to run when --review-db does not "
+            "contain reviewed data for a receipt."
         ),
     )
     parser.add_argument(
@@ -464,6 +473,7 @@ def main() -> None:
                 cache=cache,
                 visionkit_ocr_debug_image_path=visionkit_ocr_debug_image_path,
                 review_store=review_store,
+                require_reviewed_data=not args.allow_unreviewed,
             )
         if transaction.receipt is None:
             raise ValueError(f"transaction from {receipt_path} does not contain a receipt")
@@ -584,6 +594,7 @@ def _process_receipt(
     cache: SqliteCallCache | None,
     visionkit_ocr_debug_image_path: Path | None = None,
     review_store: ReceiptReviewStore | None = None,
+    require_reviewed_data: bool = False,
 ) -> Transaction:
     receipt_content = receipt_path.read_bytes()
     receipt_sha256_hex = sha256_hex(receipt_content)
@@ -597,6 +608,10 @@ def _process_receipt(
                 ingestion_file_url=file_url_from_path(receipt_path),
                 ingestion_file_sha256_hex=receipt_sha256_hex,
                 ingestion_type=IngestionType.receipt_img,
+            )
+        if require_reviewed_data:
+            raise ValueError(
+                f"receipt {receipt_path} ({receipt_sha256_hex}) does not have reviewed data"
             )
     if pipeline == "azure":
         return populate_transaction_ingestion_metadata(

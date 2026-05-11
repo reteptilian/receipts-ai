@@ -1167,6 +1167,83 @@ def test_main_processes_multiple_receipts_as_combined_csv(
     assert [row["item_description"] for row in rows] == ["Item 001", "Item 002"]
 
 
+def test_main_fails_when_review_db_has_no_reviewed_data(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"unreviewed receipt")
+    review_db_path = tmp_path / "reviews.sqlite"
+
+    def fail_analyze_receipt_file(_path: Path) -> object:
+        raise AssertionError("unreviewed receipt should not be extracted")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai-ingest-receipts",
+            "--review-db",
+            str(review_db_path),
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fail_analyze_receipt_file)
+
+    with pytest.raises(ValueError, match="does not have reviewed data"):
+        main()
+
+
+def test_main_allow_unreviewed_runs_pipeline_when_review_db_has_no_reviewed_data(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    receipt_path = tmp_path / "receipt.pdf"
+    receipt_path.write_bytes(b"unreviewed receipt")
+    review_db_path = tmp_path / "reviews.sqlite"
+    analyze_calls: list[Path] = []
+
+    def fake_analyze_receipt_file(path: Path) -> Path:
+        analyze_calls.append(path)
+        return path
+
+    def fake_transaction_from_document_intelligence_result(_result: object) -> Transaction:
+        return Transaction(
+            id="pipeline_id",
+            source=Source.receipt,
+            transaction_date=date(2026, 4, 27),
+            payee="Pipeline Shop",
+            amount="-3.00",
+            currency="USD",
+            receipt=Receipt(items=[ReceiptItem(description="Tea", amount="3.00")]),
+        )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "receipts-ai-ingest-receipts",
+            "--review-db",
+            str(review_db_path),
+            "--allow-unreviewed",
+            str(receipt_path),
+        ],
+    )
+    monkeypatch.setattr(ingest_receipts, "analyze_receipt_file", fake_analyze_receipt_file)
+    monkeypatch.setattr(
+        ingest_receipts,
+        "transaction_from_document_intelligence_result",
+        fake_transaction_from_document_intelligence_result,
+    )
+
+    main()
+
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert analyze_calls == [receipt_path]
+    assert [row["payee"] for row in rows] == ["Pipeline Shop"]
+
+
 def test_receipt_image_transaction_id_is_pipeline_independent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
