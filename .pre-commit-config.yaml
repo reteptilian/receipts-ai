@@ -7,9 +7,21 @@ repos:
         language: system
         files: ^backend/
         pass_filenames: false
+      - id: backend-tests
+        name: Backend Tests
+        entry: bash -c "cd backend && make test"
+        language: system
+        files: ^backend/
+        pass_filenames: false
       - id: cli-lint
         name: CLI Lint
         entry: bash -c "cd cli && make lint"
+        language: system
+        files: ^cli/
+        pass_filenames: false
+      - id: cli-tests
+        name: CLI Tests
+        entry: bash -c "cd cli && make test"
         language: system
         files: ^cli/
         pass_filenames: false
