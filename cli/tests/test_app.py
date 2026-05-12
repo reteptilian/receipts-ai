@@ -601,6 +601,47 @@ async def test_enter_on_transaction_without_receipt_items_opens_review_screen() 
 
 
 @pytest.mark.anyio
+async def test_review_screen_displays_mcc_description_as_read_only_reference() -> None:
+    transaction = _transaction(
+        "mcc",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.mcc_description = "Grocery Stores, Supermarkets"
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        mcc_description = app.screen.query_one("#transaction-mcc-description", Static)
+
+    assert str(mcc_description.content) == "MCC description: Grocery Stores, Supermarkets"
+    assert not mcc_description.has_class("hidden")
+
+
+@pytest.mark.anyio
+async def test_review_screen_hides_blank_mcc_description_reference() -> None:
+    transaction = _transaction(
+        "no_mcc",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        mcc_description = app.screen.query_one("#transaction-mcc-description", Static)
+
+    assert str(mcc_description.content) == ""
+    assert mcc_description.has_class("hidden")
+
+
+@pytest.mark.anyio
 async def test_app_displays_transactions_sorted_by_date_then_amount() -> None:
     transactions = [
         _transaction("late", transaction_date=date(2026, 5, 7), amount="-1"),

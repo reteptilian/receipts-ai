@@ -122,6 +122,7 @@ class TransactionReviewScreen(Screen[None]):
             )
         yield Static("", id="review-state")
         yield Static("", id="transaction-taxonomy")
+        yield Static("", id="transaction-mcc-description")
         yield Static("", id="receipt-edit-status")
         yield Static("Category Allocations", id="category-allocations-title")
         yield DataTable(id="category-allocations")
@@ -146,6 +147,7 @@ class TransactionReviewScreen(Screen[None]):
         self._refresh_category_allocations_table()
         self._refresh_review_state()
         self._refresh_transaction_taxonomy()
+        self._refresh_transaction_mcc_description()
         if self._has_receipt_items():
             self.query_one("#category-allocations-title", Static).add_class("hidden")
             allocations_table.add_class("hidden")
@@ -474,6 +476,16 @@ class TransactionReviewScreen(Screen[None]):
         taxonomy = self.query_one("#transaction-taxonomy", Static)
         value = _effective_transaction_taxonomy(self._transaction) or "Unassigned"
         taxonomy.update(f"Taxonomy: {value}")
+
+    def _refresh_transaction_mcc_description(self) -> None:
+        mcc_description = self.query_one("#transaction-mcc-description", Static)
+        value = self._transaction.mcc_description
+        if value is None or not value.strip():
+            mcc_description.add_class("hidden")
+            mcc_description.update("")
+            return
+        mcc_description.remove_class("hidden")
+        mcc_description.update(f"MCC description: {value.strip()}")
 
     def _validate_save(self) -> None:
         transaction_amount = _decimal_amount(
