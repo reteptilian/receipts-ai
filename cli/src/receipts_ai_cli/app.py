@@ -4,6 +4,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from receipts_ai.budget_categories import load_budget_category_options
 from receipts_ai.categorization import load_budget_category_choices
 
 # pyright: reportPrivateUsage=false
@@ -30,6 +31,7 @@ __all__ = [
     "TransactionReviewScreen",
     "link_bank_statement_transaction_to_receipt",
     "load_budget_category_choices",
+    "load_budget_category_options",
     "save_transaction_review_edits",
     "transactions_from_firestore",
     "unlink_bank_statement_transaction_from_receipt",

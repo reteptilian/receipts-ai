@@ -14,6 +14,18 @@ from importlib import resources
 from pathlib import Path
 from typing import Protocol, cast
 
+from receipts_ai.budget_categories import (
+    BudgetCategoryCatalog,
+    BudgetCategoryChoice,
+    catalog_from_legacy_tree,
+    load_budget_category_catalog,
+)
+from receipts_ai.budget_categories import (
+    load_budget_categories as _load_budget_categories,
+)
+from receipts_ai.budget_categories import (
+    load_budget_category_choices as _load_budget_category_choices,
+)
 from receipts_ai.cache import SqliteCallCache
 from receipts_ai.config import first_config_value
 from receipts_ai.models.transaction import CategoryAllocation, ReceiptItem, Source1, Transaction
@@ -126,15 +138,6 @@ class TaxonomyEmbeddingSearchResult:
     @property
     def path_text(self) -> str:
         return _format_taxonomy_path(self.path)
-
-
-@dataclass(frozen=True)
-class _BudgetCategoryPath:
-    path: tuple[str, ...]
-
-    @property
-    def path_text(self) -> str:
-        return " > ".join(self.path)
 
 
 class UrlLibOllamaClient:
@@ -621,20 +624,21 @@ def categorize_receipt_items(
     transaction: Transaction,
     *,
     client: CategoryModelClient | None = None,
-    categories: dict[str, object] | None = None,
+    categories: dict[str, object] | BudgetCategoryCatalog | None = None,
 ) -> Transaction:
     if transaction.receipt is None:
         raise ValueError("transaction does not contain a receipt")
 
     active_client = client if client is not None else create_ollama_category_client()
-    active_categories = categories if categories is not None else load_budget_categories()
-    flattened_choices = tuple(
-        category.path_text for category in _flatten_budget_categories(active_categories)
-    )
+    budget_category_choices = _budget_category_choices(categories)
+    flattened_choices = tuple(category.path_text for category in budget_category_choices)
+    category_id_by_path = {
+        category.path_text: category.category_id for category in budget_category_choices
+    }
 
     for item in transaction.receipt.items:
         logger.info("Categorizing receipt item %s", item.description)
-        item.category_id = _choose_category(
+        category_path = _choose_category(
             client=active_client,
             prompt=_category_prompt(
                 "Choose the best budget category path.",
@@ -643,6 +647,7 @@ def categorize_receipt_items(
             ),
             choices=flattened_choices,
         )
+        item.category_id = category_id_by_path[category_path]
         logger.info("Categorized receipt item %s as %s", item.description, item.category_id)
 
     return transaction
@@ -652,17 +657,19 @@ def categorize_transactions(
     transactions: list[Transaction] | tuple[Transaction, ...],
     *,
     client: CategoryModelClient | None = None,
-    categories: dict[str, object] | None = None,
+    categories: dict[str, object] | BudgetCategoryCatalog | None = None,
     minimum_confidence: float = TRANSACTION_MIN_CATEGORY_CONFIDENCE,
 ) -> list[Transaction] | tuple[Transaction, ...]:
     if minimum_confidence < 0 or minimum_confidence > 1:
         raise ValueError("minimum_confidence must be between 0 and 1")
 
     active_client = client if client is not None else create_ollama_category_client()
-    active_categories = categories if categories is not None else load_budget_categories()
-    flattened_choices = tuple(
-        category.path_text for category in _flatten_budget_categories(active_categories)
-    )
+    budget_category_choices = _budget_category_choices(categories)
+    flattened_choices = tuple(category.path_text for category in budget_category_choices)
+    _transaction_category_choice_aliases(flattened_choices)
+    category_id_by_path = {
+        category.path_text: category.category_id for category in budget_category_choices
+    }
 
     for transaction in transactions:
         logger.info("Categorizing transaction %s", transaction.id)
@@ -685,7 +692,7 @@ def categorize_transactions(
 
         transaction.category_allocations = [
             CategoryAllocation(
-                category_id=category_choice.choice,
+                category_id=category_id_by_path[category_choice.choice],
                 amount=transaction.amount,
                 confidence=category_choice.probability,
                 source=Source1.model,
@@ -694,7 +701,7 @@ def categorize_transactions(
         logger.info(
             "Categorized transaction %s as %s with confidence %.3f",
             transaction.id,
-            category_choice.choice,
+            category_id_by_path[category_choice.choice],
             category_choice.probability,
         )
 
@@ -884,17 +891,23 @@ def classify_transactions_by_product_taxonomy(
 
 
 def load_budget_categories() -> dict[str, object]:
-    categories_file = resources.files("receipts_ai.models").joinpath("budget_categories.json")
-    with categories_file.open("r", encoding="utf-8") as file:
-        payload = json.load(file)
-    if not isinstance(payload, dict):
-        raise RuntimeError("budget_categories.json must contain a JSON object")
-    return cast(dict[str, object], payload)
+    return _load_budget_categories()
 
 
-def load_budget_category_choices(categories: dict[str, object] | None = None) -> tuple[str, ...]:
-    active_categories = categories if categories is not None else load_budget_categories()
-    return tuple(category.path_text for category in _flatten_budget_categories(active_categories))
+def load_budget_category_choices(
+    categories: dict[str, object] | BudgetCategoryCatalog | None = None,
+) -> tuple[str, ...]:
+    return _load_budget_category_choices(categories)
+
+
+def _budget_category_choices(
+    categories: dict[str, object] | BudgetCategoryCatalog | None,
+) -> tuple[BudgetCategoryChoice, ...]:
+    if isinstance(categories, BudgetCategoryCatalog):
+        return categories.choices()
+    if categories is not None:
+        return catalog_from_legacy_tree(categories).choices()
+    return load_budget_category_catalog().choices()
 
 
 def load_product_taxonomy(path: Path | None = None) -> dict[str, object]:
@@ -1707,26 +1720,6 @@ def _clean_description_response(response: str) -> str:
 
     cleaned = lines[0].strip(" \t-*:\"'`")
     return re.sub(r"\s+", " ", cleaned).strip()
-
-
-def _flatten_budget_categories(categories: dict[str, object]) -> tuple[_BudgetCategoryPath, ...]:
-    flattened: list[_BudgetCategoryPath] = []
-    for category, child in categories.items():
-        _append_budget_category_paths(flattened, (category,), child)
-    if not flattened:
-        raise RuntimeError("budget_categories.json must contain at least one leaf category")
-    return tuple(flattened)
-
-
-def _append_budget_category_paths(
-    flattened: list[_BudgetCategoryPath], path: tuple[str, ...], node: object
-) -> None:
-    if isinstance(node, dict) and node:
-        for category, child in cast(dict[str, object], node).items():
-            _append_budget_category_paths(flattened, (*path, category), child)
-        return
-
-    flattened.append(_BudgetCategoryPath(path=path))
 
 
 def _set_item_taxonomy(item: ReceiptItem, selected_path: list[str]) -> None:

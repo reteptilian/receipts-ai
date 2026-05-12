@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from textual.app import ComposeResult
 from textual.containers import Center, Horizontal, Vertical
@@ -45,17 +45,23 @@ class CellEditScreen(ModalScreen[str]):
 class CategoryChoiceScreen(ModalScreen[str]):
     """Screen for choosing a budget category."""
 
-    def __init__(self, value: str, choices: Sequence[str]) -> None:
+    def __init__(
+        self, value: str, choices: Sequence[str], labels_by_choice: Mapping[str, str] | None = None
+    ) -> None:
         super().__init__()
         self._value = value
         self._choices = tuple(choices)
+        self._labels_by_choice = dict(labels_by_choice or {})
 
     def compose(self) -> ComposeResult:
         with Center():
             with Vertical(id="category-choice-dialog"):
                 yield Label("Choose Category ID")
                 yield OptionList(
-                    *(Option(choice) for choice in self._choices),
+                    *(
+                        Option(self._labels_by_choice.get(choice, choice))
+                        for choice in self._choices
+                    ),
                     id="category-choice-list",
                 )
                 with Horizontal(id="category-choice-buttons"):

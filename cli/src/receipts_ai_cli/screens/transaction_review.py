@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any, cast
 
 from pydantic import ValidationError
+from receipts_ai.budget_categories import BudgetCategoryChoice
 from receipts_ai.models.transaction import (
     CategoryAllocation,
     ReceiptItem,
@@ -89,6 +90,7 @@ class TransactionReviewScreen(Screen[None]):
         *,
         receipt_transaction: Transaction | None = None,
         category_choices: Sequence[str] | None = None,
+        category_options: Sequence[BudgetCategoryChoice] | None = None,
     ) -> None:
         super().__init__()
         self._source_transaction = transaction
@@ -103,11 +105,24 @@ class TransactionReviewScreen(Screen[None]):
         )
         self._dirty = False
         self._canceling_header_input_ids: set[str] = set()
+        active_category_options = (
+            _app_module().load_budget_category_options()
+            if category_options is None and category_choices is None
+            else category_options or ()
+        )
+        self._category_options = tuple(active_category_options)
+        self._category_display_by_id = {
+            option.category_id: option.path_text for option in self._category_options
+        }
         self._category_choices = (
             tuple(category_choices)
             if category_choices is not None
-            else _app_module().load_budget_category_choices()
+            else tuple(option.category_id for option in self._category_options)
         )
+        self._category_choice_labels = {
+            choice: self._category_display_by_id.get(choice, choice)
+            for choice in self._category_choices
+        }
 
     def action_exit_without_saving(self) -> None:
         self.dismiss()
@@ -159,7 +174,7 @@ class TransactionReviewScreen(Screen[None]):
         allocations_table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
         allocations_table.cursor_type = "cell"
         allocations_table.zebra_stripes = True
-        allocations_table.add_columns("Category ID", "Amount")
+        allocations_table.add_columns("Category", "Amount")
         self._refresh_category_allocations_table()
         self._refresh_review_state()
         self._refresh_transaction_taxonomy()
@@ -191,7 +206,7 @@ class TransactionReviewScreen(Screen[None]):
             return
 
         for item in receipt.items:
-            table.add_row(*_receipt_item_row(item))
+            table.add_row(*_receipt_item_row(item, self._category_display))
 
         table.focus()
 
@@ -241,7 +256,7 @@ class TransactionReviewScreen(Screen[None]):
             return
 
         column_label = (
-            ("Category ID", "Amount")[coordinate.column]
+            ("Category", "Amount")[coordinate.column]
             if table.id == "category-allocations"
             else RECEIPT_ITEM_COLUMNS[coordinate.column].label
         )
@@ -271,7 +286,11 @@ class TransactionReviewScreen(Screen[None]):
                         self._commit_receipt_item_cell_edit(coordinate, new_value)
 
             self.app.push_screen(
-                CategoryChoiceScreen(str(value), self._category_choices),
+                CategoryChoiceScreen(
+                    self._category_id_from_display(str(value)),
+                    self._category_choices,
+                    self._category_choice_labels,
+                ),
                 check_category_choice,
             )
             return
@@ -309,8 +328,8 @@ class TransactionReviewScreen(Screen[None]):
             return
         allocations = _effective_category_allocations(self._transaction)
         category_id = (
-            "Miscellaneous > Uncategorized"
-            if "Miscellaneous > Uncategorized" in self._category_choices
+            "miscellaneous.uncategorized"
+            if "miscellaneous.uncategorized" in self._category_choices
             else self._category_choices[0]
         )
         allocations.append(UserCategoryAllocation(category_id=category_id, amount="0.00"))
@@ -400,7 +419,7 @@ class TransactionReviewScreen(Screen[None]):
         try:
             match coordinate.column:
                 case 0:
-                    update["category_id"] = _parse_required_text(raw_value.strip(), "Category ID")
+                    update["category_id"] = _parse_required_text(raw_value.strip(), "Category")
                 case 1:
                     update["amount"] = _parse_required_decimal_text(raw_value.strip(), "Amount")
                 case _:
@@ -409,7 +428,7 @@ class TransactionReviewScreen(Screen[None]):
         except (ValueError, ValidationError) as exc:
             self._show_edit_error(
                 _field_edit_error_message(
-                    ("Category ID", "Category allocation amount")[coordinate.column], exc
+                    ("Category", "Category allocation amount")[coordinate.column], exc
                 )
             )
             return
@@ -440,7 +459,7 @@ class TransactionReviewScreen(Screen[None]):
         table = cast(DataTable[str], self.query_one("#receipt-items", DataTable))
         table.update_cell_at(
             coordinate,
-            column.formatter(item),
+            _receipt_item_row(item, self._category_display)[coordinate.column],
             update_width=True,
         )
         self._mark_dirty(f"Draft {column.label} edit")
@@ -519,7 +538,7 @@ class TransactionReviewScreen(Screen[None]):
         table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
         table.clear(columns=False)
         for allocation in _effective_category_allocations(self._transaction):
-            table.add_row(allocation.category_id, allocation.amount)
+            table.add_row(self._category_display(allocation.category_id), allocation.amount)
 
     def _refresh_review_state(self) -> None:
         review_state = self.query_one("#review-state", Static)
@@ -615,6 +634,17 @@ class TransactionReviewScreen(Screen[None]):
         status = self.query_one("#receipt-edit-status", Static)
         status.add_class("error")
         status.update(escape(message))
+
+    def _category_display(self, category_id: str | None) -> str:
+        if category_id is None:
+            return ""
+        return self._category_display_by_id.get(category_id, category_id)
+
+    def _category_id_from_display(self, value: str) -> str:
+        for category_id, display in self._category_display_by_id.items():
+            if value == display:
+                return category_id
+        return value
 
 
 ReceiptItemsScreen = TransactionReviewScreen

@@ -9,6 +9,7 @@ from typing import cast
 from unittest.mock import patch
 
 import pytest
+from receipts_ai.budget_categories import BudgetCategoryChoice
 from receipts_ai.models.transaction import (
     CategoryAllocation,
     Receipt,
@@ -33,6 +34,12 @@ from receipts_ai_cli.app import (
     main,
 )
 from receipts_ai_cli.screens.modals import TaxonomyChoiceScreen
+
+
+def _category_choice(category_id: str, path: str) -> BudgetCategoryChoice:
+    return BudgetCategoryChoice(category_id=category_id, path=tuple(path.split(" > ")))
+
+
 from receipts_ai_cli.taxonomy_selection import TaxonomySearcher
 
 
@@ -902,10 +909,10 @@ async def test_category_allocation_category_id_uses_budget_category_picker() -> 
 
     with (
         patch(
-            "receipts_ai_cli.app.load_budget_category_choices",
+            "receipts_ai_cli.app.load_budget_category_options",
             return_value=(
-                "Taxes > Income Taxes",
-                "Miscellaneous > Uncategorized",
+                _category_choice("taxes.income_taxes", "Taxes > Income Taxes"),
+                _category_choice("miscellaneous.uncategorized", "Miscellaneous > Uncategorized"),
             ),
         ),
         patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save,
@@ -938,7 +945,7 @@ async def test_category_allocation_category_id_uses_budget_category_picker() -> 
     assert transaction.user_overrides is not None
     assert transaction.user_overrides.category_allocations is not None
     assert transaction.user_overrides.category_allocations[0].category_id == (
-        "Miscellaneous > Uncategorized"
+        "miscellaneous.uncategorized"
     )
 
 
@@ -961,10 +968,10 @@ async def test_receipt_item_category_id_uses_budget_category_picker() -> None:
 
     with (
         patch(
-            "receipts_ai_cli.app.load_budget_category_choices",
+            "receipts_ai_cli.app.load_budget_category_options",
             return_value=(
-                "Coffee",
-                "Miscellaneous > Uncategorized",
+                _category_choice("coffee", "Coffee"),
+                _category_choice("miscellaneous.uncategorized", "Miscellaneous > Uncategorized"),
             ),
         ),
         patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save,
@@ -997,7 +1004,7 @@ async def test_receipt_item_category_id_uses_budget_category_picker() -> None:
     assert transaction.receipt is not None
     assert transaction.receipt.items[0].user_overrides is not None
     assert transaction.receipt.items[0].user_overrides.category_id == (
-        "Miscellaneous > Uncategorized"
+        "miscellaneous.uncategorized"
     )
 
 

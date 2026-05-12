@@ -321,7 +321,7 @@ def test_categorize_receipt_items_uses_clean_description_and_flattened_category(
     result = categorize_receipt_items(transaction, client=client)
 
     assert result is transaction
-    assert item.category_id == "Food & Dining > Groceries"
+    assert item.category_id == "food_dining.groceries"
     assert len(client.prompts) == 1
     assert "Food & Dining" in client.prompts[0]
     assert "Groceries" in client.prompts[0]
@@ -357,7 +357,7 @@ def test_categorize_receipt_items_can_choose_from_flattened_categories():
     )
 
     assert result is transaction
-    assert item.category_id == "Food & Dining > Groceries"
+    assert item.category_id == "food_dining.groceries"
     assert len(client.prompts) == 1
     assert "Choose the best budget category path." in client.prompts[0]
     assert "- Housing & Utilities > Mortgage & Rent" in client.prompts[0]
@@ -402,7 +402,7 @@ def test_categorize_transactions_sets_single_model_allocation_from_flattened_cat
     assert allocations is not None
     assert len(allocations) == 1
     allocation = allocations[0]
-    assert allocation.category_id == "Food & Dining > Groceries"
+    assert allocation.category_id == "food_dining.groceries"
     assert allocation.amount == "-42.19"
     assert allocation.confidence == 0.78
     assert allocation.source == "model"
@@ -477,7 +477,7 @@ def test_categorize_transactions_can_choose_from_flattened_categories():
     allocations = transaction.category_allocations
     assert allocations is not None
     assert len(allocations) == 1
-    assert allocations[0].category_id == "Food & Dining > Groceries"
+    assert allocations[0].category_id == "food_dining.groceries"
     assert allocations[0].confidence == 0.82
     assert len(client.prompts) == 1
     assert "Choose the best budget category path." in client.prompts[0]
@@ -574,7 +574,7 @@ def test_categorize_transactions_uses_single_character_aliases_for_budget_catego
     allocations = transaction.category_allocations
     assert allocations is not None
     assert len(allocations) == 1
-    assert allocations[0].category_id == "Pets & Family > Childcare & Daycare"
+    assert allocations[0].category_id == "pets_family.childcare_daycare"
     assert "f: Pets & Family > Childcare & Daycare" in client.prompts[0]
     assert "41: Pets & Family > Childcare & Daycare" not in client.prompts[0]
 

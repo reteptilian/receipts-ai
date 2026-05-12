@@ -72,6 +72,7 @@ receipts-ai-ingest-amazon = "receipts_ai.ingest_amazon:main"
 receipts-ai-ingest-receipts = "receipts_ai.ingest_receipts:main"
 receipts-ai-ingest-statements = "receipts_ai.ingest_statements:main"
 receipts-ai-review = "receipts_ai.review_cli:main"
+receipts-ai-budget-categories = "receipts_ai.budget_categories:main"
 
 
 # ---- Build system ----

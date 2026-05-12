@@ -13,8 +13,10 @@ __all__ = (  # noqa: F405
     "create_firestore_client",
     "create_ollama_category_client",
     "create_taxonomy_embedding_client",
+    "delete_category_from_transaction",
     "enrich_receipt_items_with_brave_search",
     "enrich_transactions_with_brave_search",
+    "load_budget_category_catalog",
     "load_product_taxonomy_embeddings",
     "load_budget_category_choices",
     "main",
@@ -24,6 +26,7 @@ __all__ = (  # noqa: F405
     "set_receipt_item_user_overrides",
     "set_transaction_user_overrides",
     "stream_transactions_from_firestore",
+    "summarize_delete_category_impact",
     "transaction_combined_description",
     "transaction_firestore_document",
     "transactions_from_firestore",
@@ -31,6 +34,7 @@ __all__ = (  # noqa: F405
 )
 
 from .brave_search import *  # noqa: F403
+from .budget_categories import *  # noqa: F403
 from .categorization import *  # noqa: F403
 from .document_intelligence import *  # noqa: F403
 from .firestore_client import *  # noqa: F403

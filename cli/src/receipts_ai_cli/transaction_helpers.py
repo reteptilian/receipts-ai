@@ -25,6 +25,7 @@ TransactionLoader = Callable[[], Sequence[Transaction]]
 
 ReceiptItemParser = Callable[[str], object | None]
 ReceiptItemFormatter = Callable[[ReceiptItem], str]
+CategoryDisplayResolver = Callable[[str | None], str]
 
 
 class TransactionTableColumn(NamedTuple):
@@ -128,7 +129,7 @@ RECEIPT_ITEM_COLUMNS = (
         ),
     ),
     ReceiptItemColumn(
-        "Category ID",
+        "Category",
         "category_id",
         lambda value: _parse_optional_text(value),
         lambda item: _format_optional(_effective_receipt_item_value(item, "category_id")),
@@ -236,13 +237,16 @@ def _format_receipt_indicator(transaction: Transaction, *, selected: bool = Fals
     return indicator
 
 
-def _format_transaction_category(transaction: Transaction) -> str:
+def _format_transaction_category(
+    transaction: Transaction, category_display: CategoryDisplayResolver | None = None
+) -> str:
     allocations = _effective_category_allocations(transaction)
     if not allocations:
         return ""
+    active_category_display = category_display or _format_category_id
 
     if len(allocations) == 1:
-        return allocations[0].category_id
+        return active_category_display(allocations[0].category_id)
 
     largest_allocation = max(
         allocations,
@@ -250,7 +254,7 @@ def _format_transaction_category(transaction: Transaction) -> str:
             _decimal_amount(allocation.amount, "Category allocation amount")
         ),
     )
-    return f"{largest_allocation.category_id}, ..."
+    return f"{active_category_display(largest_allocation.category_id)}, ..."
 
 
 def _format_transaction_status(transaction: Transaction) -> str:
@@ -281,8 +285,22 @@ def _is_transaction_pair(transaction: Transaction) -> bool:
     )
 
 
-def _receipt_item_row(item: ReceiptItem) -> list[str]:
-    return [column.formatter(item) for column in RECEIPT_ITEM_COLUMNS]
+def _receipt_item_row(
+    item: ReceiptItem, category_display: CategoryDisplayResolver | None = None
+) -> list[str]:
+    row = [column.formatter(item) for column in RECEIPT_ITEM_COLUMNS]
+    if category_display is not None:
+        for index, column in enumerate(RECEIPT_ITEM_COLUMNS):
+            if column.field_name == "category_id":
+                row[index] = category_display(
+                    cast(str | None, _effective_receipt_item_value(item, "category_id"))
+                )
+                break
+    return row
+
+
+def _format_category_id(category_id: str | None) -> str:
+    return "" if category_id is None else category_id
 
 
 def _format_optional(value: object | None) -> str:

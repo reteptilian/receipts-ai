@@ -216,6 +216,7 @@ class ReceiptsAIApp(App[None]):
         self._transactions_by_id: dict[str, Transaction] = {}
         self._receipt_transactions_by_display_id: dict[str, Transaction] = {}
         self._selected_transaction_ids: set[str] = set()
+        self._category_display_by_id: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -249,17 +250,27 @@ class ReceiptsAIApp(App[None]):
 
         try:
             transactions = list(self._transaction_loader())
+            category_options = tuple(_app_module().load_budget_category_options())
         except Exception as exc:  # pragma: no cover - exercised through app runtime.
             self.call_from_thread(self._show_error, exc)
             return
 
-        self.call_from_thread(self._show_transactions, transactions, cursor_row_key)
+        self.call_from_thread(
+            self._show_transactions, transactions, cursor_row_key, category_options
+        )
 
     def _show_transactions(
-        self, transactions: Sequence[Transaction], cursor_row_key: RowKey | None = None
+        self,
+        transactions: Sequence[Transaction],
+        cursor_row_key: RowKey | None = None,
+        category_options: Sequence[Any] | None = None,
     ) -> None:
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))
         table.clear()
+        if category_options is not None:
+            self._category_display_by_id = {
+                option.category_id: option.path_text for option in category_options
+            }
         sorted_transactions = sorted(transactions, key=_transaction_sort_key)
         display_transactions = _display_transactions(sorted_transactions)
         self._transactions_by_id = {
@@ -276,7 +287,7 @@ class ReceiptsAIApp(App[None]):
                 transaction.description or "",
                 _effective_transaction_taxonomy(transaction),
                 _format_transaction_status(transaction),
-                _format_transaction_category(transaction),
+                _format_transaction_category(transaction, self._category_display),
                 transaction.ingestion_filename or "",
                 _format_receipt_indicator(
                     self._receipt_transactions_by_display_id.get(transaction.id, transaction),
@@ -331,7 +342,11 @@ class ReceiptsAIApp(App[None]):
             self.run_worker(self._load_transactions, thread=True, name="load-transactions")
 
         self.push_screen(
-            TransactionReviewScreen(transaction, receipt_transaction=receipt_transaction),
+            TransactionReviewScreen(
+                transaction,
+                receipt_transaction=receipt_transaction,
+                category_options=tuple(_app_module().load_budget_category_options()),
+            ),
             on_return,
         )
 
@@ -459,3 +474,8 @@ class ReceiptsAIApp(App[None]):
         else:
             status.remove_class("error")
         status.update(escape(message))
+
+    def _category_display(self, category_id: str | None) -> str:
+        if category_id is None:
+            return ""
+        return self._category_display_by_id.get(category_id, category_id)
