@@ -25,6 +25,25 @@ repos:
         language: system
         files: ^cli/
         pass_filenames: false
+      - id: flutter-format
+        name: Flutter Format
+        # We use 'bash -c' to navigate into the subdir before running the command
+        entry: bash -c "cd ui/tracker_ui && dart format . --set-exit-if-changed"
+        language: system
+        files: ^ui/tracker_ui/.*\.dart$
+        pass_filenames: false
+      - id: flutter-analyze
+        name: Flutter Analyze
+        entry: bash -c "cd ui/tracker_ui && flutter analyze"
+        language: system
+        files: ^ui/tracker_ui/
+        pass_filenames: false
+      - id: flutter-tests
+        name: Flutter Tests
+        entry: bash -c "cd ui/tracker_ui && flutter test"
+        language: system
+        files: ^ui/tracker_ui/
+        pass_filenames: false
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.24.2
     hooks:
