@@ -12,7 +12,7 @@ from typing import Protocol, cast
 
 from rich import print as rprint
 
-DEFAULT_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
+DEFAULT_EMBEDDING_MODEL = "Snowflake/snowflake-arctic-embed-m-v1.5"
 DEFAULT_BATCH_SIZE = 64
 ARTIFACT_SCHEMA_VERSION = 1
 

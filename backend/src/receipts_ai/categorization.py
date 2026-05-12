@@ -54,7 +54,7 @@ TRANSACTION_CATEGORY_CHOICE_ALIASES = tuple(
 MAX_TRANSACTION_CATEGORY_ALIAS_CHOICES = len(TRANSACTION_CATEGORY_CHOICE_ALIASES)
 PRODUCT_TAXONOMY_FILENAME = "taxonomy.en-US.txt"
 PRODUCT_TAXONOMY_EMBEDDINGS_FILENAME = "taxonomy_embeddings.json"
-DEFAULT_TAXONOMY_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
+DEFAULT_TAXONOMY_EMBEDDING_MODEL = "Snowflake/snowflake-arctic-embed-m-v1.5"
 TAXONOMY_EMBEDDING_QUERY_PREFIX = (
     "Represent this sentence for searching relevant product taxonomy categories: "
 )
