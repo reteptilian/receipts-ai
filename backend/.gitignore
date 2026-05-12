@@ -180,3 +180,11 @@ cython_debug/
 
 
 taxonomy_embeddings.json
+
+
+# Prevent creds from accidental commit
+credentials.json
+authorized_user.json
+client_secret.json
+service_account.json
+*-key.json
