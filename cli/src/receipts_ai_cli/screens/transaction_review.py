@@ -50,6 +50,11 @@ from receipts_ai_cli.transaction_helpers import (
     _receipt_item_row,
 )
 
+
+class TransactionTaxonomyStatic(Static, can_focus=True):
+    """Focusable transaction taxonomy field."""
+
+
 _HEADER_INPUT_IDS = frozenset(
     {
         "receipt-date",
@@ -132,7 +137,7 @@ class TransactionReviewScreen(Screen[None]):
                 compact=True,
             )
         yield Static("", id="review-state")
-        yield Static("", id="transaction-taxonomy")
+        yield TransactionTaxonomyStatic("", id="transaction-taxonomy")
         yield Static("", id="transaction-mcc-description")
         yield Static("", id="receipt-edit-status")
         yield Static("Category Allocations", id="category-allocations-title")
@@ -195,6 +200,10 @@ class TransactionReviewScreen(Screen[None]):
         if data_table.id in {"category-allocations", "receipt-items"}:
             self.action_edit_cell()
 
+    def on_click(self, event: events.Click) -> None:
+        if event.widget is self.query_one("#transaction-taxonomy", TransactionTaxonomyStatic):
+            self.action_edit_transaction_taxonomy()
+
     def on_key(self, event: events.Key) -> None:
         if event.key == "escape" and isinstance(self.focused, Input):
             input_widget = self.focused
@@ -202,6 +211,12 @@ class TransactionReviewScreen(Screen[None]):
                 self._cancel_header_input_edit(input_widget)
                 event.stop()
                 event.prevent_default()
+        if event.key in {"enter", "space"} and self.focused is self.query_one(
+            "#transaction-taxonomy", TransactionTaxonomyStatic
+        ):
+            self.action_edit_transaction_taxonomy()
+            event.stop()
+            event.prevent_default()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self._commit_header_input(event.input)
@@ -214,6 +229,10 @@ class TransactionReviewScreen(Screen[None]):
             self._commit_header_input(event.input)
 
     def action_edit_cell(self) -> None:
+        if self.focused is self.query_one("#transaction-taxonomy", TransactionTaxonomyStatic):
+            self.action_edit_transaction_taxonomy()
+            return
+
         table = self._focused_edit_table()
         if table is None:
             return

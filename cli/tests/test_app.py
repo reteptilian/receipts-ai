@@ -55,6 +55,35 @@ def _transaction(
     )
 
 
+class _FakeTaxonomySearcher:
+    choices = (
+        "Food, Beverages & Tobacco > Beverages > Coffee",
+        "Vehicles & Parts > Vehicle Fuels & Lubricants",
+    )
+    semantic_error = None
+
+    def exact_matches(self, query: str) -> tuple[str, ...]:
+        folded_query = query.casefold()
+        return tuple(choice for choice in self.choices if folded_query in choice.casefold())
+
+    def semantic_matches(self, _query: str) -> tuple[str, ...]:
+        return ()
+
+    def combine_matches(
+        self,
+        query: str,
+        *,
+        semantic_matches: tuple[str, ...] = (),
+    ) -> tuple[str, ...]:
+        if not query.strip():
+            return self.choices
+        combined: list[str] = []
+        for choice in (*self.exact_matches(query), *semantic_matches):
+            if choice not in combined:
+                combined.append(choice)
+        return tuple(combined)
+
+
 def test_app_title_defaults_to_class_name() -> None:
     app = ReceiptsAIApp()
 
@@ -598,6 +627,67 @@ async def test_enter_on_transaction_without_receipt_items_opens_review_screen() 
     assert receipt_items.row_count == 0
     assert "Save and Exit" in str(controls.content)
     assert "Exit Without Saving" in str(controls.content)
+
+
+@pytest.mark.anyio
+async def test_transaction_taxonomy_is_focusable_and_editable_with_keyboard() -> None:
+    transaction = _transaction(
+        "no_receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Gas", amount="-7.5")]
+    transaction.taxonomy = "Vehicles & Parts > Vehicle Fuels & Lubricants"
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with patch(
+        "receipts_ai_cli.screens.modals.taxonomy_selector_searcher",
+        return_value=_FakeTaxonomySearcher(),
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            for _ in range(8):
+                if app.screen.focused is app.screen.query_one("#transaction-taxonomy", Static):
+                    break
+                await pilot.press("tab")
+                await pilot.pause(0.1)
+
+            assert app.screen.focused is app.screen.query_one("#transaction-taxonomy", Static)
+
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            assert isinstance(app.screen, TaxonomyChoiceScreen)
+
+
+@pytest.mark.anyio
+async def test_transaction_taxonomy_opens_picker_on_click() -> None:
+    transaction = _transaction(
+        "no_receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Gas", amount="-7.5")]
+    transaction.taxonomy = "Vehicles & Parts > Vehicle Fuels & Lubricants"
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with patch(
+        "receipts_ai_cli.screens.modals.taxonomy_selector_searcher",
+        return_value=_FakeTaxonomySearcher(),
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            clicked = await pilot.click("#transaction-taxonomy")
+            await pilot.pause(0.1)
+
+            assert clicked
+            assert isinstance(app.screen, TaxonomyChoiceScreen)
 
 
 @pytest.mark.anyio

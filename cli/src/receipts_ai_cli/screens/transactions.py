@@ -103,6 +103,16 @@ class ReceiptsAIApp(App[None]):
         padding: 0 1;
     }
 
+    #transaction-taxonomy {
+        height: 1;
+        padding: 0 1;
+    }
+
+    #transaction-taxonomy:focus {
+        background: $accent;
+        color: $text;
+    }
+
     #cell-edit-dialog {
         padding: 1 2;
         width: 60;
