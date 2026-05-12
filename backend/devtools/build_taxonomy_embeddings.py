@@ -49,7 +49,7 @@ class TaxonomyPath:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Build a JSON embedding artifact for Google product taxonomy leaf paths.",
+        description="Build a JSON embedding artifact for Google product taxonomy paths.",
     )
     parser.add_argument(
         "--taxonomy-path",
@@ -77,21 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_taxonomy_leaf_paths(taxonomy_path: Path) -> list[TaxonomyPath]:
+def load_taxonomy_paths(taxonomy_path: Path) -> list[TaxonomyPath]:
     taxonomy_text = taxonomy_path.read_text(encoding="utf-8")
-    all_paths = _taxonomy_paths_from_text(taxonomy_text)
-    path_set = {path.parts for path in all_paths}
-    leaf_paths = [
-        path
-        for path in all_paths
-        if not any(
-            len(candidate) > len(path.parts) and candidate[: len(path.parts)] == path.parts
-            for candidate in path_set
-        )
-    ]
-    if not leaf_paths:
-        raise RuntimeError(f"{taxonomy_path} did not contain taxonomy leaf paths")
-    return leaf_paths
+    paths = _taxonomy_paths_from_text(taxonomy_text)
+    if not paths:
+        raise RuntimeError(f"{taxonomy_path} did not contain taxonomy paths")
+    return paths
 
 
 def build_taxonomy_embedding_payload(
@@ -102,8 +93,8 @@ def build_taxonomy_embedding_payload(
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> dict[str, object]:
     taxonomy_bytes = taxonomy_path.read_bytes()
-    leaf_paths = load_taxonomy_leaf_paths(taxonomy_path)
-    embedding_texts = [path.embedding_text for path in leaf_paths]
+    paths = load_taxonomy_paths(taxonomy_path)
+    embedding_texts = [path.embedding_text for path in paths]
     embeddings = embedder.encode(
         embedding_texts,
         batch_size=batch_size,
@@ -112,9 +103,9 @@ def build_taxonomy_embedding_payload(
         show_progress_bar=True,
     )
     vectors = _vectors_as_lists(embeddings)
-    if len(vectors) != len(leaf_paths):
+    if len(vectors) != len(paths):
         raise RuntimeError(
-            f"embedding count mismatch: got {len(vectors)} embeddings for {len(leaf_paths)} paths"
+            f"embedding count mismatch: got {len(vectors)} embeddings for {len(paths)} paths"
         )
 
     dimension = len(vectors[0]) if vectors else 0
@@ -131,7 +122,7 @@ def build_taxonomy_embedding_payload(
         "embedding_dimension": dimension,
         "embedding_normalized": True,
         "generated_at": datetime.now(UTC).isoformat(),
-        "entry_count": len(leaf_paths),
+        "entry_count": len(paths),
         "entries": [
             {
                 "path": path.path,
@@ -139,7 +130,7 @@ def build_taxonomy_embedding_payload(
                 "embedding_text": path.embedding_text,
                 "embedding": vector,
             }
-            for path, vector in zip(leaf_paths, vectors, strict=True)
+            for path, vector in zip(paths, vectors, strict=True)
         ],
     }
 
@@ -160,7 +151,7 @@ def build_taxonomy_embeddings(
 
     rprint(f"[bold green]Loading embedding model:[/bold green] {model_name}")
     embedder = cast(TaxonomyEmbedder, cast(object, SentenceTransformer(model_name)))
-    rprint(f"[bold green]Embedding taxonomy leaves from:[/bold green] {taxonomy_path}")
+    rprint(f"[bold green]Embedding taxonomy paths from:[/bold green] {taxonomy_path}")
     payload = build_taxonomy_embedding_payload(
         taxonomy_path=taxonomy_path,
         model_name=model_name,

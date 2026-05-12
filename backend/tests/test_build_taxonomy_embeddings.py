@@ -14,7 +14,7 @@ sys.modules[SPEC.name] = build_taxonomy_embeddings
 SPEC.loader.exec_module(build_taxonomy_embeddings)
 
 build_taxonomy_embedding_payload = build_taxonomy_embeddings.build_taxonomy_embedding_payload
-load_taxonomy_leaf_paths = build_taxonomy_embeddings.load_taxonomy_leaf_paths
+load_taxonomy_paths = build_taxonomy_embeddings.load_taxonomy_paths
 
 
 class FakeEmbedder:
@@ -34,7 +34,7 @@ class FakeEmbedder:
         return [[float(index), float(index + 1)] for index, _ in enumerate(sentences)]
 
 
-def test_load_taxonomy_leaf_paths_keeps_only_terminal_paths(tmp_path: Path):
+def test_load_taxonomy_paths_keeps_parent_and_terminal_paths(tmp_path: Path):
     taxonomy_path = tmp_path / "taxonomy.en-US.txt"
     taxonomy_path.write_text(
         "\n".join(
@@ -51,11 +51,14 @@ def test_load_taxonomy_leaf_paths_keeps_only_terminal_paths(tmp_path: Path):
         encoding="utf-8",
     )
 
-    leaf_paths = load_taxonomy_leaf_paths(taxonomy_path)
+    paths = load_taxonomy_paths(taxonomy_path)
 
-    assert [path.path for path in leaf_paths] == [
+    assert [path.path for path in paths] == [
+        "Electronics",
+        "Electronics > Audio",
         "Electronics > Audio > Headphones",
         "Electronics > Video",
+        "Food, Beverages & Tobacco > Food Items > Bakery",
         "Food, Beverages & Tobacco > Food Items > Bakery > Crackers",
     ]
 
@@ -86,20 +89,32 @@ def test_build_taxonomy_embedding_payload_includes_metadata_and_vectors(tmp_path
     assert payload["embedding_model"] == "test-model"
     assert payload["embedding_dimension"] == 2
     assert payload["embedding_normalized"] is True
-    assert payload["entry_count"] == 2
+    assert payload["entry_count"] == 4
     assert isinstance(payload["taxonomy_sha256"], str)
     assert isinstance(payload["generated_at"], str)
     assert payload["entries"] == [
         {
+            "path": "Electronics",
+            "parts": ["Electronics"],
+            "embedding_text": "Google product category: Electronics",
+            "embedding": [0.0, 1.0],
+        },
+        {
+            "path": "Electronics > Audio",
+            "parts": ["Electronics", "Audio"],
+            "embedding_text": "Google product category: Electronics > Audio",
+            "embedding": [1.0, 2.0],
+        },
+        {
             "path": "Electronics > Audio > Headphones",
             "parts": ["Electronics", "Audio", "Headphones"],
             "embedding_text": "Google product category: Electronics > Audio > Headphones",
-            "embedding": [0.0, 1.0],
+            "embedding": [2.0, 3.0],
         },
         {
             "path": "Electronics > Video",
             "parts": ["Electronics", "Video"],
             "embedding_text": "Google product category: Electronics > Video",
-            "embedding": [1.0, 2.0],
+            "embedding": [3.0, 4.0],
         },
     ]
