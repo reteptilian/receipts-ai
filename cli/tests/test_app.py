@@ -1233,6 +1233,36 @@ async def test_invalid_header_edit_explains_the_problem() -> None:
 
 
 @pytest.mark.anyio
+async def test_escape_cancels_active_header_edit_without_exiting_review_screen() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.category_allocations = [CategoryAllocation(category_id="Coffee", amount="-7.5")]
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        payee_input = app.screen.query_one("#receipt-payee", Input)
+        payee_input.focus()
+        payee_input.value = "Accidental r"
+        await pilot.press("escape")
+        await pilot.pause(0.1)
+
+        screen = app.screen
+        focused = app.focused
+
+    assert isinstance(screen, TransactionReviewScreen)
+    assert payee_input.value == "Payee receipt"
+    assert isinstance(focused, DataTable)
+    assert transaction.user_overrides is None
+
+
+@pytest.mark.anyio
 async def test_linked_transaction_review_saves_bst_overrides_and_rbt_items() -> None:
     bst = _transaction(
         "statement",

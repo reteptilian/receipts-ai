@@ -16,6 +16,7 @@ from receipts_ai.models.transaction import (
     UserCategoryAllocation,
 )
 from rich.markup import escape
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.coordinate import Coordinate
@@ -47,6 +48,15 @@ from receipts_ai_cli.transaction_helpers import (
     _parse_required_decimal_text,
     _parse_required_text,
     _receipt_item_row,
+)
+
+_HEADER_INPUT_IDS = frozenset(
+    {
+        "receipt-date",
+        "receipt-payee",
+        "receipt-description",
+        "receipt-amount",
+    }
 )
 
 
@@ -87,6 +97,7 @@ class TransactionReviewScreen(Screen[None]):
             else None
         )
         self._dirty = False
+        self._canceling_header_input_ids: set[str] = set()
         self._category_choices = (
             tuple(category_choices)
             if category_choices is not None
@@ -184,16 +195,22 @@ class TransactionReviewScreen(Screen[None]):
         if data_table.id in {"category-allocations", "receipt-items"}:
             self.action_edit_cell()
 
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "escape" and isinstance(self.focused, Input):
+            input_widget = self.focused
+            if input_widget.id in _HEADER_INPUT_IDS:
+                self._cancel_header_input_edit(input_widget)
+                event.stop()
+                event.prevent_default()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self._commit_header_input(event.input)
 
     def on_input_blurred(self, event: Input.Blurred) -> None:
-        if event.input.id in {
-            "receipt-date",
-            "receipt-payee",
-            "receipt-description",
-            "receipt-amount",
-        }:
+        if event.input.id in _HEADER_INPUT_IDS:
+            if event.input.id in self._canceling_header_input_ids:
+                self._canceling_header_input_ids.discard(event.input.id)
+                return
             self._commit_header_input(event.input)
 
     def action_edit_cell(self) -> None:
@@ -330,6 +347,27 @@ class TransactionReviewScreen(Screen[None]):
             return
 
         self._mark_dirty("Draft transaction edit")
+
+    def _cancel_header_input_edit(self, input_widget: Input) -> None:
+        if input_widget.id is not None:
+            self._canceling_header_input_ids.add(input_widget.id)
+        input_widget.value = self._effective_header_input_value(input_widget)
+        table = self._focused_edit_table()
+        if table is not None:
+            table.focus()
+
+    def _effective_header_input_value(self, input_widget: Input) -> str:
+        match input_widget.id:
+            case "receipt-date":
+                return _effective_transaction_date(self._transaction).isoformat()
+            case "receipt-payee":
+                return _effective_transaction_payee(self._transaction)
+            case "receipt-description":
+                return _effective_transaction_description(self._transaction)
+            case "receipt-amount":
+                return _effective_transaction_amount(self._transaction)
+            case _:
+                return input_widget.value
 
     def _commit_category_allocation_cell_edit(self, coordinate: Coordinate, raw_value: str) -> None:
         allocations = _effective_category_allocations(self._transaction)
