@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # pyright: reportPrivateUsage=false, reportUnknownMemberType=false
 import importlib
+import logging
 from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any, cast
@@ -65,6 +66,8 @@ _HEADER_INPUT_IDS = frozenset(
         "receipt-amount",
     }
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _app_module() -> Any:
@@ -355,13 +358,37 @@ class TransactionReviewScreen(Screen[None]):
         self._mark_dirty("Deleted category allocation")
 
     def action_save_and_exit(self) -> None:
+        LOGGER.debug(
+            "Save and Exit requested for transaction %s: dirty=%s reviewed=%s "
+            "effective_reviewed=%s has_receipt_items=%s source_receipt_transaction_id=%s",
+            self._source_transaction.id,
+            self._dirty,
+            self._transaction.reviewed,
+            _effective_transaction_reviewed(self._transaction),
+            self._has_receipt_items(),
+            (
+                self._source_receipt_transaction.id
+                if self._source_receipt_transaction is not None
+                else None
+            ),
+        )
         try:
             self._validate_save()
         except ValueError as exc:
+            LOGGER.debug(
+                "Save validation blocked rule suggestions for transaction %s: %s",
+                self._source_transaction.id,
+                exc,
+            )
             self._show_edit_error(str(exc))
             return
 
         self._pending_rule_suggestions = self._rule_suggestions_for_save()
+        LOGGER.debug(
+            "Prepared %d pending rule suggestion(s) for transaction %s before persist",
+            len(self._pending_rule_suggestions),
+            self._source_transaction.id,
+        )
         self._show_edit_status("Saving review edits...")
         self.run_worker(
             self._persist_review_edits,
@@ -512,18 +539,45 @@ class TransactionReviewScreen(Screen[None]):
 
     def _finish_persisted_review(self) -> None:
         if not self._pending_rule_suggestions:
+            LOGGER.debug(
+                "No pending rule suggestions after saving transaction %s; dismissing review screen",
+                self._source_transaction.id,
+            )
             self.dismiss()
             return
+        LOGGER.debug(
+            "Prompting %d rule suggestion(s) after saving transaction %s",
+            len(self._pending_rule_suggestions),
+            self._source_transaction.id,
+        )
         self._show_edit_status("Review saved. Checking automation rule suggestions...")
         self._prompt_rule_suggestion(0)
 
     def _prompt_rule_suggestion(self, index: int) -> None:
         if index >= len(self._pending_rule_suggestions):
+            LOGGER.debug(
+                "Finished prompting rule suggestions for transaction %s",
+                self._source_transaction.id,
+            )
             self.dismiss()
             return
         suggestion = self._pending_rule_suggestions[index]
+        LOGGER.debug(
+            "Prompting rule suggestion %d/%d for transaction %s: key=%s prompt=%r",
+            index + 1,
+            len(self._pending_rule_suggestions),
+            self._source_transaction.id,
+            suggestion.key,
+            suggestion.prompt,
+        )
 
         def on_decision(create_rule: bool | None) -> None:
+            LOGGER.debug(
+                "Rule suggestion decision for transaction %s: key=%s create_rule=%s",
+                self._source_transaction.id,
+                suggestion.key,
+                create_rule,
+            )
             if create_rule:
                 self._show_edit_status("Saving automation rule...")
                 self.run_worker(
@@ -538,13 +592,28 @@ class TransactionReviewScreen(Screen[None]):
 
     def _save_rule_suggestion(self, suggestion: Any, index: int) -> None:
         try:
+            LOGGER.debug(
+                "Saving automation rule suggestion for transaction %s: key=%s",
+                self._source_transaction.id,
+                suggestion.key,
+            )
             _app_module().save_automation_rule(suggestion.rule)
         except Exception as exc:
+            LOGGER.exception(
+                "Failed to save automation rule suggestion for transaction %s: key=%s",
+                self._source_transaction.id,
+                suggestion.key,
+            )
             self.app.call_from_thread(
                 self._show_edit_error,
                 f"Review saved, but failed to save automation rule: {exc}",
             )
             return
+        LOGGER.debug(
+            "Saved automation rule suggestion for transaction %s: key=%s",
+            self._source_transaction.id,
+            suggestion.key,
+        )
         self.app.call_from_thread(self._prompt_rule_suggestion, index + 1)
 
     def action_toggle_reviewed(self) -> None:
@@ -657,10 +726,26 @@ class TransactionReviewScreen(Screen[None]):
             )
 
     def _rule_suggestions_for_save(self) -> tuple[Any, ...]:
-        if not self._dirty or self._transaction.reviewed is not True:
+        if not self._dirty:
+            LOGGER.debug(
+                "Skipping rule suggestions for transaction %s: screen is not dirty",
+                self._source_transaction.id,
+            )
             return ()
+        if self._transaction.reviewed is not True:
+            LOGGER.debug(
+                "Skipping rule suggestions for transaction %s: transaction.reviewed is %s",
+                self._source_transaction.id,
+                self._transaction.reviewed,
+            )
+            return ()
+        LOGGER.debug(
+            "Generating rule suggestions for transaction %s: %s",
+            self._source_transaction.id,
+            self._rule_debug_summary(),
+        )
         try:
-            return tuple(
+            suggestions = tuple(
                 _app_module().generate_rule_suggestions(
                     self._source_transaction,
                     self._transaction,
@@ -672,9 +757,71 @@ class TransactionReviewScreen(Screen[None]):
                     ),
                 )
             )
+            LOGGER.debug(
+                "Generated %d rule suggestion(s) for transaction %s: keys=%s",
+                len(suggestions),
+                self._source_transaction.id,
+                [suggestion.key for suggestion in suggestions],
+            )
+            return suggestions
         except Exception as exc:
+            LOGGER.exception(
+                "Failed to generate rule suggestions for transaction %s",
+                self._source_transaction.id,
+            )
             self._show_edit_error(f"Skipping automation rule suggestions: {exc}")
             return ()
+
+    def _rule_debug_summary(self) -> dict[str, object]:
+        original_receipt_transaction = self._source_receipt_transaction
+        edited_receipt_transaction = (
+            self._receipt_transaction if original_receipt_transaction is not None else None
+        )
+        return {
+            "dirty": self._dirty,
+            "reviewed": self._transaction.reviewed,
+            "effective_reviewed": _effective_transaction_reviewed(self._transaction),
+            "has_receipt_items": self._has_receipt_items(),
+            "original": self._transaction_rule_debug_summary(self._source_transaction),
+            "edited": self._transaction_rule_debug_summary(self._transaction),
+            "original_receipt": self._receipt_rule_debug_summary(original_receipt_transaction),
+            "edited_receipt": self._receipt_rule_debug_summary(edited_receipt_transaction),
+        }
+
+    def _transaction_rule_debug_summary(self, transaction: Transaction | None) -> dict[str, object]:
+        if transaction is None:
+            return {}
+        return {
+            "id": transaction.id,
+            "payee": _effective_transaction_payee(transaction),
+            "amount": _effective_transaction_amount(transaction),
+            "taxonomy": _effective_transaction_taxonomy(transaction),
+            "reviewed": transaction.reviewed,
+            "effective_reviewed": _effective_transaction_reviewed(transaction),
+            "allocations": [
+                {"category_id": allocation.category_id, "amount": allocation.amount}
+                for allocation in _effective_category_allocations(transaction)
+            ],
+        }
+
+    def _receipt_rule_debug_summary(self, transaction: Transaction | None) -> dict[str, object]:
+        receipt = transaction.receipt if transaction is not None else None
+        if transaction is None or receipt is None:
+            return {}
+        return {
+            "id": transaction.id,
+            "item_count": len(receipt.items),
+            "items": [
+                {
+                    "index": index,
+                    "description": _effective_receipt_item_value(item, "description"),
+                    "category_id": _effective_receipt_item_value(item, "category_id"),
+                    "taxonomy": _effective_receipt_item_value(item, "taxonomy"),
+                    "net_amount": _effective_receipt_item_value(item, "net_amount"),
+                }
+                for index, item in enumerate(receipt.items)
+            ],
+        }
 
     def _focused_edit_table(self) -> DataTable[str] | None:
         allocations_table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))
