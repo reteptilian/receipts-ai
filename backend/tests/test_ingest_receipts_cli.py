@@ -1098,8 +1098,9 @@ def test_main_after_filters_receipts_before_enrichment_and_upsert(
         return transaction_to_enrich
 
     def fake_upsert_transaction_to_firestore(
-        transaction_to_upsert: Transaction, *, collection: str
+        transaction_to_upsert: Transaction, *, collection: str, apply_rules: bool = True
     ) -> None:
+        assert apply_rules is False
         _ = transaction_to_upsert, collection
         calls.append("upsert")
 
@@ -1844,8 +1845,9 @@ def test_main_can_upsert_processed_transaction_to_firestore(
         return transaction_to_clean
 
     def fake_upsert_transaction_to_firestore(
-        transaction_to_upsert: Transaction, *, collection: str
+        transaction_to_upsert: Transaction, *, collection: str, apply_rules: bool = True
     ) -> None:
+        assert apply_rules is False
         upserts.append((transaction_to_upsert, collection))
 
     monkeypatch.setattr(

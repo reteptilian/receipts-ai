@@ -260,7 +260,10 @@ def test_main_can_upsert_firestore(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     csv_path.write_text(SAMPLE_ORDER_CSV, encoding="utf-8")
     calls: list[tuple[str, str]] = []
 
-    def fake_upsert_transaction_to_firestore(transaction: Transaction, *, collection: str) -> None:
+    def fake_upsert_transaction_to_firestore(
+        transaction: Transaction, *, collection: str, apply_rules: bool = True
+    ) -> None:
+        assert apply_rules is False
         calls.append((transaction.external_id or "", collection))
 
     monkeypatch.setattr(
@@ -283,3 +286,32 @@ def test_main_can_upsert_firestore(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     main()
 
     assert calls == [("114-9364152-5237852", "test-transactions")]
+
+
+def test_main_applies_rules_before_amazon_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    csv_path = tmp_path / "Order History.csv"
+    csv_path.write_text(SAMPLE_ORDER_CSV, encoding="utf-8")
+
+    def fake_apply_automation_rules_from_firestore(transactions: list[Transaction]) -> None:
+        assert transactions[0].receipt is not None
+        transactions[0].receipt.items[0].category_id = "shopping.sporting_goods"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["receipts-ai-ingest-amazon", str(csv_path)],
+    )
+    monkeypatch.setattr(
+        ingest_amazon,
+        "apply_automation_rules_from_firestore",
+        fake_apply_automation_rules_from_firestore,
+    )
+
+    main()
+
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert rows[0]["category_allocation.category_id"] == "shopping.sporting_goods"

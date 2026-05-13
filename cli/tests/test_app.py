@@ -1251,6 +1251,37 @@ async def test_save_uses_receipt_items_instead_of_category_allocations() -> None
 
 
 @pytest.mark.anyio
+async def test_save_without_new_edits_does_not_generate_rule_suggestions() -> None:
+    transaction = _transaction(
+        "receipt",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.reviewed = True
+    transaction.user_overrides = TransactionUserOverrides(
+        category_allocations=[
+            UserCategoryAllocation(category_id="Coffee", amount="-7.5"),
+        ]
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with (
+        patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save,
+        patch("receipts_ai_cli.app.generate_rule_suggestions") as mock_generate,
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            cast(TransactionReviewScreen, app.screen).action_save_and_exit()
+            await pilot.pause(0.1)
+
+        assert mock_save.called
+        mock_generate.assert_not_called()
+
+
+@pytest.mark.anyio
 async def test_save_validates_receipt_item_net_amounts() -> None:
     transaction = _transaction(
         "receipt",

@@ -16,6 +16,7 @@ from importlib import resources
 from pathlib import Path
 from typing import TextIO
 
+from receipts_ai.automation_rules import apply_automation_rules_from_firestore
 from receipts_ai.brave_search import (
     CachedBraveSearchClient,
     create_brave_search_client,
@@ -211,9 +212,14 @@ def main() -> None:
             else:
                 categorize_transactions(statement_transactions)
                 classify_transactions_by_product_taxonomy(statement_transactions)
+        apply_automation_rules_from_firestore(statement_transactions)
         if args.upsert_firestore:
             for transaction in statement_transactions:
-                upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
+                upsert_transaction_to_firestore(
+                    transaction,
+                    collection=args.firestore_collection,
+                    apply_rules=False,
+                )
         transactions.extend(statement_transactions)
 
     _write_transactions(transactions, output_format=args.format, output_path=args.output)

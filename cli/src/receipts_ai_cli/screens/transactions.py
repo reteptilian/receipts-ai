@@ -13,6 +13,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
 
+from receipts_ai_cli.screens.rules import RulesScreen
 from receipts_ai_cli.screens.transaction_review import TransactionReviewScreen
 from receipts_ai_cli.transaction_helpers import (
     TRANSACTION_TABLE_COLUMNS,
@@ -187,6 +188,39 @@ class ReceiptsAIApp(App[None]):
         color: $error;
     }
 
+    #rule-suggestion-dialog {
+        padding: 1 2;
+        width: 76;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+    }
+
+    #rule-suggestion-prompt {
+        margin: 1 0;
+    }
+
+    #rule-suggestion-buttons {
+        height: 3;
+    }
+
+    #rules-status {
+        dock: top;
+        height: 1;
+        padding: 0 1;
+    }
+
+    #rules-status.error {
+        color: $error;
+    }
+
+    #rules-controls {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        color: $text-muted;
+    }
+
     #review-controls {
         dock: bottom;
         height: 1;
@@ -204,6 +238,7 @@ class ReceiptsAIApp(App[None]):
         ("space", "toggle_transaction_selection", "Select"),
         ("l", "link_selected_transactions", "Link"),
         ("u", "unlink_transaction", "Unlink"),
+        ("R", "open_rules", "Rules"),
     ]
 
     def __init__(
@@ -359,6 +394,9 @@ class ReceiptsAIApp(App[None]):
         else:
             self._selected_transaction_ids.add(transaction_id)
         self._refresh_visible_transactions()
+
+    def action_open_rules(self) -> None:
+        self.push_screen(RulesScreen())
 
     def action_link_selected_transactions(self) -> None:
         if len(self._selected_transaction_ids) != 2:

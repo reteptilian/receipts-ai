@@ -633,7 +633,10 @@ def test_main_can_upsert_firestore(
     )
     calls: list[tuple[str | None, str]] = []
 
-    def fake_upsert_transaction_to_firestore(transaction: Transaction, *, collection: str) -> None:
+    def fake_upsert_transaction_to_firestore(
+        transaction: Transaction, *, collection: str, apply_rules: bool = True
+    ) -> None:
+        assert apply_rules is False
         calls.append((transaction.payee, collection))
 
     monkeypatch.setattr(
@@ -656,6 +659,39 @@ def test_main_can_upsert_firestore(
     main()
 
     assert calls == [(None, "test-transactions")]
+
+
+def test_main_applies_rules_before_statement_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    statement_path = tmp_path / "checking.ofx"
+    statement_path.write_text(
+        """
+        <OFX><CREDITCARDMSGSRSV1><CCSTMTTRNRS><CCSTMTRS><CURDEF>USD
+        <CCACCTFROM><ACCTID>credit</ACCTID></CCACCTFROM>
+        <BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260427
+        <TRNAMT>-7.00<FITID>credit-1<NAME>Coffee Shop</STMTTRN></BANKTRANLIST>
+        </CCSTMTRS></CCSTMTTRNRS></CREDITCARDMSGSRSV1></OFX>
+        """,
+        encoding="utf-8",
+    )
+
+    def fake_apply_automation_rules_from_firestore(transactions: list[Transaction]) -> None:
+        transactions[0].payee = "Rule Coffee"
+
+    monkeypatch.setattr(sys, "argv", ["ingest_statements.py", str(statement_path)])
+    monkeypatch.setattr(
+        ingest_statements,
+        "apply_automation_rules_from_firestore",
+        fake_apply_automation_rules_from_firestore,
+    )
+
+    main()
+
+    rows = list(csv.DictReader(StringIO(capsys.readouterr().out)))
+    assert rows[0]["payee"] == "Rule Coffee"
 
 
 def test_main_can_enrich_and_categorize_transactions(

@@ -4,6 +4,13 @@ import argparse
 import logging
 from pathlib import Path
 
+from receipts_ai.automation_rules import (
+    automation_rules_from_firestore,
+    delete_automation_rule,
+    generate_rule_suggestions,
+    rule_invalid_reason,
+    save_automation_rule,
+)
 from receipts_ai.budget_categories import load_budget_category_options
 from receipts_ai.categorization import load_budget_category_choices
 
@@ -29,10 +36,15 @@ __all__ = [
     "ReceiptsAIApp",
     "TransactionLoader",
     "TransactionReviewScreen",
+    "automation_rules_from_firestore",
+    "delete_automation_rule",
+    "generate_rule_suggestions",
     "link_bank_statement_transaction_to_receipt",
     "load_budget_category_choices",
     "load_budget_category_options",
+    "rule_invalid_reason",
     "save_transaction_review_edits",
+    "save_automation_rule",
     "transactions_from_firestore",
     "unlink_bank_statement_transaction_from_receipt",
     "_open_file_in_external_viewer",

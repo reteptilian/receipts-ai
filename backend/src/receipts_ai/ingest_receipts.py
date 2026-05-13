@@ -19,6 +19,9 @@ from typing import Annotated, Any, Protocol, TextIO, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from receipts_ai.automation_rules import (
+    apply_automation_rules_from_firestore,
+)
 from receipts_ai.brave_search import (
     CachedBraveSearchClient,
     create_brave_search_client,
@@ -520,8 +523,13 @@ def main() -> None:
                     transaction,
                     method=args.product_taxonomy_method,
                 )
+        apply_automation_rules_from_firestore([transaction])
         if args.upsert_firestore:
-            upsert_transaction_to_firestore(transaction, collection=args.firestore_collection)
+            upsert_transaction_to_firestore(
+                transaction,
+                collection=args.firestore_collection,
+                apply_rules=False,
+            )
         transactions.append(transaction)
 
     _write_transactions(transactions, output_format=args.format, output_path=args.output)
@@ -1246,11 +1254,14 @@ def upsert_transaction_to_firestore(
     *,
     client: FirestoreClient | None = None,
     collection: str = DEFAULT_FIRESTORE_COLLECTION,
+    apply_rules: bool = True,
 ) -> None:
     if not collection:
         raise ValueError("collection must not be empty")
 
     firestore_client = client if client is not None else create_firestore_client()
+    if apply_rules:
+        apply_automation_rules_from_firestore([transaction], client=cast(Any, firestore_client))
     document = transaction_firestore_document(transaction)
     item_count = len(transaction.receipt.items) if transaction.receipt is not None else 0
     LOGGER.info(

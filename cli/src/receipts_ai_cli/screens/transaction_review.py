@@ -27,6 +27,7 @@ from textual.widgets import DataTable, Header, Input, Label, Static
 from receipts_ai_cli.screens.modals import (
     CategoryChoiceScreen,
     CellEditScreen,
+    RuleSuggestionScreen,
     TaxonomyChoiceScreen,
 )
 from receipts_ai_cli.transaction_helpers import (
@@ -104,6 +105,7 @@ class TransactionReviewScreen(Screen[None]):
             else None
         )
         self._dirty = False
+        self._pending_rule_suggestions: tuple[Any, ...] = ()
         self._canceling_header_input_ids: set[str] = set()
         active_category_options = (
             _app_module().load_budget_category_options()
@@ -359,6 +361,7 @@ class TransactionReviewScreen(Screen[None]):
             self._show_edit_error(str(exc))
             return
 
+        self._pending_rule_suggestions = self._rule_suggestions_for_save()
         self._show_edit_status("Saving review edits...")
         self.run_worker(
             self._persist_review_edits,
@@ -371,13 +374,25 @@ class TransactionReviewScreen(Screen[None]):
         try:
             match input_widget.id:
                 case "receipt-date":
-                    self._set_transaction_override("transaction_date", _parse_optional_date(value))
+                    parsed_value = _parse_optional_date(value)
+                    if parsed_value == _effective_transaction_date(self._transaction):
+                        return
+                    self._set_transaction_override("transaction_date", parsed_value)
                 case "receipt-payee":
-                    self._set_transaction_override("payee", _parse_optional_text(value))
+                    parsed_value = _parse_optional_text(value)
+                    if parsed_value == _effective_transaction_payee(self._transaction):
+                        return
+                    self._set_transaction_override("payee", parsed_value)
                 case "receipt-description":
-                    self._set_transaction_override("description", _parse_optional_text(value))
+                    parsed_value = _parse_optional_text(value)
+                    if parsed_value == _effective_transaction_description(self._transaction):
+                        return
+                    self._set_transaction_override("description", parsed_value)
                 case "receipt-amount":
-                    self._set_transaction_override("amount", _parse_optional_text(value))
+                    parsed_value = _parse_optional_text(value)
+                    if parsed_value == _effective_transaction_amount(self._transaction):
+                        return
+                    self._set_transaction_override("amount", parsed_value)
                 case _:
                     return
         except (ValueError, ValidationError) as exc:
@@ -491,9 +506,46 @@ class TransactionReviewScreen(Screen[None]):
             elif self._receipt_transaction is not None:
                 self._source_transaction.receipt = self._receipt_transaction.receipt
             self._dirty = False
-            self.app.call_from_thread(self.dismiss)
+            self.app.call_from_thread(self._finish_persisted_review)
         except Exception as exc:
             self.app.call_from_thread(self._show_edit_error, f"Failed to persist: {exc}")
+
+    def _finish_persisted_review(self) -> None:
+        if not self._pending_rule_suggestions:
+            self.dismiss()
+            return
+        self._show_edit_status("Review saved. Checking automation rule suggestions...")
+        self._prompt_rule_suggestion(0)
+
+    def _prompt_rule_suggestion(self, index: int) -> None:
+        if index >= len(self._pending_rule_suggestions):
+            self.dismiss()
+            return
+        suggestion = self._pending_rule_suggestions[index]
+
+        def on_decision(create_rule: bool | None) -> None:
+            if create_rule:
+                self._show_edit_status("Saving automation rule...")
+                self.run_worker(
+                    lambda: self._save_rule_suggestion(suggestion, index),
+                    thread=True,
+                    name=f"save-rule-{suggestion.key}",
+                )
+            else:
+                self._prompt_rule_suggestion(index + 1)
+
+        self.app.push_screen(RuleSuggestionScreen(suggestion.prompt), on_decision)
+
+    def _save_rule_suggestion(self, suggestion: Any, index: int) -> None:
+        try:
+            _app_module().save_automation_rule(suggestion.rule)
+        except Exception as exc:
+            self.app.call_from_thread(
+                self._show_edit_error,
+                f"Review saved, but failed to save automation rule: {exc}",
+            )
+            return
+        self.app.call_from_thread(self._prompt_rule_suggestion, index + 1)
 
     def action_toggle_reviewed(self) -> None:
         self._transaction.reviewed = not _effective_transaction_reviewed(self._transaction)
@@ -603,6 +655,26 @@ class TransactionReviewScreen(Screen[None]):
                 f"transaction amount. The receipt items total {receipt_item_total}, but the "
                 f"expected total is {expected_receipt_total}."
             )
+
+    def _rule_suggestions_for_save(self) -> tuple[Any, ...]:
+        if not self._dirty or self._transaction.reviewed is not True:
+            return ()
+        try:
+            return tuple(
+                _app_module().generate_rule_suggestions(
+                    self._source_transaction,
+                    self._transaction,
+                    original_receipt_transaction=self._source_receipt_transaction,
+                    edited_receipt_transaction=(
+                        self._receipt_transaction
+                        if self._source_receipt_transaction is not None
+                        else None
+                    ),
+                )
+            )
+        except Exception as exc:
+            self._show_edit_error(f"Skipping automation rule suggestions: {exc}")
+            return ()
 
     def _focused_edit_table(self) -> DataTable[str] | None:
         allocations_table = cast(DataTable[str], self.query_one("#category-allocations", DataTable))

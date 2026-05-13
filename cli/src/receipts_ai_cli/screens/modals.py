@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import Center, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.timer import Timer
-from textual.widgets import Input, Label, OptionList, Static
+from textual.widgets import Button, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from receipts_ai_cli.taxonomy_selection import taxonomy_selector_searcher
@@ -237,3 +237,41 @@ class TaxonomyChoiceScreen(ModalScreen[str | None]):
                 "semantic matches unavailable; see log for details"
             )
         self.query_one("#taxonomy-choice-status", Static).update(status)
+
+
+class RuleSuggestionScreen(ModalScreen[bool]):
+    """Screen for confirming one suggested automation rule."""
+
+    BINDINGS = [
+        ("escape", "skip", "Skip"),
+        ("n", "skip", "Skip"),
+        ("y", "create", "Create"),
+    ]
+
+    def __init__(self, prompt: str) -> None:
+        super().__init__()
+        self._prompt = prompt
+
+    def compose(self) -> ComposeResult:
+        with Center():
+            with Vertical(id="rule-suggestion-dialog"):
+                yield Label("Create automation rule?")
+                yield Static(self._prompt, id="rule-suggestion-prompt")
+                with Horizontal(id="rule-suggestion-buttons"):
+                    yield Button("Create", id="rule-suggestion-create", variant="primary")
+                    yield Button("Skip", id="rule-suggestion-skip")
+
+    def on_mount(self) -> None:
+        self.query_one("#rule-suggestion-create", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "rule-suggestion-create":
+            self.dismiss(True)
+        elif event.button.id == "rule-suggestion-skip":
+            self.dismiss(False)
+
+    def action_create(self) -> None:
+        self.dismiss(True)
+
+    def action_skip(self) -> None:
+        self.dismiss(False)
