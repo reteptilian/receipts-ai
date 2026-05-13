@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from receipts_ai.firestore_transactions import transactions_from_firestore
-from receipts_ai.models.transaction import Transaction
+from receipts_ai.models.transaction import Transaction, TransactionUserOverrides
 from rich.markup import escape
 from textual import events
 from textual.app import App, ComposeResult
@@ -22,6 +22,7 @@ from receipts_ai_cli.transaction_helpers import (
     _effective_transaction_amount,
     _effective_transaction_date,
     _effective_transaction_payee,
+    _effective_transaction_reviewed,
     _effective_transaction_taxonomy,
     _format_amount,
     _format_receipt_indicator,
@@ -238,6 +239,7 @@ class ReceiptsAIApp(App[None]):
         ("space", "toggle_transaction_selection", "Select"),
         ("l", "link_selected_transactions", "Link"),
         ("u", "unlink_transaction", "Unlink"),
+        ("r", "toggle_transaction_reviewed", "Toggle reviewed"),
         ("R", "open_rules", "Rules"),
     ]
 
@@ -471,6 +473,38 @@ class ReceiptsAIApp(App[None]):
             name="unlink-transaction",
         )
 
+    def action_toggle_transaction_reviewed(self) -> None:
+        transaction_id = self._current_transaction_id()
+        if transaction_id is None:
+            return
+        transaction = self._transactions_by_id.get(transaction_id)
+        if transaction is None:
+            return
+
+        reviewed = not _effective_transaction_reviewed(transaction)
+        receipt_transaction = self._receipt_transactions_by_display_id.get(transaction_id)
+        receipt_transaction_id = (
+            receipt_transaction.id
+            if receipt_transaction is not None and receipt_transaction is not transaction
+            else None
+        )
+        transaction.reviewed = reviewed
+        if receipt_transaction_id is not None and receipt_transaction is not None:
+            receipt_transaction.reviewed = reviewed
+        self._refresh_visible_transactions()
+        status = "Reviewed" if reviewed else "Unreviewed"
+        self._show_status(f"Marked transaction as {status}. Saving...")
+        self.run_worker(
+            lambda: self._persist_transaction_reviewed(
+                transaction.id,
+                transaction.user_overrides or TransactionUserOverrides(),
+                reviewed,
+                receipt_transaction_id,
+            ),
+            thread=True,
+            name=f"toggle-review-{transaction.id}",
+        )
+
     def _persist_transaction_link(self, bank_statement_id: str, receipt_based_id: str) -> None:
         try:
             _app_module().link_bank_statement_transaction_to_receipt(
@@ -498,6 +532,35 @@ class ReceiptsAIApp(App[None]):
             )
         except Exception as exc:
             self.call_from_thread(self._show_status, f"Failed to unlink: {exc}", True)
+
+    def _persist_transaction_reviewed(
+        self,
+        transaction_id: str,
+        transaction_user_overrides: TransactionUserOverrides,
+        reviewed: bool,
+        receipt_transaction_id: str | None,
+    ) -> None:
+        try:
+            _app_module().save_transaction_review_edits(
+                transaction_id,
+                transaction_user_overrides,
+                reviewed=reviewed,
+                receipt_transaction_id=receipt_transaction_id,
+            )
+            status = "Reviewed" if reviewed else "Unreviewed"
+            self.call_from_thread(self._show_status, f"Transaction marked {status}")
+            self.call_from_thread(
+                lambda: self.run_worker(
+                    self._load_transactions, thread=True, name="load-transactions"
+                )
+            )
+        except Exception as exc:
+            self.call_from_thread(self._show_status, f"Failed to toggle reviewed: {exc}", True)
+            self.call_from_thread(
+                lambda: self.run_worker(
+                    self._load_transactions, thread=True, name="load-transactions"
+                )
+            )
 
     def _current_transaction_id(self) -> str | None:
         table = cast(DataTable[str], self.query_one("#transactions", DataTable))

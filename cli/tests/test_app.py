@@ -1553,6 +1553,50 @@ async def test_transactions_table_shows_review_and_pair_status() -> None:
 
 
 @pytest.mark.anyio
+async def test_main_screen_can_toggle_selected_transaction_review_status() -> None:
+    bst = _transaction(
+        "statement",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    bst.record_type = RecordType.bank_statement
+    bst.linked_receipt_based_transaction_id = "receipt"
+    bst.linked_transaction_ids = ["receipt"]
+    rbt = Transaction(
+        id="receipt",
+        source=Source.receipt,
+        record_type=RecordType.receipt_based,
+        linked_transaction_ids=["statement"],
+        transaction_date=date(2026, 5, 6),
+        payee="Receipt Payee",
+        amount="-7.5",
+        currency="USD",
+        receipt=Receipt(items=[ReceiptItem(description="Latte", amount="7.5", net_amount="7.5")]),
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [bst, rbt])
+
+    with patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            await pilot.press("r")
+            await pilot.pause(0.1)
+
+            table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+            row = table.get_row_at(0)
+
+        mock_save.assert_called_once()
+
+    assert row[4] == "Reviewed | Pair"
+    assert bst.reviewed is True
+    assert rbt.reviewed is True
+    args, kwargs = mock_save.call_args
+    assert args == ("statement", TransactionUserOverrides())
+    assert kwargs["reviewed"] is True
+    assert kwargs["receipt_transaction_id"] == "receipt"
+
+
+@pytest.mark.anyio
 async def test_review_toggle_is_drafted_until_save_and_persists_for_pair() -> None:
     bst = _transaction(
         "statement",
