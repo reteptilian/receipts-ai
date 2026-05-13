@@ -133,6 +133,49 @@ def test_apply_payee_rule_sets_rule_sourced_category_allocations() -> None:
     assert transaction.category_allocations[0].source == Source1.rule
 
 
+def test_generates_transaction_taxonomy_clear_rule_suggestion() -> None:
+    original = _transaction()
+    original.taxonomy = "Vehicles & Parts > Vehicle Fuels & Lubricants"
+    edited = original.model_copy(deep=True)
+    edited.reviewed = True
+    edited.user_overrides = TransactionUserOverrides(taxonomy="")
+
+    suggestions = generate_rule_suggestions(original, edited, category_catalog=_catalog())
+
+    assert len(suggestions) == 1
+    assert suggestions[0].prompt == (
+        "Always leave taxonomy unassigned for payee 'COSTCO #101 GAS STATION'?"
+    )
+    assert suggestions[0].rule.actions[0].type == RuleActionType.set_transaction_taxonomy
+    assert suggestions[0].rule.actions[0].value == ""
+
+
+def test_apply_transaction_taxonomy_clear_rule_sets_taxonomy_to_none() -> None:
+    transaction = _transaction()
+    transaction.taxonomy = "Vehicles & Parts > Vehicle Fuels & Lubricants"
+    rule = AutomationRule(
+        id="rule_1",
+        name="No Costco gas taxonomy",
+        scope=RuleScope.transaction,
+        conditions=[
+            RuleCondition(
+                field=RuleConditionField.payee,
+                value="COSTCO #101 GAS STATION",
+            )
+        ],
+        actions=[
+            RuleAction(
+                type=RuleActionType.set_transaction_taxonomy,
+                value="",
+            )
+        ],
+    )
+
+    apply_automation_rules(transaction, [rule], category_catalog=_catalog())
+
+    assert transaction.taxonomy is None
+
+
 def test_rule_with_deleted_category_is_invalid_and_skipped() -> None:
     catalog = BudgetCategoryCatalog(
         id="test",
@@ -197,5 +240,8 @@ def test_generates_receipt_item_taxonomy_rule_suggestion() -> None:
     suggestions = generate_rule_suggestions(original, edited, category_catalog=_catalog())
 
     assert len(suggestions) == 1
+    assert suggestions[0].prompt == (
+        "Always classify receipt item 'KIRKLAND BATTERIES' as 'Electronics > Batteries'?"
+    )
     assert suggestions[0].rule.scope == RuleScope.receipt_item
     assert suggestions[0].rule.actions[0].type == RuleActionType.set_receipt_item_taxonomy

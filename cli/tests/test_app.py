@@ -9,6 +9,14 @@ from typing import cast
 from unittest.mock import patch
 
 import pytest
+from receipts_ai.automation_rules import (
+    AutomationRule,
+    RuleAction,
+    RuleActionType,
+    RuleCondition,
+    RuleConditionField,
+    RuleScope,
+)
 from receipts_ai.budget_categories import BudgetCategoryChoice
 from receipts_ai.models.transaction import (
     CategoryAllocation,
@@ -317,6 +325,45 @@ async def test_app_displays_transaction_overrides_in_table() -> None:
     assert row[0] == "2026-05-07"
     assert row[1] == "Edited Coffee Shop"
     assert row[8] == "-8.25 USD"
+
+
+@pytest.mark.anyio
+async def test_app_applies_rules_to_unreviewed_transactions_on_load() -> None:
+    unreviewed = _transaction(
+        "transaction_1",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    unreviewed.payee = "Original Payee"
+    reviewed = _transaction(
+        "transaction_2",
+        transaction_date=date(2026, 5, 7),
+        amount="-8.5",
+    )
+    reviewed.payee = "Original Payee"
+    reviewed.reviewed = True
+    rule = AutomationRule(
+        id="rule_1",
+        name="Rename payee",
+        scope=RuleScope.transaction,
+        conditions=[
+            RuleCondition(field=RuleConditionField.payee, value="Original Payee"),
+        ],
+        actions=[
+            RuleAction(type=RuleActionType.set_payee, value="Rule Payee"),
+        ],
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [unreviewed, reviewed])
+
+    with patch("receipts_ai_cli.app.automation_rules_from_firestore", return_value=[rule]):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            table = cast(DataTable[str], app.query_one("#transactions", DataTable))
+            rows = [table.get_row_at(index) for index in range(table.row_count)]
+
+    assert [row[1] for row in rows] == ["Rule Payee", "Original Payee"]
+    assert unreviewed.payee == "Original Payee"
 
 
 @pytest.mark.anyio
@@ -1197,6 +1244,43 @@ async def test_transaction_taxonomy_uses_advanced_taxonomy_picker_and_can_clear(
 
     assert transaction.user_overrides is not None
     assert transaction.user_overrides.taxonomy == ""
+
+
+@pytest.mark.anyio
+async def test_cleared_reviewed_transaction_taxonomy_generates_rule_suggestion() -> None:
+    transaction = _transaction(
+        "transaction_1",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.5",
+    )
+    transaction.payee = "COSTCO #101 GAS STATION"
+    transaction.taxonomy = "Vehicles & Parts > Vehicle Fuels & Lubricants"
+    transaction.reviewed = True
+    transaction.category_allocations = [CategoryAllocation(category_id="Gas", amount="-7.5")]
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with (
+        patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save,
+        patch("receipts_ai_cli.app.save_automation_rule") as mock_save_rule,
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            cast(TransactionReviewScreen, app.screen)._set_transaction_override("taxonomy", "")
+            cast(TransactionReviewScreen, app.screen)._mark_dirty("Draft transaction taxonomy edit")
+            await pilot.press("s")
+            await pilot.pause(0.2)
+
+            assert str(app.screen.query_one("#rule-suggestion-prompt", Static).content) == (
+                "Always leave taxonomy unassigned for payee 'COSTCO #101 GAS STATION'?"
+            )
+            await pilot.press("y")
+            await pilot.pause(0.2)
+
+        assert mock_save.called
+        assert mock_save_rule.called
 
 
 @pytest.mark.anyio

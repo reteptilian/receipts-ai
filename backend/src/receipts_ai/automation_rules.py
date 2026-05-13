@@ -307,6 +307,26 @@ def generate_rule_suggestions(
                     )
                 )
 
+    original_taxonomy = _effective_transaction_taxonomy(original_transaction)
+    edited_taxonomy = _effective_transaction_taxonomy(edited_transaction)
+    if original_payee and original_taxonomy != edited_taxonomy:
+        taxonomy_value = edited_taxonomy or ""
+        rule = _transaction_rule(
+            name=f"Set taxonomy for {original_payee}",
+            payee=original_payee,
+            action=RuleAction(
+                type=RuleActionType.set_transaction_taxonomy,
+                value=taxonomy_value,
+            ),
+            transaction_id=original_transaction.id,
+        )
+        prompt = (
+            f"Always leave taxonomy unassigned for payee {original_payee!r}?"
+            if not taxonomy_value
+            else f"Always set taxonomy for payee {original_payee!r} to {taxonomy_value!r}?"
+        )
+        suggestions.append(_suggestion(prompt, rule))
+
     original_receipt = original_receipt_transaction or original_transaction
     edited_receipt = edited_receipt_transaction or edited_transaction
     if original_receipt.receipt is None or edited_receipt.receipt is None:
@@ -354,7 +374,7 @@ def generate_rule_suggestions(
             )
             suggestions.append(
                 _suggestion(
-                    f"Always classify receipt item {item_description!r} with this taxonomy?",
+                    f"Always classify receipt item {item_description!r} as {edited_taxonomy!r}?",
                     rule,
                 )
             )
@@ -460,8 +480,8 @@ def _apply_transaction_actions(transaction: Transaction, actions: Sequence[RuleA
     for action in actions:
         if action.type == RuleActionType.set_payee and action.value:
             transaction.payee = action.value
-        elif action.type == RuleActionType.set_transaction_taxonomy and action.value:
-            transaction.taxonomy = action.value
+        elif action.type == RuleActionType.set_transaction_taxonomy and action.value is not None:
+            transaction.taxonomy = action.value or None
         elif action.type == RuleActionType.set_category_allocations and action.allocations:
             transaction.category_allocations = [
                 CategoryAllocation(
@@ -508,6 +528,13 @@ def _effective_transaction_amount(transaction: Transaction) -> str:
     if overrides is not None and overrides.amount is not None:
         return overrides.amount
     return transaction.amount
+
+
+def _effective_transaction_taxonomy(transaction: Transaction) -> str | None:
+    overrides = transaction.user_overrides
+    if overrides is not None and overrides.taxonomy is not None:
+        return overrides.taxonomy or None
+    return transaction.taxonomy
 
 
 def _effective_category_allocations(transaction: Transaction) -> list[CategoryAllocation]:

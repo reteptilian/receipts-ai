@@ -285,6 +285,7 @@ class ReceiptsAIApp(App[None]):
 
         try:
             transactions = list(self._transaction_loader())
+            transactions = self._transactions_with_rules_applied(transactions)
             category_options = tuple(_app_module().load_budget_category_options())
         except Exception as exc:  # pragma: no cover - exercised through app runtime.
             self.call_from_thread(self._show_error, exc)
@@ -293,6 +294,24 @@ class ReceiptsAIApp(App[None]):
         self.call_from_thread(
             self._show_transactions, transactions, cursor_row_key, category_options
         )
+
+    def _transactions_with_rules_applied(
+        self, transactions: Sequence[Transaction]
+    ) -> list[Transaction]:
+        try:
+            rules = tuple(_app_module().automation_rules_from_firestore())
+        except Exception:
+            return list(transactions)
+        if not rules:
+            return list(transactions)
+
+        updated_transactions: list[Transaction] = []
+        for transaction in transactions:
+            updated_transaction = transaction.model_copy(deep=True)
+            if updated_transaction.reviewed is not True:
+                _app_module().apply_automation_rules(updated_transaction, rules)
+            updated_transactions.append(updated_transaction)
+        return updated_transactions
 
     def _show_transactions(
         self,

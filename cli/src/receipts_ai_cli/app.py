@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from receipts_ai.automation_rules import (
+    apply_automation_rules,
     automation_rules_from_firestore,
     delete_automation_rule,
     generate_rule_suggestions,
@@ -36,6 +37,7 @@ __all__ = [
     "ReceiptsAIApp",
     "TransactionLoader",
     "TransactionReviewScreen",
+    "apply_automation_rules",
     "automation_rules_from_firestore",
     "delete_automation_rule",
     "generate_rule_suggestions",
