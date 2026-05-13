@@ -69,6 +69,9 @@ def test_generates_category_rule_suggestion_from_reviewed_edit() -> None:
     suggestions = generate_rule_suggestions(original, edited, category_catalog=_catalog())
 
     assert len(suggestions) == 1
+    assert suggestions[0].prompt == (
+        "Always categorize payee 'COSTCO #101 GAS STATION' as 'Transportation > Gas & Fuel'?"
+    )
     rule = suggestions[0].rule
     assert rule.scope == RuleScope.transaction
     assert rule.conditions == [

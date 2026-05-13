@@ -302,7 +302,7 @@ def generate_rule_suggestions(
             if rule_invalid_reason(rule, category_catalog=catalog) is None:
                 suggestions.append(
                     _suggestion(
-                        f"Always categorize payee {original_payee!r} this way?",
+                        _categorize_payee_prompt(original_payee, allocations, catalog),
                         rule,
                     )
                 )
@@ -514,6 +514,27 @@ def _action_category_ids(action: RuleAction) -> tuple[str, ...]:
     if action.allocations:
         return tuple(allocation.category_id for allocation in action.allocations)
     return ()
+
+
+def _categorize_payee_prompt(
+    payee: str,
+    allocations: Sequence[CategoryAllocationPercent],
+    catalog: BudgetCategoryCatalog,
+) -> str:
+    category_names_by_id = {choice.category_id: choice.path_text for choice in catalog.choices()}
+    category_names = [
+        category_names_by_id.get(allocation.category_id, allocation.category_id)
+        for allocation in allocations
+    ]
+    if len(category_names) == 1:
+        return f"Always categorize payee {payee!r} as {category_names[0]!r}?"
+    return f"Always categorize payee {payee!r} across {_format_quoted_list(category_names)}?"
+
+
+def _format_quoted_list(values: Sequence[str]) -> str:
+    if len(values) == 1:
+        return repr(values[0])
+    return ", ".join(repr(value) for value in values[:-1]) + f", and {values[-1]!r}"
 
 
 def _effective_transaction_payee(transaction: Transaction) -> str | None:
