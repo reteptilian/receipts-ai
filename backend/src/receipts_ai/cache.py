@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -84,10 +85,15 @@ class SqliteCallCache:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Generator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _migrate_json_cache_if_needed(self) -> None:
         if not self.path.exists() or self.path.stat().st_size == 0:

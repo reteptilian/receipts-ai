@@ -6,6 +6,13 @@ import sys
 from pathlib import Path
 from typing import Any, TextIO
 
+from receipts_ai.budget_categories import (
+    BUDGET_CATEGORY_GROUP_EXPENSE,
+    BUDGET_CATEGORY_GROUP_INCOME,
+    BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER,
+    BudgetCategoryCatalog,
+    load_budget_category_catalog,
+)
 from receipts_ai.config import add_config_file_argument, configure_config_file
 from receipts_ai.firestore_client import DEFAULT_FIRESTORE_COLLECTION
 from receipts_ai.firestore_transactions import (
@@ -19,10 +26,20 @@ from receipts_ai.ingest_receipts import (
 )
 
 LOGGER = logging.getLogger(__name__)
-RECORDS_SHEET_TITLE = "records"
-BUDGET_SHEET_TITLE = "budget"
+EXPENSE_RECORDS_SHEET_TITLE = "expense transactions"
+EXPENSE_BUDGET_SHEET_TITLE = "expense budget"
+INCOME_RECORDS_SHEET_TITLE = "income transactions"
+INCOME_BUDGET_SHEET_TITLE = "income budget"
+INTERNAL_TRANSFER_RECORDS_SHEET_TITLE = "internal transfer transactions"
+INTERNAL_TRANSFER_BUDGET_SHEET_TITLE = "internal transfer budget"
+UNCATEGORIZED_RECORDS_SHEET_TITLE = "uncategorized transactions"
 STUFF_SHEET_TITLE = "stuff"
 DEFAULT_GOOGLE_SHEET_TITLE = "Sheet1"
+SHEET_CATEGORY_GROUP_FIELDNAME = "category_allocation.group"
+SHEET_FIELDNAMES: tuple[str, ...] = (
+    *TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES,
+    SHEET_CATEGORY_GROUP_FIELDNAME,
+)
 
 
 def main() -> None:
@@ -137,6 +154,7 @@ def export_firestore_receipt_items_google_sheet(
     gspread_client: Any | None = None,
     client: FirestoreTransactionClient | None = None,
     collection: str = DEFAULT_FIRESTORE_COLLECTION,
+    category_catalog: BudgetCategoryCatalog | None = None,
 ) -> None:
     if (
         sum(value is not None for value in (spreadsheet_title, spreadsheet_id, spreadsheet_url))
@@ -148,6 +166,7 @@ def export_firestore_receipt_items_google_sheet(
 
     transactions = list(stream_transactions_from_firestore(client=client, collection=collection))
     rows = transaction_receipt_item_rows(transactions)
+    catalog = category_catalog or load_budget_category_catalog()
     sheet_client = gspread_client or _create_gspread_oauth_client(
         oauth_credentials_path=oauth_credentials_path,
         oauth_authorized_user_path=oauth_authorized_user_path,
@@ -158,7 +177,7 @@ def export_firestore_receipt_items_google_sheet(
         spreadsheet_id=spreadsheet_id,
         spreadsheet_url=spreadsheet_url,
     )
-    _write_export_spreadsheet(spreadsheet, rows)
+    _write_export_spreadsheet(spreadsheet, rows, category_catalog=catalog)
     LOGGER.info(
         "Exported %d Firestore transaction(s) from collection %s to Google Sheet %s",
         len(transactions),
@@ -206,25 +225,73 @@ def _open_or_create_spreadsheet(
 def _write_export_spreadsheet(
     spreadsheet: Any,
     rows: list[dict[str, object | None]],
+    *,
+    category_catalog: BudgetCategoryCatalog,
 ) -> None:
-    records = _reset_worksheet(
+    grouped_rows = _sheet_rows_by_category_group(rows, category_catalog)
+    expense_records = _write_records_worksheet(
         spreadsheet,
-        RECORDS_SHEET_TITLE,
-        rows=max(len(rows) + 1, 1),
-        cols=len(TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES),
+        EXPENSE_RECORDS_SHEET_TITLE,
+        grouped_rows[BUDGET_CATEGORY_GROUP_EXPENSE],
     )
-    budget = _reset_worksheet(spreadsheet, BUDGET_SHEET_TITLE, rows=1000, cols=26)
+    expense_budget = _reset_worksheet(spreadsheet, EXPENSE_BUDGET_SHEET_TITLE, rows=1000, cols=26)
+    income_records = _write_records_worksheet(
+        spreadsheet,
+        INCOME_RECORDS_SHEET_TITLE,
+        grouped_rows[BUDGET_CATEGORY_GROUP_INCOME],
+    )
+    income_budget = _reset_worksheet(spreadsheet, INCOME_BUDGET_SHEET_TITLE, rows=1000, cols=26)
+    internal_transfer_records = _write_records_worksheet(
+        spreadsheet,
+        INTERNAL_TRANSFER_RECORDS_SHEET_TITLE,
+        grouped_rows[BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER],
+    )
+    internal_transfer_budget = _reset_worksheet(
+        spreadsheet, INTERNAL_TRANSFER_BUDGET_SHEET_TITLE, rows=1000, cols=26
+    )
+    _write_records_worksheet(spreadsheet, UNCATEGORIZED_RECORDS_SHEET_TITLE, grouped_rows[None])
     stuff = _reset_worksheet(spreadsheet, STUFF_SHEET_TITLE, rows=1000, cols=26)
-    values = _sheet_values(rows)
-    records.update(values, range_name="A1", value_input_option="USER_ENTERED")
-    records.freeze(rows=1)
     _add_budget_pivot_table(
-        spreadsheet, records_sheet=records, budget_sheet=budget, row_count=len(values)
+        spreadsheet,
+        records_sheet=expense_records,
+        budget_sheet=expense_budget,
+        row_count=len(grouped_rows[BUDGET_CATEGORY_GROUP_EXPENSE]) + 1,
+    )
+    _add_budget_pivot_table(
+        spreadsheet,
+        records_sheet=income_records,
+        budget_sheet=income_budget,
+        row_count=len(grouped_rows[BUDGET_CATEGORY_GROUP_INCOME]) + 1,
+    )
+    _add_budget_pivot_table(
+        spreadsheet,
+        records_sheet=internal_transfer_records,
+        budget_sheet=internal_transfer_budget,
+        row_count=len(grouped_rows[BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER]) + 1,
     )
     _add_stuff_pivot_table(
-        spreadsheet, records_sheet=records, stuff_sheet=stuff, row_count=len(values)
+        spreadsheet,
+        records_sheet=expense_records,
+        stuff_sheet=stuff,
+        row_count=len(grouped_rows[BUDGET_CATEGORY_GROUP_EXPENSE]) + 1,
     )
     _delete_default_google_sheet(spreadsheet)
+
+
+def _write_records_worksheet(
+    spreadsheet: Any,
+    title: str,
+    rows: list[dict[str, object | None]],
+) -> Any:
+    worksheet = _reset_worksheet(
+        spreadsheet,
+        title,
+        rows=max(len(rows) + 1, 1),
+        cols=len(SHEET_FIELDNAMES),
+    )
+    worksheet.update(_sheet_values(rows), range_name="A1", value_input_option="USER_ENTERED")
+    worksheet.freeze(rows=1)
+    return worksheet
 
 
 def _reset_worksheet(spreadsheet: Any, title: str, *, rows: int, cols: int) -> Any:
@@ -252,13 +319,29 @@ def _delete_default_google_sheet(spreadsheet: Any) -> None:
 
 
 def _sheet_values(rows: list[dict[str, object | None]]) -> list[list[Any]]:
-    return [list(TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES)] + [
-        [
-            "" if row.get(fieldname) is None else row[fieldname]
-            for fieldname in TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES
-        ]
+    return [list(SHEET_FIELDNAMES)] + [
+        ["" if row.get(fieldname) is None else row[fieldname] for fieldname in SHEET_FIELDNAMES]
         for row in rows
     ]
+
+
+def _sheet_rows_by_category_group(
+    rows: list[dict[str, object | None]],
+    category_catalog: BudgetCategoryCatalog,
+) -> dict[str | None, list[dict[str, object | None]]]:
+    grouped_rows: dict[str | None, list[dict[str, object | None]]] = {
+        BUDGET_CATEGORY_GROUP_EXPENSE: [],
+        BUDGET_CATEGORY_GROUP_INCOME: [],
+        BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER: [],
+        None: [],
+    }
+    for row in rows:
+        row_copy = dict(row)
+        category_id = row.get("category_allocation.category_id")
+        group = category_catalog.category_group(str(category_id) if category_id else None)
+        row_copy[SHEET_CATEGORY_GROUP_FIELDNAME] = group
+        grouped_rows.setdefault(group, []).append(row_copy)
+    return grouped_rows
 
 
 def _add_budget_pivot_table(
@@ -293,9 +376,7 @@ def _add_budget_pivot_table(
                                                 "startRowIndex": 0,
                                                 "startColumnIndex": 0,
                                                 "endRowIndex": row_count,
-                                                "endColumnIndex": len(
-                                                    TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES
-                                                ),
+                                                "endColumnIndex": len(SHEET_FIELDNAMES),
                                             },
                                             "rows": [
                                                 {
@@ -370,9 +451,7 @@ def _add_stuff_pivot_table(
                                                 "startRowIndex": 0,
                                                 "startColumnIndex": 0,
                                                 "endRowIndex": row_count,
-                                                "endColumnIndex": len(
-                                                    TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES
-                                                ),
+                                                "endColumnIndex": len(SHEET_FIELDNAMES),
                                             },
                                             "rows": [
                                                 {

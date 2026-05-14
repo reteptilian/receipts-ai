@@ -906,6 +906,8 @@ def _budget_category_choices(
     if isinstance(categories, BudgetCategoryCatalog):
         return categories.choices()
     if categories is not None:
+        if isinstance(categories.get("categories"), list):
+            return BudgetCategoryCatalog.from_json_payload(categories).choices()
         return catalog_from_legacy_tree(categories).choices()
     return load_budget_category_catalog().choices()
 

@@ -20,6 +20,14 @@ DEFAULT_BUDGET_CATEGORY_CATALOG_ID = "default-budget-categories"
 DEFAULT_BUDGET_CATEGORY_CATALOG_VERSION = 1
 DEFAULT_MAX_BUDGET_CATEGORY_DEPTH = 4
 DEFAULT_MAX_BUDGET_CATEGORY_LEAVES = 82
+BUDGET_CATEGORY_GROUP_EXPENSE = "expense"
+BUDGET_CATEGORY_GROUP_INCOME = "income"
+BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER = "internal_transfer"
+SYSTEM_BUDGET_CATEGORY_GROUPS: tuple[str, ...] = (
+    BUDGET_CATEGORY_GROUP_EXPENSE,
+    BUDGET_CATEGORY_GROUP_INCOME,
+    BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER,
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +38,7 @@ class BudgetCategory:
     status: str = "active"
     sort_order: int = 0
     aliases: tuple[str, ...] = ()
+    system: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,7 +80,7 @@ class BudgetCategoryCatalog:
         )
         choices: list[BudgetCategoryChoice] = []
         for category in self.categories:
-            if category.status != "active" or child_counts[category.id]:
+            if category.system or category.status != "active" or child_counts[category.id]:
                 continue
             choices.append(
                 BudgetCategoryChoice(
@@ -102,6 +111,20 @@ class BudgetCategoryCatalog:
             descendants.append(current)
             pending.extend(children_by_parent.get(current, ()))
         return tuple(descendants)
+
+    def category_group(self, category_id: str | None) -> str | None:
+        if not category_id:
+            return None
+        categories_by_id = self.categories_by_id
+        resolved_category_id = category_id
+        if resolved_category_id not in categories_by_id:
+            resolved_category_id = self.legacy_path_aliases().get(category_id, category_id)
+        category = categories_by_id.get(resolved_category_id)
+        while category is not None:
+            if category.parent_id is None:
+                return category.id if category.id in SYSTEM_BUDGET_CATEGORY_GROUPS else None
+            category = categories_by_id.get(category.parent_id)
+        return None
 
     def to_json_payload(self) -> dict[str, object]:
         return {
@@ -220,6 +243,7 @@ def validate_budget_category_catalog(
     catalog: BudgetCategoryCatalog,
     *,
     max_leaf_categories: int | None = DEFAULT_MAX_BUDGET_CATEGORY_LEAVES,
+    require_system_groups: bool = True,
 ) -> BudgetCategoryCatalogValidationResult:
     errors: list[str] = []
     warnings: list[str] = []
@@ -250,6 +274,19 @@ def validate_budget_category_catalog(
             errors.append(
                 f"category {category.id!r} references missing parent {category.parent_id!r}"
             )
+
+    if require_system_groups:
+        for group in SYSTEM_BUDGET_CATEGORY_GROUPS:
+            category = categories_by_id.get(group)
+            if category is None:
+                errors.append(f"missing required system budget category group {group!r}")
+                continue
+            if category.parent_id is not None:
+                errors.append(f"system budget category group {group!r} must be a root category")
+            if category.status != "active":
+                errors.append(f"system budget category group {group!r} must be active")
+            if not category.system:
+                errors.append(f"system budget category group {group!r} must have system=true")
 
     if errors:
         return BudgetCategoryCatalogValidationResult(tuple(errors), tuple(warnings))
@@ -287,6 +324,12 @@ def validate_budget_category_catalog(
                 warnings.append(
                     f"active category {category.id!r} is under deleted parent {category.parent_id!r}"
                 )
+            if require_system_groups and category.status == "active" and not category.system:
+                root_group = catalog.category_group(category.id)
+                if root_group not in SYSTEM_BUDGET_CATEGORY_GROUPS:
+                    errors.append(
+                        f"active category {category.id!r} must be under a system budget category group"
+                    )
 
     return BudgetCategoryCatalogValidationResult(tuple(errors), tuple(warnings))
 
@@ -406,6 +449,8 @@ def _category_json_payload(category: BudgetCategory) -> dict[str, object]:
         payload["parentId"] = category.parent_id
     if category.aliases:
         payload["aliases"] = list(category.aliases)
+    if category.system:
+        payload["system"] = category.system
     return payload
 
 
@@ -425,6 +470,10 @@ def _catalog_from_categories_argument(
     if isinstance(categories, BudgetCategoryCatalog):
         return categories
     if categories is not None:
+        if _is_catalog_payload(categories):
+            catalog = BudgetCategoryCatalog.from_json_payload(categories)
+            validate_budget_category_catalog(catalog, max_leaf_categories=None).raise_for_errors()
+            return catalog
         return catalog_from_legacy_tree(categories)
     return load_budget_category_catalog()
 
@@ -461,6 +510,7 @@ def _catalog_from_record_payload(payload: Mapping[str, object]) -> BudgetCategor
                 status=_optional_string(raw_category, "status", index) or "active",
                 sort_order=_optional_int(raw_category, "sortOrder", index) or index,
                 aliases=tuple(cast(list[str], aliases)),
+                system=_optional_bool(raw_category, "system", index) or False,
             )
         )
     return BudgetCategoryCatalog(
@@ -494,6 +544,15 @@ def _optional_int(raw_category: Mapping[str, object], key: str, index: int) -> i
         return None
     if not isinstance(value, int):
         raise ValueError(f"categories[{index}].{key} must be an integer")
+    return value
+
+
+def _optional_bool(raw_category: Mapping[str, object], key: str, index: int) -> bool | None:
+    value = raw_category.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ValueError(f"categories[{index}].{key} must be a boolean")
     return value
 
 

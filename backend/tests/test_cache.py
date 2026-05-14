@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sqlite3
+from contextlib import AbstractContextManager
 from pathlib import Path
 from types import ModuleType
 
@@ -12,6 +13,11 @@ from receipts_ai.cache import SqliteCallCache
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = BACKEND_ROOT / "devtools" / "invalidate_cache_namespace.py"
+
+
+class InspectableSqliteCallCache(SqliteCallCache):
+    def connect_for_test(self) -> AbstractContextManager[sqlite3.Connection]:
+        return self._connect()
 
 
 def load_invalidate_cache_namespace() -> ModuleType:
@@ -53,6 +59,16 @@ def test_invalidate_cache_namespace_can_create_file_when_requested(tmp_path: Pat
 
     assert deleted_count == 0
     assert cache_entries(cache_path, "brave_search") == []
+
+
+def test_sqlite_cache_closes_connections_after_operations(tmp_path: Path):
+    cache = InspectableSqliteCallCache(tmp_path / "api-cache.sqlite")
+
+    with cache.connect_for_test() as connection:
+        connection.execute("SELECT 1").fetchone()
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1").fetchone()
 
 
 def test_sqlite_cache_migrates_existing_json_cache(tmp_path: Path):

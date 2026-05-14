@@ -1,79 +1,75 @@
 {
-  "Housing & Utilities": {
-    "Mortgage & Rent": {},
-    "Property Taxes": {},
-    "Homeowners Insurance": {},
-    "Maintenance & Repairs": {},
-    "Electricity": {},
-    "Gas": {},
-    "Water & Sewer": {},
-    "Trash & Recycling": {},
-    "Internet": {},
-    "Mobile Phone": {}
-  },
-  "Food & Dining": {
-    "Groceries": {},
-    "Restaurants & Dining Out": {},
-    "Fast Food & Coffee": {},
-    "Alcohol & Bars": {}
-  },
-  "Auto & Transportation": {
-    "Car Payment": {},
-    "Gas & Fuel": {},
-    "Auto Insurance": {},
-    "Auto Maintenance": {},
-    "Public Transit": {},
-    "Parking & Tolls": {}
-  },
-  "Health & Wellness": {
-    "Health Insurance": {},
-    "Medical & Doctor Visits": {},
-    "Pharmacy": {},
-    "Dental": {},
-    "Vision": {},
-    "Fitness & Gym": {}
-  },
-  "Personal & Shopping": {
-    "Clothing": {},
-    "Personal Care & Hair": {},
-    "Household Supplies": {},
-    "Electronics & Software": {}
-  },
-  "Entertainment & Leisure": {
-    "Streaming Services": {},
-    "Hobbies": {},
-    "Movies & Concerts": {},
-    "Travel & Vacation": {}
-  },
-  "Financial & Debt": {
-    "Credit Card Interest": {},
-    "Student Loans": {},
-    "Bank Fees": {},
-    "Investment Transfers": {}
-  },
-  "Pets & Family": {
-    "Pet Food & Supplies": {},
-    "Veterinary": {},
-    "Childcare & Daycare": {},
-    "School Supplies": {}
-  },
-  "Giving & Miscellaneous": {
-    "Gifts": {},
-    "Charitable Donations": {}
-  },
-  "Income": {
-    "Wages": {},
-    "Interest": {},
-    "Dividends": {}
-  },
-  "Taxes": {
-    "Income Taxes": {},
-    "Sales Taxes": {},
-    "Property Taxes": {},
-    "Other Taxes": {}
-  },
-  "Miscellaneous": {
-    "Internal Transfers": {},
-    "Uncategorized": {}
-  }
+  "id": "default-budget-categories",
+  "version": 2,
+  "maxDepth": 4,
+  "categories": [
+    {"id": "expense", "name": "Expense", "sortOrder": 0, "system": true},
+    {"id": "income", "name": "Income", "sortOrder": 1, "system": true},
+    {"id": "internal_transfer", "name": "Internal Transfers", "sortOrder": 2, "system": true},
+    {"id": "housing_utilities", "name": "Housing & Utilities", "parentId": "expense", "sortOrder": 10},
+    {"id": "housing_utilities.mortgage_rent", "name": "Mortgage & Rent", "parentId": "housing_utilities", "sortOrder": 11},
+    {"id": "housing_utilities.property_taxes", "name": "Property Taxes", "parentId": "housing_utilities", "sortOrder": 12},
+    {"id": "housing_utilities.homeowners_insurance", "name": "Homeowners Insurance", "parentId": "housing_utilities", "sortOrder": 13},
+    {"id": "housing_utilities.maintenance_repairs", "name": "Maintenance & Repairs", "parentId": "housing_utilities", "sortOrder": 14},
+    {"id": "housing_utilities.electricity", "name": "Electricity", "parentId": "housing_utilities", "sortOrder": 15},
+    {"id": "housing_utilities.gas", "name": "Gas", "parentId": "housing_utilities", "sortOrder": 16},
+    {"id": "housing_utilities.water_sewer", "name": "Water & Sewer", "parentId": "housing_utilities", "sortOrder": 17},
+    {"id": "housing_utilities.trash_recycling", "name": "Trash & Recycling", "parentId": "housing_utilities", "sortOrder": 18},
+    {"id": "housing_utilities.internet", "name": "Internet", "parentId": "housing_utilities", "sortOrder": 19},
+    {"id": "housing_utilities.mobile_phone", "name": "Mobile Phone", "parentId": "housing_utilities", "sortOrder": 20},
+    {"id": "food_dining", "name": "Food & Dining", "parentId": "expense", "sortOrder": 30},
+    {"id": "food_dining.groceries", "name": "Groceries", "parentId": "food_dining", "sortOrder": 31},
+    {"id": "food_dining.restaurants_dining_out", "name": "Restaurants & Dining Out", "parentId": "food_dining", "sortOrder": 32},
+    {"id": "food_dining.fast_food_coffee", "name": "Fast Food & Coffee", "parentId": "food_dining", "sortOrder": 33},
+    {"id": "food_dining.alcohol_bars", "name": "Alcohol & Bars", "parentId": "food_dining", "sortOrder": 34},
+    {"id": "auto_transportation", "name": "Auto & Transportation", "parentId": "expense", "sortOrder": 40},
+    {"id": "auto_transportation.car_payment", "name": "Car Payment", "parentId": "auto_transportation", "sortOrder": 41},
+    {"id": "auto_transportation.gas_fuel", "name": "Gas & Fuel", "parentId": "auto_transportation", "sortOrder": 42},
+    {"id": "auto_transportation.auto_insurance", "name": "Auto Insurance", "parentId": "auto_transportation", "sortOrder": 43},
+    {"id": "auto_transportation.auto_maintenance", "name": "Auto Maintenance", "parentId": "auto_transportation", "sortOrder": 44},
+    {"id": "auto_transportation.public_transit", "name": "Public Transit", "parentId": "auto_transportation", "sortOrder": 45},
+    {"id": "auto_transportation.parking_tolls", "name": "Parking & Tolls", "parentId": "auto_transportation", "sortOrder": 46},
+    {"id": "health_wellness", "name": "Health & Wellness", "parentId": "expense", "sortOrder": 50},
+    {"id": "health_wellness.health_insurance", "name": "Health Insurance", "parentId": "health_wellness", "sortOrder": 51},
+    {"id": "health_wellness.medical_doctor_visits", "name": "Medical & Doctor Visits", "parentId": "health_wellness", "sortOrder": 52},
+    {"id": "health_wellness.pharmacy", "name": "Pharmacy", "parentId": "health_wellness", "sortOrder": 53},
+    {"id": "health_wellness.dental", "name": "Dental", "parentId": "health_wellness", "sortOrder": 54},
+    {"id": "health_wellness.vision", "name": "Vision", "parentId": "health_wellness", "sortOrder": 55},
+    {"id": "health_wellness.fitness_gym", "name": "Fitness & Gym", "parentId": "health_wellness", "sortOrder": 56},
+    {"id": "personal_shopping", "name": "Personal & Shopping", "parentId": "expense", "sortOrder": 60},
+    {"id": "personal_shopping.clothing", "name": "Clothing", "parentId": "personal_shopping", "sortOrder": 61},
+    {"id": "personal_shopping.personal_care_hair", "name": "Personal Care & Hair", "parentId": "personal_shopping", "sortOrder": 62},
+    {"id": "personal_shopping.household_supplies", "name": "Household Supplies", "parentId": "personal_shopping", "sortOrder": 63},
+    {"id": "personal_shopping.electronics_software", "name": "Electronics & Software", "parentId": "personal_shopping", "sortOrder": 64},
+    {"id": "entertainment_leisure", "name": "Entertainment & Leisure", "parentId": "expense", "sortOrder": 70},
+    {"id": "entertainment_leisure.streaming_services", "name": "Streaming Services", "parentId": "entertainment_leisure", "sortOrder": 71},
+    {"id": "entertainment_leisure.hobbies", "name": "Hobbies", "parentId": "entertainment_leisure", "sortOrder": 72},
+    {"id": "entertainment_leisure.movies_concerts", "name": "Movies & Concerts", "parentId": "entertainment_leisure", "sortOrder": 73},
+    {"id": "entertainment_leisure.travel_vacation", "name": "Travel & Vacation", "parentId": "entertainment_leisure", "sortOrder": 74},
+    {"id": "financial_debt", "name": "Financial & Debt", "parentId": "expense", "sortOrder": 80},
+    {"id": "financial_debt.credit_card_interest", "name": "Credit Card Interest", "parentId": "financial_debt", "sortOrder": 81},
+    {"id": "financial_debt.student_loans", "name": "Student Loans", "parentId": "financial_debt", "sortOrder": 82},
+    {"id": "financial_debt.bank_fees", "name": "Bank Fees", "parentId": "financial_debt", "sortOrder": 83},
+    {"id": "pets_family", "name": "Pets & Family", "parentId": "expense", "sortOrder": 90},
+    {"id": "pets_family.pet_food_supplies", "name": "Pet Food & Supplies", "parentId": "pets_family", "sortOrder": 91},
+    {"id": "pets_family.veterinary", "name": "Veterinary", "parentId": "pets_family", "sortOrder": 92},
+    {"id": "pets_family.childcare_daycare", "name": "Childcare & Daycare", "parentId": "pets_family", "sortOrder": 93},
+    {"id": "pets_family.school_supplies", "name": "School Supplies", "parentId": "pets_family", "sortOrder": 94},
+    {"id": "giving_miscellaneous", "name": "Giving & Miscellaneous", "parentId": "expense", "sortOrder": 100},
+    {"id": "giving_miscellaneous.gifts", "name": "Gifts", "parentId": "giving_miscellaneous", "sortOrder": 101},
+    {"id": "giving_miscellaneous.charitable_donations", "name": "Charitable Donations", "parentId": "giving_miscellaneous", "sortOrder": 102},
+    {"id": "taxes", "name": "Taxes", "parentId": "expense", "sortOrder": 110},
+    {"id": "taxes.income_taxes", "name": "Income Taxes", "parentId": "taxes", "sortOrder": 111},
+    {"id": "taxes.sales_taxes", "name": "Sales Taxes", "parentId": "taxes", "sortOrder": 112},
+    {"id": "taxes.property_taxes", "name": "Property Taxes", "parentId": "taxes", "sortOrder": 113},
+    {"id": "taxes.other_taxes", "name": "Other Taxes", "parentId": "taxes", "sortOrder": 114},
+    {"id": "miscellaneous", "name": "Miscellaneous", "parentId": "expense", "sortOrder": 120},
+    {"id": "miscellaneous.uncategorized", "name": "Uncategorized", "parentId": "miscellaneous", "sortOrder": 121},
+    {"id": "income.wages", "name": "Wages", "parentId": "income", "sortOrder": 200},
+    {"id": "income.interest", "name": "Interest", "parentId": "income", "sortOrder": 201},
+    {"id": "income.dividends", "name": "Dividends", "parentId": "income", "sortOrder": 202},
+    {"id": "internal_transfer.bank_transfers", "name": "Bank Transfers", "parentId": "internal_transfer", "sortOrder": 300},
+    {"id": "internal_transfer.credit_card_payments", "name": "Credit Card Payments", "parentId": "internal_transfer", "sortOrder": 301},
+    {"id": "internal_transfer.investment_transfers", "name": "Investment Transfers", "parentId": "internal_transfer", "sortOrder": 302}
+  ]
 }

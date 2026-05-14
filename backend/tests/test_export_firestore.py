@@ -867,12 +867,12 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
                     description="Coffee",
                     amount="7.00",
                     net_amount="6.50",
-                    category_id="Food & Dining > Coffee Shops",
+                    category_id="food_dining.fast_food_coffee",
                 ),
                 ReceiptItem(
                     description="Bagel",
                     amount="3.00",
-                    category_id="Food & Dining > Bakeries",
+                    category_id="food_dining.restaurants_dining_out",
                 ),
             ]
         ),
@@ -892,8 +892,13 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
     assert gspread_client.opened_titles == ["Receipt Budget"]
     assert gspread_client.created_titles == ["Receipt Budget"]
     spreadsheet = gspread_client.spreadsheet
-    records = spreadsheet.worksheet("records")
-    budget = spreadsheet.worksheet("budget")
+    records = spreadsheet.worksheet("expense transactions")
+    budget = spreadsheet.worksheet("expense budget")
+    income_records = spreadsheet.worksheet("income transactions")
+    income_budget = spreadsheet.worksheet("income budget")
+    transfer_records = spreadsheet.worksheet("internal transfer transactions")
+    transfer_budget = spreadsheet.worksheet("internal transfer budget")
+    uncategorized_records = spreadsheet.worksheet("uncategorized transactions")
     stuff = spreadsheet.worksheet("stuff")
     assert spreadsheet.deleted_worksheet_titles == ["Sheet1"]
     assert "Sheet1" not in spreadsheet.worksheets_by_title
@@ -901,6 +906,7 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
     category_column = header.index("category_allocation.category_id")
     description_column = header.index("combined_description")
     amount_column = header.index("category_allocation.amount")
+    group_column = header.index("category_allocation.group")
     item_net_amount_column = header.index("item_net_amount")
     stuff_row_columns = [
         header.index(fieldname)
@@ -915,11 +921,17 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
         )
     ]
     assert records.values[1][description_column] == "Coffee"
-    assert records.values[1][category_column] == "Food & Dining > Coffee Shops"
+    assert records.values[1][category_column] == "food_dining.fast_food_coffee"
     assert records.values[1][amount_column] == "-6.50"
+    assert records.values[1][group_column] == "expense"
     assert records.values[1][item_net_amount_column] == "6.50"
     assert records.values[2][description_column] == "Bagel"
     assert records.freeze_calls == [{"rows": 1, "cols": None}]
+    assert income_records.values == [header]
+    assert income_budget.id
+    assert transfer_records.values == [header]
+    assert transfer_budget.id
+    assert uncategorized_records.values == [header]
 
     budget_pivot = spreadsheet.batch_update_calls[0]["requests"][0]["updateCells"]["rows"][0][
         "values"
@@ -943,7 +955,7 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
         "columnIndex": 0,
     }
 
-    stuff_pivot = spreadsheet.batch_update_calls[1]["requests"][0]["updateCells"]["rows"][0][
+    stuff_pivot = spreadsheet.batch_update_calls[3]["requests"][0]["updateCells"]["rows"][0][
         "values"
     ][0]["pivotTable"]
     assert stuff_pivot["source"]["sheetId"] == records.id
@@ -956,7 +968,7 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
             "name": "Sum of item_net_amount",
         }
     ]
-    assert spreadsheet.batch_update_calls[1]["requests"][0]["updateCells"]["start"] == {
+    assert spreadsheet.batch_update_calls[3]["requests"][0]["updateCells"]["start"] == {
         "sheetId": stuff.id,
         "rowIndex": 0,
         "columnIndex": 0,
@@ -976,7 +988,10 @@ def test_export_firestore_receipt_items_google_sheet_opens_existing_sheet_by_id(
 
     assert gspread_client.opened_keys == ["spreadsheet-key"]
     assert gspread_client.created_titles == []
-    assert gspread_client.spreadsheet.worksheet("records").values[0][0] == "transaction_id"
+    assert (
+        gspread_client.spreadsheet.worksheet("expense transactions").values[0][0]
+        == "transaction_id"
+    )
 
 
 def test_main_exports_firestore_csv_to_output_file(

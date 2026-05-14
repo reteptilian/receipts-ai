@@ -8,6 +8,9 @@ import pytest
 
 from receipts_ai import budget_categories
 from receipts_ai.budget_categories import (
+    BUDGET_CATEGORY_GROUP_EXPENSE,
+    BUDGET_CATEGORY_GROUP_INCOME,
+    BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER,
     BudgetCategory,
     BudgetCategoryCatalog,
     catalog_from_legacy_tree,
@@ -59,12 +62,20 @@ def test_load_budget_category_catalog_accepts_record_format(tmp_path: Path):
                 "version": 3,
                 "maxDepth": 4,
                 "categories": [
-                    {"id": "food", "name": "Food", "sortOrder": 1},
+                    {"id": "expense", "name": "Expense", "sortOrder": 0, "system": True},
+                    {"id": "income", "name": "Income", "sortOrder": 1, "system": True},
+                    {
+                        "id": "internal_transfer",
+                        "name": "Internal Transfers",
+                        "sortOrder": 2,
+                        "system": True,
+                    },
+                    {"id": "food", "name": "Food", "parentId": "expense", "sortOrder": 10},
                     {
                         "id": "food.groceries",
                         "name": "Groceries",
                         "parentId": "food",
-                        "sortOrder": 2,
+                        "sortOrder": 11,
                         "aliases": ["Supermarket"],
                     },
                 ],
@@ -81,12 +92,34 @@ def test_load_budget_category_catalog_accepts_record_format(tmp_path: Path):
     assert catalog.choices()[0].aliases == ("Supermarket",)
 
 
+def test_budget_category_catalog_resolves_system_groups():
+    catalog = load_budget_category_catalog()
+
+    assert catalog.category_group("food_dining.groceries") == BUDGET_CATEGORY_GROUP_EXPENSE
+    assert catalog.category_group("income.wages") == BUDGET_CATEGORY_GROUP_INCOME
+    assert (
+        catalog.category_group("internal_transfer.bank_transfers")
+        == BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER
+    )
+    assert catalog.category_group(None) is None
+
+
+def test_validate_budget_category_catalog_requires_system_groups():
+    catalog = catalog_from_legacy_tree({"Food": {"Groceries": {}}})
+
+    result = validate_budget_category_catalog(catalog, max_leaf_categories=None)
+
+    assert "missing required system budget category group 'expense'" in result.errors
+
+
 def test_validate_budget_category_catalog_rejects_too_many_leaf_categories():
     catalog = catalog_from_legacy_tree(
         {"Budget": {f"Category {index}": {} for index in range(1, 84)}}
     )
 
-    result = validate_budget_category_catalog(catalog, max_leaf_categories=82)
+    result = validate_budget_category_catalog(
+        catalog, max_leaf_categories=82, require_system_groups=False
+    )
 
     assert result.errors == (
         "too many budget category leaves for single-token alias prompt: got 83, maximum is 82",
@@ -107,7 +140,7 @@ def test_validate_budget_category_catalog_rejects_more_than_four_levels():
         ),
     )
 
-    result = validate_budget_category_catalog(catalog)
+    result = validate_budget_category_catalog(catalog, require_system_groups=False)
 
     assert "category 'e' depth 5 exceeds maxDepth 4" in result.errors
 
@@ -248,6 +281,13 @@ def test_main_export_default_writes_record_style_catalog(
         "name": "Groceries",
         "parentId": "food_dining",
         "status": "active",
-        "sortOrder": 12,
+        "sortOrder": 31,
+    } in payload["categories"]
+    assert {
+        "id": "expense",
+        "name": "Expense",
+        "status": "active",
+        "sortOrder": 0,
+        "system": True,
     } in payload["categories"]
     assert f"Wrote {output_path}" in capsys.readouterr().out

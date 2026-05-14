@@ -10,7 +10,7 @@ from datetime import date
 from email.message import Message
 from io import BytesIO
 from pathlib import Path
-from typing import TypedDict, Unpack
+from typing import TypedDict, Unpack, cast
 
 import pytest
 
@@ -120,11 +120,25 @@ class FakeResponse:
 
 def test_load_budget_categories_exposes_nested_categories():
     categories = load_budget_categories()
+    raw_categories = categories["categories"]
 
-    assert "Food & Dining" in categories
-    food_categories = categories["Food & Dining"]
-    assert isinstance(food_categories, dict)
-    assert "Groceries" in food_categories
+    assert isinstance(raw_categories, list)
+    category_records = cast(list[object], raw_categories)
+    food_categories: list[dict[str, object]] = []
+    for category in category_records:
+        if not isinstance(category, dict):
+            continue
+        category_record = cast(dict[str, object], category)
+        if category_record.get("id") == "food_dining.groceries":
+            food_categories.append(category_record)
+    assert food_categories == [
+        {
+            "id": "food_dining.groceries",
+            "name": "Groceries",
+            "parentId": "food_dining",
+            "sortOrder": 31,
+        }
+    ]
 
 
 def test_load_budget_category_choices_flattens_leaf_paths():
@@ -316,7 +330,7 @@ def test_categorize_receipt_items_uses_clean_description_and_flattened_category(
         currency="USD",
         receipt=Receipt(items=[item]),
     )
-    client = FakeCategoryClient(["Food & Dining > Groceries"])
+    client = FakeCategoryClient(["Expense > Food & Dining > Groceries"])
 
     result = categorize_receipt_items(transaction, client=client)
 
@@ -559,8 +573,8 @@ def test_categorize_transactions_uses_single_character_aliases_for_budget_catego
     client = FakeProbabilityCategoryClient(
         [
             CategoryCompletion(
-                response="f",
-                probabilities=(CategoryChoiceProbability("f", 0.91),),
+                response="e",
+                probabilities=(CategoryChoiceProbability("e", 0.91),),
             ),
         ]
     )
@@ -575,7 +589,7 @@ def test_categorize_transactions_uses_single_character_aliases_for_budget_catego
     assert allocations is not None
     assert len(allocations) == 1
     assert allocations[0].category_id == "pets_family.childcare_daycare"
-    assert "f: Pets & Family > Childcare & Daycare" in client.prompts[0]
+    assert "e: Expense > Pets & Family > Childcare & Daycare" in client.prompts[0]
     assert "41: Pets & Family > Childcare & Daycare" not in client.prompts[0]
 
 
