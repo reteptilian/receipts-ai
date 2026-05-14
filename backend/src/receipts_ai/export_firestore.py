@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 
 from receipts_ai.budget_categories import (
     BUDGET_CATEGORY_GROUP_EXPENSE,
@@ -171,13 +173,33 @@ def export_firestore_receipt_items_google_sheet(
         oauth_credentials_path=oauth_credentials_path,
         oauth_authorized_user_path=oauth_authorized_user_path,
     )
-    spreadsheet = _open_or_create_spreadsheet(
-        sheet_client,
-        spreadsheet_title=spreadsheet_title,
-        spreadsheet_id=spreadsheet_id,
-        spreadsheet_url=spreadsheet_url,
-    )
-    _write_export_spreadsheet(spreadsheet, rows, category_catalog=catalog)
+    try:
+        spreadsheet = _open_or_create_spreadsheet(
+            sheet_client,
+            spreadsheet_title=spreadsheet_title,
+            spreadsheet_id=spreadsheet_id,
+            spreadsheet_url=spreadsheet_url,
+        )
+        _write_export_spreadsheet(spreadsheet, rows, category_catalog=catalog)
+    except Exception as exc:
+        if gspread_client is not None or not _is_invalid_grant_refresh_error(exc):
+            raise
+        LOGGER.warning(
+            "Google OAuth refresh token has expired or been revoked; "
+            "starting browser reauthorization flow."
+        )
+        sheet_client = _create_gspread_oauth_client(
+            oauth_credentials_path=oauth_credentials_path,
+            oauth_authorized_user_path=oauth_authorized_user_path,
+            force_reauthorize=True,
+        )
+        spreadsheet = _open_or_create_spreadsheet(
+            sheet_client,
+            spreadsheet_title=spreadsheet_title,
+            spreadsheet_id=spreadsheet_id,
+            spreadsheet_url=spreadsheet_url,
+        )
+        _write_export_spreadsheet(spreadsheet, rows, category_catalog=catalog)
     LOGGER.info(
         "Exported %d Firestore transaction(s) from collection %s to Google Sheet %s",
         len(transactions),
@@ -190,15 +212,44 @@ def _create_gspread_oauth_client(
     *,
     oauth_credentials_path: Path | None,
     oauth_authorized_user_path: Path | None,
+    force_reauthorize: bool = False,
 ) -> Any:
     import gspread
+    import gspread.auth
 
     kwargs: dict[str, Any] = {}
     if oauth_credentials_path is not None:
         kwargs["credentials_filename"] = oauth_credentials_path
     if oauth_authorized_user_path is not None:
         kwargs["authorized_user_filename"] = oauth_authorized_user_path
+    if force_reauthorize:
+        authorized_user_filename = (
+            oauth_authorized_user_path or gspread.auth.DEFAULT_AUTHORIZED_USER_FILENAME
+        )
+        _archive_authorized_user_file(Path(authorized_user_filename))
     return gspread.oauth(**kwargs)
+
+
+def _archive_authorized_user_file(path: Path) -> None:
+    if not path.exists():
+        return
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+    archived_path = path.with_name(f"{path.name}.revoked-{timestamp}")
+    path.replace(archived_path)
+    LOGGER.info("Archived revoked Google OAuth authorized user file to %s", archived_path)
+
+
+def _is_invalid_grant_refresh_error(exc: BaseException) -> bool:
+    from google.auth.exceptions import RefreshError
+
+    if not isinstance(exc, RefreshError):
+        return False
+    for arg in exc.args:
+        if isinstance(arg, dict):
+            error_payload = cast("Mapping[str, object]", arg)
+            if error_payload.get("error") == "invalid_grant":
+                return True
+    return "invalid_grant" in str(exc)
 
 
 def _open_or_create_spreadsheet(

@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, date, datetime
 from io import StringIO
 from pathlib import Path
-from typing import Any, TypedDict, Unpack
+from typing import Any, TypedDict, Unpack, override
 
 import pytest
 
@@ -992,6 +992,68 @@ def test_export_firestore_receipt_items_google_sheet_opens_existing_sheet_by_id(
         gspread_client.spreadsheet.worksheet("expense transactions").values[0][0]
         == "transaction_id"
     )
+
+
+def test_export_firestore_receipt_items_google_sheet_reauthorizes_revoked_oauth_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from google.auth.exceptions import RefreshError
+
+    class RevokedTokenGspreadClient(FakeGspreadClient):
+        @override
+        def open_by_key(self, key: str) -> FakeSpreadsheet:
+            raise RefreshError(
+                "invalid_grant: Token has been expired or revoked.",
+                {"error": "invalid_grant"},
+            )
+
+    firestore_client = FakeFirestoreClient([])
+    refreshed_gspread_client = FakeGspreadClient()
+    oauth_calls: list[dict[str, object]] = []
+    oauth_clients = [RevokedTokenGspreadClient(), refreshed_gspread_client]
+
+    def fake_create_gspread_oauth_client(
+        *,
+        oauth_credentials_path: Path | None,
+        oauth_authorized_user_path: Path | None,
+        force_reauthorize: bool = False,
+    ) -> FakeGspreadClient:
+        oauth_calls.append(
+            {
+                "oauth_credentials_path": oauth_credentials_path,
+                "oauth_authorized_user_path": oauth_authorized_user_path,
+                "force_reauthorize": force_reauthorize,
+            }
+        )
+        return oauth_clients.pop(0)
+
+    monkeypatch.setattr(
+        export_firestore,
+        "_create_gspread_oauth_client",
+        fake_create_gspread_oauth_client,
+    )
+
+    export_firestore.export_firestore_receipt_items_google_sheet(
+        spreadsheet_id="spreadsheet-key",
+        oauth_credentials_path=Path("/tmp/credentials.json"),
+        oauth_authorized_user_path=Path("/tmp/authorized_user.json"),
+        client=firestore_client,
+        collection="test-transactions",
+    )
+
+    assert oauth_calls == [
+        {
+            "oauth_credentials_path": Path("/tmp/credentials.json"),
+            "oauth_authorized_user_path": Path("/tmp/authorized_user.json"),
+            "force_reauthorize": False,
+        },
+        {
+            "oauth_credentials_path": Path("/tmp/credentials.json"),
+            "oauth_authorized_user_path": Path("/tmp/authorized_user.json"),
+            "force_reauthorize": True,
+        },
+    ]
+    assert refreshed_gspread_client.opened_keys == ["spreadsheet-key"]
 
 
 def test_main_exports_firestore_csv_to_output_file(

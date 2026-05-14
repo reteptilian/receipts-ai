@@ -301,7 +301,7 @@ async def test_transaction_table_description_column_has_capped_fixed_width() -> 
         description_column = table.ordered_columns[2]
 
     assert description_column.auto_width is False
-    assert description_column.width == 52
+    assert description_column.width == 49
 
 
 @pytest.mark.anyio

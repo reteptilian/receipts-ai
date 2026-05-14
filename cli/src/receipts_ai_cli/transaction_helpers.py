@@ -63,7 +63,7 @@ TRANSACTION_TABLE_FLEX_COLUMNS = (
     TransactionTableFlexColumn(key="payee", min_width=16, max_width=40, weight=2),
     TransactionTableFlexColumn(key="description", min_width=18, max_width=60, weight=4),
     TransactionTableFlexColumn(key="taxonomy", min_width=18, max_width=52, weight=3),
-    TransactionTableFlexColumn(key="category", min_width=16, max_width=40, weight=2),
+    TransactionTableFlexColumn(key="category", min_width=16, max_width=56, weight=3),
     TransactionTableFlexColumn(key="ingestion_filename", min_width=14, max_width=30, weight=1),
 )
 
