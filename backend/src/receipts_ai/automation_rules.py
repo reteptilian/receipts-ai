@@ -244,6 +244,25 @@ def apply_automation_rules_from_firestore(
             LOGGER.exception("Skipping automation rules for transaction %s", transaction.id)
 
 
+def replacement_conflicts_for_rule(
+    rule: AutomationRule,
+    existing_rules: Sequence[AutomationRule],
+) -> tuple[AutomationRule, ...]:
+    """Return active generated category rules replaced by saving this rule."""
+    if not _is_transaction_category_allocation_rule(rule):
+        return ()
+    condition_signature = _condition_signature(rule)
+    return tuple(
+        existing_rule
+        for existing_rule in existing_rules
+        if existing_rule.id != rule.id
+        and existing_rule.enabled
+        and existing_rule.status == AutomationRuleStatus.active
+        and _is_transaction_category_allocation_rule(existing_rule)
+        and _condition_signature(existing_rule) == condition_signature
+    )
+
+
 def generate_rule_suggestions(
     original_transaction: Transaction,
     edited_transaction: Transaction,
@@ -474,6 +493,27 @@ def _receipt_item_rule_matches(rule: AutomationRule, item: ReceiptItem) -> bool:
         if condition.operator == RuleConditionOperator.equals and value != condition.value:
             return False
     return True
+
+
+def _is_transaction_category_allocation_rule(rule: AutomationRule) -> bool:
+    return (
+        rule.scope == RuleScope.transaction
+        and len(rule.conditions) == 1
+        and rule.conditions[0].field == RuleConditionField.payee
+        and rule.conditions[0].operator == RuleConditionOperator.equals
+        and any(
+            action.type == RuleActionType.set_category_allocations
+            and action.allocations is not None
+            for action in rule.actions
+        )
+    )
+
+
+def _condition_signature(rule: AutomationRule) -> tuple[tuple[str, str, str], ...]:
+    return tuple(
+        (condition.field.value, condition.operator.value, condition.value)
+        for condition in rule.conditions
+    )
 
 
 def _apply_transaction_actions(transaction: Transaction, actions: Sequence[RuleAction]) -> None:

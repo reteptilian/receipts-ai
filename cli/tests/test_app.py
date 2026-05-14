@@ -11,11 +11,13 @@ from unittest.mock import patch
 import pytest
 from receipts_ai.automation_rules import (
     AutomationRule,
+    CategoryAllocationPercent,
     RuleAction,
     RuleActionType,
     RuleCondition,
     RuleConditionField,
     RuleScope,
+    RuleSuggestion,
 )
 from receipts_ai.budget_categories import BudgetCategoryChoice
 from receipts_ai.models.transaction import (
@@ -1281,6 +1283,111 @@ async def test_cleared_reviewed_transaction_taxonomy_generates_rule_suggestion()
 
         assert mock_save.called
         assert mock_save_rule.called
+
+
+@pytest.mark.anyio
+async def test_category_rule_suggestion_prompts_to_replace_conflicting_rule() -> None:
+    transaction = _transaction(
+        "transaction_1",
+        transaction_date=date(2026, 5, 6),
+        amount="-7.50",
+    )
+    transaction.payee = "Coffee Shop"
+    transaction.reviewed = True
+    replacement_rule = AutomationRule(
+        id="rule_replacement",
+        name="Categorize Coffee Shop",
+        scope=RuleScope.transaction,
+        conditions=[
+            RuleCondition(
+                field=RuleConditionField.payee,
+                value="Coffee Shop",
+            )
+        ],
+        actions=[
+            RuleAction(
+                type=RuleActionType.set_category_allocations,
+                allocations=[
+                    CategoryAllocationPercent.model_validate(
+                        {"categoryId": "food_dining.groceries", "percent": "100"}
+                    )
+                ],
+            )
+        ],
+    )
+    existing_rule = replacement_rule.model_copy(
+        update={
+            "id": "rule_existing",
+            "name": "Categorize Coffee Shop as gas",
+            "actions": [
+                RuleAction(
+                    type=RuleActionType.set_category_allocations,
+                    allocations=[
+                        CategoryAllocationPercent.model_validate(
+                            {
+                                "categoryId": "auto_transportation.gas_fuel",
+                                "percent": "100",
+                            }
+                        )
+                    ],
+                )
+            ],
+        },
+        deep=True,
+    )
+    suggestion = RuleSuggestion(
+        key=replacement_rule.id,
+        prompt="Always categorize payee 'Coffee Shop' as 'Food & Dining > Groceries'?",
+        rule=replacement_rule,
+    )
+    app = ReceiptsAIApp(transaction_loader=lambda: [transaction])
+
+    with (
+        patch("receipts_ai_cli.app.save_transaction_review_edits") as mock_save_review,
+        patch("receipts_ai_cli.app.generate_rule_suggestions", return_value=(suggestion,)),
+        patch(
+            "receipts_ai_cli.app.automation_rules_from_firestore",
+            return_value=[existing_rule],
+        ),
+        patch("receipts_ai_cli.app.delete_automation_rule") as mock_delete_rule,
+        patch("receipts_ai_cli.app.save_automation_rule") as mock_save_rule,
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+
+            review_screen = cast(TransactionReviewScreen, app.screen)
+            review_screen._set_category_allocation_overrides(
+                [
+                    UserCategoryAllocation(
+                        category_id="food_dining.groceries",
+                        amount="-7.50",
+                    )
+                ]
+            )
+            review_screen._mark_dirty("Draft category allocation edit")
+            await pilot.press("s")
+            await pilot.pause(0.2)
+
+            assert str(app.screen.query_one("#rule-suggestion-prompt", Static).content) == (
+                "Always categorize payee 'Coffee Shop' as 'Food & Dining > Groceries'?"
+            )
+            await pilot.press("y")
+            await pilot.pause(0.2)
+
+            assert str(app.screen.query_one("#rule-suggestion-prompt", Static).content) == (
+                "rule 'Categorize Coffee Shop as gas' "
+                "(Expense > Auto & Transportation > Gas & Fuel) "
+                "already matches this payee. Replace it with rule "
+                "'Categorize Coffee Shop' (Expense > Food & Dining > Groceries)?"
+            )
+            await pilot.press("y")
+            await pilot.pause(0.2)
+
+    assert mock_save_review.called
+    mock_delete_rule.assert_called_once_with("rule_existing")
+    mock_save_rule.assert_called_once_with(replacement_rule)
 
 
 @pytest.mark.anyio

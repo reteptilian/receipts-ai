@@ -248,17 +248,29 @@ class RuleSuggestionScreen(ModalScreen[bool]):
         ("y", "create", "Create"),
     ]
 
-    def __init__(self, prompt: str) -> None:
+    def __init__(
+        self,
+        prompt: str,
+        *,
+        title: str = "Create automation rule?",
+        create_label: str = "Create",
+    ) -> None:
         super().__init__()
         self._prompt = prompt
+        self._title = title
+        self._create_label = create_label
 
     def compose(self) -> ComposeResult:
         with Center():
             with Vertical(id="rule-suggestion-dialog"):
-                yield Label("Create automation rule?")
+                yield Label(self._title)
                 yield Static(self._prompt, id="rule-suggestion-prompt")
                 with Horizontal(id="rule-suggestion-buttons"):
-                    yield Button("Create", id="rule-suggestion-create", variant="primary")
+                    yield Button(
+                        self._create_label,
+                        id="rule-suggestion-create",
+                        variant="primary",
+                    )
                     yield Button("Skip", id="rule-suggestion-skip")
 
     def on_mount(self) -> None:

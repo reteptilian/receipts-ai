@@ -597,6 +597,22 @@ class TransactionReviewScreen(Screen[None]):
                 self._source_transaction.id,
                 suggestion.key,
             )
+            if self._rule_has_category_allocation_action(suggestion.rule):
+                existing_rules = tuple(_app_module().automation_rules_from_firestore())
+                conflicts = tuple(
+                    _app_module().replacement_conflicts_for_rule(
+                        suggestion.rule,
+                        existing_rules,
+                    )
+                )
+                if conflicts:
+                    self.app.call_from_thread(
+                        self._confirm_replace_rule_suggestion,
+                        suggestion,
+                        index,
+                        conflicts,
+                    )
+                    return
             _app_module().save_automation_rule(suggestion.rule)
         except Exception as exc:
             LOGGER.exception(
@@ -615,6 +631,90 @@ class TransactionReviewScreen(Screen[None]):
             suggestion.key,
         )
         self.app.call_from_thread(self._prompt_rule_suggestion, index + 1)
+
+    def _confirm_replace_rule_suggestion(
+        self,
+        suggestion: Any,
+        index: int,
+        conflicts: Sequence[Any],
+    ) -> None:
+        prompt = self._replacement_prompt(suggestion, conflicts)
+
+        def on_decision(replace_rule: bool | None) -> None:
+            LOGGER.debug(
+                "Rule replacement decision for transaction %s: key=%s replace_rule=%s",
+                self._source_transaction.id,
+                suggestion.key,
+                replace_rule,
+            )
+            if replace_rule:
+                self._show_edit_status("Replacing automation rule...")
+                self.run_worker(
+                    lambda: self._replace_rule_suggestion(suggestion, index, conflicts),
+                    thread=True,
+                    name=f"replace-rule-{suggestion.key}",
+                )
+            else:
+                self._prompt_rule_suggestion(index + 1)
+
+        self.app.push_screen(
+            RuleSuggestionScreen(
+                prompt,
+                title="Replace automation rule?",
+                create_label="Replace",
+            ),
+            on_decision,
+        )
+
+    def _replace_rule_suggestion(
+        self,
+        suggestion: Any,
+        index: int,
+        conflicts: Sequence[Any],
+    ) -> None:
+        try:
+            for conflict in conflicts:
+                _app_module().delete_automation_rule(conflict.id)
+            _app_module().save_automation_rule(suggestion.rule)
+        except Exception as exc:
+            LOGGER.exception(
+                "Failed to replace automation rule suggestion for transaction %s: key=%s",
+                self._source_transaction.id,
+                suggestion.key,
+            )
+            self.app.call_from_thread(
+                self._show_edit_error,
+                f"Review saved, but failed to replace automation rule: {exc}",
+            )
+            return
+        self.app.call_from_thread(self._prompt_rule_suggestion, index + 1)
+
+    def _replacement_prompt(self, suggestion: Any, conflicts: Sequence[Any]) -> str:
+        conflict_count = len(conflicts)
+        existing_summary = (
+            self._rule_category_summary(conflicts[0])
+            if conflict_count == 1
+            else f"{conflict_count} existing category rules"
+        )
+        new_summary = self._rule_category_summary(suggestion.rule)
+        return f"{existing_summary} already matches this payee. Replace it with {new_summary}?"
+
+    def _rule_category_summary(self, rule: Any) -> str:
+        category_ids: list[str] = []
+        for action in rule.actions:
+            allocations = getattr(action, "allocations", None)
+            if action.type.value == "set_category_allocations" and allocations:
+                category_ids.extend(allocation.category_id for allocation in allocations)
+        if not category_ids:
+            return f"rule {rule.name!r}"
+        categories = ", ".join(self._category_display(category_id) for category_id in category_ids)
+        return f"rule {rule.name!r} ({categories})"
+
+    def _rule_has_category_allocation_action(self, rule: Any) -> bool:
+        return any(
+            action.type.value == "set_category_allocations" and getattr(action, "allocations", None)
+            for action in rule.actions
+        )
 
     def action_toggle_reviewed(self) -> None:
         self._transaction.reviewed = not _effective_transaction_reviewed(self._transaction)

@@ -9,6 +9,7 @@ from receipts_ai.automation_rules import (
     automation_rules_from_firestore,
     delete_automation_rule,
     generate_rule_suggestions,
+    replacement_conflicts_for_rule,
     rule_invalid_reason,
     save_automation_rule,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "link_bank_statement_transaction_to_receipt",
     "load_budget_category_choices",
     "load_budget_category_options",
+    "replacement_conflicts_for_rule",
     "rule_invalid_reason",
     "save_transaction_review_edits",
     "save_automation_rule",

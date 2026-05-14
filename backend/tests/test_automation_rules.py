@@ -12,6 +12,7 @@ from receipts_ai.automation_rules import (
     RuleScope,
     apply_automation_rules,
     generate_rule_suggestions,
+    replacement_conflicts_for_rule,
     rule_invalid_reason,
 )
 from receipts_ai.budget_categories import BudgetCategory, BudgetCategoryCatalog
@@ -134,6 +135,69 @@ def test_apply_payee_rule_sets_rule_sourced_category_allocations() -> None:
     assert transaction.category_allocations[0].category_id == "transportation.gas_fuel"
     assert transaction.category_allocations[0].amount == "-50.00"
     assert transaction.category_allocations[0].source == Source1.rule
+
+
+def test_replacement_conflicts_for_category_rule_finds_same_payee_rule() -> None:
+    existing = AutomationRule(
+        id="rule_existing",
+        name="Costco groceries",
+        scope=RuleScope.transaction,
+        conditions=[
+            RuleCondition(
+                field=RuleConditionField.payee,
+                value="COSTCO #101 GAS STATION",
+            )
+        ],
+        actions=[
+            RuleAction(
+                type=RuleActionType.set_category_allocations,
+                allocations=[
+                    CategoryAllocationPercent.model_validate(
+                        {
+                            "categoryId": "food.groceries",
+                            "percent": "100",
+                        }
+                    )
+                ],
+            )
+        ],
+    )
+    replacement = existing.model_copy(
+        update={
+            "id": "rule_replacement",
+            "name": "Costco gas",
+            "actions": [
+                RuleAction(
+                    type=RuleActionType.set_category_allocations,
+                    allocations=[
+                        CategoryAllocationPercent.model_validate(
+                            {
+                                "categoryId": "transportation.gas_fuel",
+                                "percent": "100",
+                            }
+                        )
+                    ],
+                )
+            ],
+        },
+        deep=True,
+    )
+    unrelated = existing.model_copy(
+        update={
+            "id": "rule_unrelated",
+            "conditions": [
+                RuleCondition(
+                    field=RuleConditionField.payee,
+                    value="Other Payee",
+                )
+            ],
+        },
+        deep=True,
+    )
+
+    assert replacement_conflicts_for_rule(replacement, [existing, replacement, unrelated]) == (
+        existing,
+    )
 
 
 def test_generates_transaction_taxonomy_clear_rule_suggestion() -> None:
