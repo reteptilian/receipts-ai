@@ -881,6 +881,11 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
         [FakeDocumentSnapshot("receipt_1", transaction_firestore_document(transaction))]
     )
     gspread_client = FakeGspreadClient()
+    gspread_client.spreadsheet.add_worksheet(
+        title="internal transfer budget",
+        rows=1000,
+        cols=26,
+    )
 
     export_firestore.export_firestore_receipt_items_google_sheet(
         spreadsheet_title="Receipt Budget",
@@ -897,12 +902,13 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
     income_records = spreadsheet.worksheet("income transactions")
     income_budget = spreadsheet.worksheet("income budget")
     transfer_records = spreadsheet.worksheet("internal transfer transactions")
-    transfer_budget = spreadsheet.worksheet("internal transfer budget")
     uncategorized_records = spreadsheet.worksheet("uncategorized transactions")
     stuff = spreadsheet.worksheet("stuff")
-    assert spreadsheet.deleted_worksheet_titles == ["Sheet1"]
+    assert spreadsheet.deleted_worksheet_titles == ["internal transfer budget", "Sheet1"]
     assert "Sheet1" not in spreadsheet.worksheets_by_title
+    assert "internal transfer budget" not in spreadsheet.worksheets_by_title
     header = records.values[0]
+    transaction_amount_column = header.index("transaction_amount")
     category_column = header.index("category_allocation.category_id")
     description_column = header.index("combined_description")
     amount_column = header.index("category_allocation.amount")
@@ -922,7 +928,8 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
     ]
     assert records.values[1][description_column] == "Coffee"
     assert records.values[1][category_column] == "food_dining.fast_food_coffee"
-    assert records.values[1][amount_column] == "-6.50"
+    assert records.values[1][transaction_amount_column] == "10.00"
+    assert records.values[1][amount_column] == "6.50"
     assert records.values[1][group_column] == "expense"
     assert records.values[1][item_net_amount_column] == "6.50"
     assert records.values[2][description_column] == "Bagel"
@@ -930,7 +937,6 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
     assert income_records.values == [header]
     assert income_budget.id
     assert transfer_records.values == [header]
-    assert transfer_budget.id
     assert uncategorized_records.values == [header]
 
     budget_pivot = spreadsheet.batch_update_calls[0]["requests"][0]["updateCells"]["rows"][0][
@@ -942,6 +948,7 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
         category_column,
         description_column,
     ]
+    assert [row["showTotals"] for row in budget_pivot["rows"]] == [False, False]
     assert budget_pivot["values"] == [
         {
             "sourceColumnOffset": amount_column,
@@ -954,13 +961,57 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
         "rowIndex": 0,
         "columnIndex": 0,
     }
+    expense_chart = spreadsheet.batch_update_calls[1]["requests"][0]["addChart"]["chart"]
+    assert expense_chart["spec"]["title"] == "Expense budget by category"
+    assert expense_chart["spec"]["pieChart"]["domain"]["sourceRange"]["sources"] == [
+        {
+            "sheetId": budget.id,
+            "startRowIndex": 1,
+            "endRowIndex": 1000,
+            "startColumnIndex": 0,
+            "endColumnIndex": 1,
+        }
+    ]
+    assert expense_chart["spec"]["pieChart"]["series"]["sourceRange"]["sources"] == [
+        {
+            "sheetId": budget.id,
+            "startRowIndex": 1,
+            "endRowIndex": 1000,
+            "startColumnIndex": 2,
+            "endColumnIndex": 3,
+        }
+    ]
+    assert expense_chart["position"]["overlayPosition"]["anchorCell"] == {
+        "sheetId": budget.id,
+        "rowIndex": 0,
+        "columnIndex": 4,
+    }
+    expense_slicer = spreadsheet.batch_update_calls[2]["requests"][0]["addSlicer"]["slicer"]
+    assert expense_slicer["spec"] == {
+        "dataRange": {
+            "sheetId": records.id,
+            "startRowIndex": 0,
+            "endRowIndex": 3,
+            "startColumnIndex": 0,
+            "endColumnIndex": len(header),
+        },
+        "columnIndex": category_column,
+        "applyToPivotTables": True,
+        "title": "Expense category",
+    }
+    assert expense_slicer["position"]["overlayPosition"]["anchorCell"] == {
+        "sheetId": budget.id,
+        "rowIndex": 20,
+        "columnIndex": 4,
+    }
 
-    stuff_pivot = spreadsheet.batch_update_calls[3]["requests"][0]["updateCells"]["rows"][0][
+    stuff_pivot = spreadsheet.batch_update_calls[4]["requests"][0]["updateCells"]["rows"][0][
         "values"
     ][0]["pivotTable"]
     assert stuff_pivot["source"]["sheetId"] == records.id
     assert stuff_pivot["source"]["endRowIndex"] == 3
     assert [row["sourceColumnOffset"] for row in stuff_pivot["rows"]] == stuff_row_columns
+    assert all(row["showTotals"] is False for row in stuff_pivot["rows"])
     assert stuff_pivot["values"] == [
         {
             "sourceColumnOffset": item_net_amount_column,
@@ -968,7 +1019,7 @@ def test_export_firestore_receipt_items_google_sheet_writes_records_and_budget_p
             "name": "Sum of item_net_amount",
         }
     ]
-    assert spreadsheet.batch_update_calls[3]["requests"][0]["updateCells"]["start"] == {
+    assert spreadsheet.batch_update_calls[4]["requests"][0]["updateCells"]["start"] == {
         "sheetId": stuff.id,
         "rowIndex": 0,
         "columnIndex": 0,

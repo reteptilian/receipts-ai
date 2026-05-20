@@ -5,6 +5,7 @@ import logging
 import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, TextIO, cast
 
@@ -38,6 +39,10 @@ UNCATEGORIZED_RECORDS_SHEET_TITLE = "uncategorized transactions"
 STUFF_SHEET_TITLE = "stuff"
 DEFAULT_GOOGLE_SHEET_TITLE = "Sheet1"
 SHEET_CATEGORY_GROUP_FIELDNAME = "category_allocation.group"
+EXPENSE_POSITIVE_AMOUNT_FIELDNAMES = (
+    "transaction_amount",
+    "category_allocation.amount",
+)
 SHEET_FIELDNAMES: tuple[str, ...] = (
     *TRANSACTION_RECEIPT_ITEMS_CSV_FIELDNAMES,
     SHEET_CATEGORY_GROUP_FIELDNAME,
@@ -292,14 +297,12 @@ def _write_export_spreadsheet(
         grouped_rows[BUDGET_CATEGORY_GROUP_INCOME],
     )
     income_budget = _reset_worksheet(spreadsheet, INCOME_BUDGET_SHEET_TITLE, rows=1000, cols=26)
-    internal_transfer_records = _write_records_worksheet(
+    _write_records_worksheet(
         spreadsheet,
         INTERNAL_TRANSFER_RECORDS_SHEET_TITLE,
         grouped_rows[BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER],
     )
-    internal_transfer_budget = _reset_worksheet(
-        spreadsheet, INTERNAL_TRANSFER_BUDGET_SHEET_TITLE, rows=1000, cols=26
-    )
+    _delete_worksheet_if_exists(spreadsheet, INTERNAL_TRANSFER_BUDGET_SHEET_TITLE)
     _write_records_worksheet(spreadsheet, UNCATEGORIZED_RECORDS_SHEET_TITLE, grouped_rows[None])
     stuff = _reset_worksheet(spreadsheet, STUFF_SHEET_TITLE, rows=1000, cols=26)
     _add_budget_pivot_table(
@@ -313,12 +316,6 @@ def _write_export_spreadsheet(
         records_sheet=income_records,
         budget_sheet=income_budget,
         row_count=len(grouped_rows[BUDGET_CATEGORY_GROUP_INCOME]) + 1,
-    )
-    _add_budget_pivot_table(
-        spreadsheet,
-        records_sheet=internal_transfer_records,
-        budget_sheet=internal_transfer_budget,
-        row_count=len(grouped_rows[BUDGET_CATEGORY_GROUP_INTERNAL_TRANSFER]) + 1,
     )
     _add_stuff_pivot_table(
         spreadsheet,
@@ -359,10 +356,14 @@ def _reset_worksheet(spreadsheet: Any, title: str, *, rows: int, cols: int) -> A
 
 
 def _delete_default_google_sheet(spreadsheet: Any) -> None:
+    _delete_worksheet_if_exists(spreadsheet, DEFAULT_GOOGLE_SHEET_TITLE)
+
+
+def _delete_worksheet_if_exists(spreadsheet: Any, title: str) -> None:
     import gspread
 
     try:
-        worksheet = spreadsheet.worksheet(DEFAULT_GOOGLE_SHEET_TITLE)
+        worksheet = spreadsheet.worksheet(title)
     except gspread.WorksheetNotFound:
         return
 
@@ -391,8 +392,26 @@ def _sheet_rows_by_category_group(
         category_id = row.get("category_allocation.category_id")
         group = category_catalog.category_group(str(category_id) if category_id else None)
         row_copy[SHEET_CATEGORY_GROUP_FIELDNAME] = group
+        if group == BUDGET_CATEGORY_GROUP_EXPENSE:
+            _make_expense_amounts_positive(row_copy)
         grouped_rows.setdefault(group, []).append(row_copy)
     return grouped_rows
+
+
+def _make_expense_amounts_positive(row: dict[str, object | None]) -> None:
+    for fieldname in EXPENSE_POSITIVE_AMOUNT_FIELDNAMES:
+        value = row.get(fieldname)
+        if value is not None:
+            row[fieldname] = _positive_decimal_string(value)
+
+
+def _positive_decimal_string(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    try:
+        return str(abs(Decimal(value)))
+    except InvalidOperation:
+        return value
 
 
 def _add_budget_pivot_table(
@@ -432,12 +451,12 @@ def _add_budget_pivot_table(
                                             "rows": [
                                                 {
                                                     "sourceColumnOffset": category_column,
-                                                    "showTotals": True,
+                                                    "showTotals": False,
                                                     "sortOrder": "ASCENDING",
                                                 },
                                                 {
                                                     "sourceColumnOffset": description_column,
-                                                    "showTotals": True,
+                                                    "showTotals": False,
                                                     "sortOrder": "ASCENDING",
                                                 },
                                             ],
@@ -455,6 +474,122 @@ def _add_budget_pivot_table(
                             }
                         ],
                         "fields": "pivotTable",
+                    }
+                }
+            ]
+        }
+    )
+    if budget_sheet.title == EXPENSE_BUDGET_SHEET_TITLE:
+        _add_expense_budget_pie_chart(spreadsheet, budget_sheet=budget_sheet)
+        _add_expense_budget_slicer(
+            spreadsheet,
+            records_sheet=records_sheet,
+            budget_sheet=budget_sheet,
+            row_count=row_count,
+            category_column=category_column,
+        )
+
+
+def _add_expense_budget_pie_chart(spreadsheet: Any, *, budget_sheet: Any) -> None:
+    spreadsheet.batch_update(
+        {
+            "requests": [
+                {
+                    "addChart": {
+                        "chart": {
+                            "spec": {
+                                "title": "Expense budget by category",
+                                "pieChart": {
+                                    "legendPosition": "RIGHT_LEGEND",
+                                    "domain": {
+                                        "sourceRange": {
+                                            "sources": [
+                                                {
+                                                    "sheetId": budget_sheet.id,
+                                                    "startRowIndex": 1,
+                                                    "endRowIndex": 1000,
+                                                    "startColumnIndex": 0,
+                                                    "endColumnIndex": 1,
+                                                }
+                                            ]
+                                        }
+                                    },
+                                    "series": {
+                                        "sourceRange": {
+                                            "sources": [
+                                                {
+                                                    "sheetId": budget_sheet.id,
+                                                    "startRowIndex": 1,
+                                                    "endRowIndex": 1000,
+                                                    "startColumnIndex": 2,
+                                                    "endColumnIndex": 3,
+                                                }
+                                            ]
+                                        }
+                                    },
+                                },
+                            },
+                            "position": {
+                                "overlayPosition": {
+                                    "anchorCell": {
+                                        "sheetId": budget_sheet.id,
+                                        "rowIndex": 0,
+                                        "columnIndex": 4,
+                                    },
+                                    "offsetXPixels": 0,
+                                    "offsetYPixels": 0,
+                                    "widthPixels": 600,
+                                    "heightPixels": 400,
+                                }
+                            },
+                        }
+                    }
+                }
+            ]
+        }
+    )
+
+
+def _add_expense_budget_slicer(
+    spreadsheet: Any,
+    *,
+    records_sheet: Any,
+    budget_sheet: Any,
+    row_count: int,
+    category_column: int,
+) -> None:
+    spreadsheet.batch_update(
+        {
+            "requests": [
+                {
+                    "addSlicer": {
+                        "slicer": {
+                            "spec": {
+                                "dataRange": {
+                                    "sheetId": records_sheet.id,
+                                    "startRowIndex": 0,
+                                    "endRowIndex": row_count,
+                                    "startColumnIndex": 0,
+                                    "endColumnIndex": len(SHEET_FIELDNAMES),
+                                },
+                                "columnIndex": category_column,
+                                "applyToPivotTables": True,
+                                "title": "Expense category",
+                            },
+                            "position": {
+                                "overlayPosition": {
+                                    "anchorCell": {
+                                        "sheetId": budget_sheet.id,
+                                        "rowIndex": 20,
+                                        "columnIndex": 4,
+                                    },
+                                    "offsetXPixels": 0,
+                                    "offsetYPixels": 0,
+                                    "widthPixels": 300,
+                                    "heightPixels": 120,
+                                }
+                            },
+                        }
                     }
                 }
             ]
@@ -507,7 +642,7 @@ def _add_stuff_pivot_table(
                                             "rows": [
                                                 {
                                                     "sourceColumnOffset": column,
-                                                    "showTotals": True,
+                                                    "showTotals": False,
                                                     "sortOrder": "ASCENDING",
                                                 }
                                                 for column in row_columns
