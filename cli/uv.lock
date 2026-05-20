@@ -2197,7 +2197,7 @@ dev = [
 
 [[package]]
 name = "receipts-ai-cli"
-version = "0.0.1.dev88+0914e32"
+version = "0.0.1.dev182+d53b6d2"
 source = { editable = "." }
 dependencies = [
     { name = "receipts-ai" },

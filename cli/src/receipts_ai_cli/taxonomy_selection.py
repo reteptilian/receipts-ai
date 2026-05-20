@@ -7,14 +7,12 @@ from functools import lru_cache
 from threading import Lock
 from typing import Any, cast
 
-import sentence_transformers.sentence_transformer.model as sentence_transformer_model
 from receipts_ai.categorization import (
     create_taxonomy_embedding_client,
     load_product_taxonomy,
     load_product_taxonomy_embeddings,
     search_product_taxonomy_embeddings,
 )
-from transformers.utils import logging as transformers_logging
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,23 +20,31 @@ LOGGER = logging.getLogger(__name__)
 class _TransformersProgressBarGuard:
     def __init__(self) -> None:
         self._progress_bar_enabled = False
+        self._transformers_logging: Any = None
 
     def __enter__(self) -> None:
+        from transformers.utils import logging as transformers_logging
+
+        self._transformers_logging = transformers_logging
         self._progress_bar_enabled = transformers_logging.is_progress_bar_enabled()
         transformers_logging.disable_progress_bar()
         return None
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        if self._progress_bar_enabled:
-            transformers_logging.enable_progress_bar()
+        if self._progress_bar_enabled and self._transformers_logging is not None:
+            self._transformers_logging.enable_progress_bar()
         return None
 
 
 class _SentenceTransformersTrangeGuard:
     def __init__(self) -> None:
         self._original_trange: Callable[..., range] | None = None
+        self._sentence_transformer_model: Any = None
 
     def __enter__(self) -> None:
+        import sentence_transformers.sentence_transformer.model as sentence_transformer_model
+
+        self._sentence_transformer_model = sentence_transformer_model
         self._original_trange = cast(
             Callable[..., range],
             sentence_transformer_model.trange,
@@ -47,8 +53,8 @@ class _SentenceTransformersTrangeGuard:
         return None
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        if self._original_trange is not None:
-            sentence_transformer_model.trange = self._original_trange
+        if self._original_trange is not None and self._sentence_transformer_model is not None:
+            self._sentence_transformer_model.trange = self._original_trange
         return None
 
 
